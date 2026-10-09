@@ -195,6 +195,8 @@ func levelForTier(t roster.Tier) roster.Level {
 		return roster.LevelNone
 	case roster.TierDaily:
 		return roster.LevelSome
+	case roster.TierFrontier:
+		return roster.LevelExpert
 	default:
 		return roster.LevelSignificant
 	}
