@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jalendport/maestro/internal/budget"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/discovery"
 	"github.com/jalendport/maestro/internal/dispatch"
@@ -86,6 +87,7 @@ func (a *app) build() *cobra.Command {
 	root.AddCommand(a.doctorCmd())
 	root.AddCommand(a.helpTopicCmd())
 	root.AddCommand(a.keyCmd())
+	root.AddCommand(a.budgetCmd())
 	root.AddCommand(a.routerCmd())
 	root.AddCommand(a.superviseCmd())
 	return root
@@ -123,7 +125,11 @@ func (a *app) env(refresh bool) (*dispatch.Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &dispatch.Env{Roster: r, Disc: disc, Reg: reg, Project: project, Root: root}, nil
+	bf, err := budget.Load()
+	if err != nil {
+		return nil, err
+	}
+	return &dispatch.Env{Roster: r, Disc: disc, Reg: reg, Project: project, Root: root, Budget: bf}, nil
 }
 
 func (a *app) renderHelp() {
@@ -149,6 +155,10 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, "  "+ui.Name.Render("roster")+"                   Show the effective Roster (families, models, levels, state)")
 	ui.Fprintln(out, "    "+ui.Name.Render("roster refresh")+"         Re-read the Harness catalogs")
 	ui.Fprintln(out, "    "+ui.Name.Render("roster prices")+"          Show the embedded price table")
+	ui.Fprintln(out, "  "+ui.Name.Render("budget")+"                   Show Budget readings per Account")
+	ui.Fprintln(out, "    "+ui.Name.Render("budget set <account> <percent>")+"   Record a manual reading")
+	ui.Fprintln(out, "    "+ui.Name.Render("budget record claude")+"   Read a Claude statusline JSON on stdin (statusline tee)")
+	ui.Fprintln(out, "    "+ui.Name.Render("budget reset codex")+"     Spend one Codex reset credit (manual only)")
 	ui.Fprintln(out, "  "+ui.Name.Render("router stats")+"             Jev vs rules agreement, verified rates per Route source")
 	ui.Fprintln(out, "  "+ui.Name.Render("key set")+"                  Store the Jev key in ~/.maestro/env (no echo)")
 	ui.Fprintln(out, "  "+ui.Name.Render("help brief|plan|report")+"   Print the Brief file, Plan file, or Report formats")
@@ -161,5 +171,5 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, ui.Section.Render("Output flags"))
 	ui.Fprintln(out, "  --json                     Machine output (one object)    --quiet  progress only, on stderr")
 	ui.Fprintln(out, "")
-	ui.Fprintln(out, ui.Dim.Render("Not in this build yet: tell, answer, budget, hook, roster stats|solo."))
+	ui.Fprintln(out, ui.Dim.Render("Not in this build yet: tell, answer, hook, roster stats|solo."))
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/proc"
-	"github.com/jalendport/maestro/internal/router"
 	"github.com/jalendport/maestro/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -78,7 +77,7 @@ func (a *app) doctorCmd() *cobra.Command {
 			}
 			cfg.State = "ok"
 			rows = append(rows, cfg)
-			rt := &router.Router{Roster: env.Roster, Disc: env.Disc, Reg: env.Reg}
+			rt := env.NewRouter()
 			failing := 0
 			for _, f := range env.Roster.Families {
 				if f.Enabled && rt.Preflight(f, "read") != "" && rt.Preflight(f, "edit") != "" {

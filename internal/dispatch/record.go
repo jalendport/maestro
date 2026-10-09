@@ -113,6 +113,7 @@ type Reading struct {
 	Used   float64   `json:"used"`
 	ReadAt time.Time `json:"read_at"`
 	Source string    `json:"source"`
+	State  string    `json:"state"`
 }
 
 // Permission is the Permission group.

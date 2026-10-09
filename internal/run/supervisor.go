@@ -43,7 +43,7 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 		return nil, err
 	}
 	s := &State{Run: runID, Project: env.Root, Plan: plan.Path, Title: plan.Title, State: StateHeld, StartedAt: time.Now(), Folder: folder, Lane: o.Lane}
-	rt := &router.Router{Roster: env.Roster, Disc: env.Disc, Reg: env.Reg}
+	rt := env.NewRouter()
 	var approval []string
 	for i, b := range plan.Tasks {
 		id := dispatch.NewTaskID(folder)

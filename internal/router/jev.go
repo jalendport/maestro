@@ -111,8 +111,19 @@ func (rt *Router) jevRoute(req Request, cands []*roster.Family, level roster.Lev
 		return nil, jr, &AskOrchestrator{Reason: fmt.Sprintf("router asked for the orchestrator (confidence %.2f)", conf)}
 	}
 	band := "high"
+	tieBreak := ""
 	switch {
 	case conf >= th("dispatch"):
+		// Near-tie between equally fit subscription families of one Tier: the
+		// higher allocation weight wins (routing-policy.md section 4).
+		if second, p := secondOption(lane.Probabilities, pickID); second != "" && pick != nil && lane.Probabilities[pickID]-p <= 0.10 {
+			if sf := byID[second]; sf != nil && sf.TierFor(scoreLevel) == pick.TierFor(scoreLevel) &&
+				rt.Roster.Accounts[sf.Account].Billing != "metered" && rt.Roster.Accounts[pick.Account].Billing != "metered" &&
+				rt.Weight(sf) > rt.Weight(pick) {
+				pick, pickID = sf, second
+				tieBreak = "equal fit, higher allocation"
+			}
+		}
 	case conf >= th("step_up"):
 		band = "medium"
 		// 5. Step up to a higher-Tier second option, never down.
@@ -140,6 +151,7 @@ func (rt *Router) jevRoute(req Request, cands []*roster.Family, level roster.Lev
 	r := rt.finish(pick, useLevel, estimate, category, req.Access, "jev", defaults, nil)
 	r.Confidence = conf
 	r.Band = band
+	r.TieBreak = tieBreak
 	return r, jr, nil
 }
 

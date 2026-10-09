@@ -249,7 +249,7 @@ func jevLevel(env *dispatch.Env, question string) roster.Level {
 	b := &brief.Brief{Goal: question, Done: "An answer with findings.", Sections: map[string]string{}}
 	b.Title = "council"
 	b.Category = "second opinion"
-	rt := &router.Router{Roster: env.Roster, Disc: env.Disc, Reg: env.Reg}
+	rt := env.NewRouter()
 	r, err := rt.Route(router.Request{Brief: b, Access: brief.AccessRead, Project: env.Project})
 	if err != nil || r == nil || r.Jev == nil {
 		return ""
@@ -261,7 +261,7 @@ func jevLevel(env *dispatch.Env, question string) roster.Level {
 // price, agy only to fill or on --seats 4; author families may sit; relax
 // in order until two Seats exist (council.md sections 2 to 4).
 func pickSeats(env *dispatch.Env, c *Council, o Opts) ([]*Seat, []string, error) {
-	rt := &router.Router{Roster: env.Roster, Disc: env.Disc, Reg: env.Reg}
+	rt := env.NewRouter()
 	authors := map[string]bool{}
 	for _, a := range o.Authors {
 		authors[a] = true

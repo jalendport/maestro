@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
+	"github.com/jalendport/maestro/internal/budget"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/discovery"
 	"github.com/jalendport/maestro/internal/harness"
@@ -63,6 +65,8 @@ type Route struct {
 	Enforcement     string         `json:"enforcement"`
 	Excluded        []Exclusion    `json:"excluded,omitempty"`
 	Jev             *JevRoute      `json:"jev,omitempty"`
+	Budget          *BudgetNote    `json:"budget,omitempty"`
+	BudgetWarning   string         `json:"budget_warning,omitempty"`
 }
 
 // AskOrchestrator is returned when no Lane can take the Task.
@@ -78,6 +82,51 @@ type Router struct {
 	Roster *roster.Roster
 	Disc   *discovery.Cache
 	Reg    *harness.Registry
+	Budget *budget.File // nil = every Account unknown
+}
+
+// BudgetNote is the Budget reading in force at Route time (ledger group Budget).
+type BudgetNote struct {
+	Account  string  `json:"account"`
+	State    string  `json:"state"`
+	Headroom float64 `json:"headroom"`
+	Used     float64 `json:"used"`
+	ReadAt   string  `json:"read_at,omitempty"`
+	Source   string  `json:"source"`
+	Reason   string  `json:"reason,omitempty"`
+}
+
+// View evaluates one Account's Budget with the roster's rules.
+func (rt *Router) View(account string) budget.View {
+	if rt.Budget == nil {
+		return budget.View{Headroom: rt.Roster.Budget.AssumedHeadroom, State: "unknown", Reason: "budget unknown"}
+	}
+	acct := rt.Roster.Accounts[account]
+	r := budget.Rules{BlockAt: rt.Roster.Budget.BlockAt, WarnAt: rt.Roster.Budget.WarnAt, StaleAfter: rt.Roster.Budget.StaleAfter.Duration, AssumedHeadroom: rt.Roster.Budget.AssumedHeadroom}
+	if acct.BlockAt > 0 {
+		r.BlockAt = acct.BlockAt
+	}
+	if acct.Harness == "claude" {
+		r.Reserve = acct.Reserve
+	}
+	return rt.Budget.Evaluate(account, r, time.Now())
+}
+
+// Note turns a View into the ledger's Budget note.
+func (rt *Router) Note(account string) *BudgetNote {
+	v := rt.View(account)
+	n := &BudgetNote{Account: account, State: v.State, Headroom: v.Headroom, Source: "unknown", Reason: v.Reason}
+	if v.Tight != nil {
+		n.Used = v.Tight.Used
+		n.ReadAt = v.Tight.ReadAt.Format(time.RFC3339)
+		n.Source = v.Tight.Source
+	}
+	return n
+}
+
+// Weight is the allocation weight: plan price × headroom above the reserve.
+func (rt *Router) Weight(f *roster.Family) float64 {
+	return rt.Roster.Accounts[f.Account].PlanPrice * rt.View(f.Account).Headroom
 }
 
 // Route decides. The rules table decides today; the Jev backend lands in
@@ -265,6 +314,11 @@ func (rt *Router) candidates(req Request, level roster.Level) ([]*roster.Family,
 				continue
 			}
 		}
+		// Hard rule 3: an Account at or past its block point leaves the list.
+		if v := rt.View(f.Account); v.State == "blocked" {
+			excluded = append(excluded, Exclusion{f.ID, "budget: " + v.Reason})
+			continue
+		}
 		if rt.Roster.Accounts[f.Account].Billing == "metered" {
 			metered = append(metered, f)
 			continue
@@ -427,6 +481,15 @@ func (rt *Router) finish(f *roster.Family, level, estimate roster.Level, categor
 	if estimate != "" && abs(estimate.Rank()-level.Rank()) >= 2 {
 		r.GapFlag = true
 	}
+	r.Budget = rt.Note(f.Account)
+	switch r.Budget.State {
+	case "unknown":
+		r.BudgetWarning = "budget unknown"
+	case "warning":
+		r.BudgetWarning = "budget " + r.Budget.Reason
+	case "stale":
+		r.BudgetWarning = "budget reading stale"
+	}
 	return r
 }
 
@@ -448,6 +511,9 @@ func reason(r *Route, source string) string {
 	}
 	if r.OverrideWarning != "" {
 		tail = append(tail, "warning: "+r.OverrideWarning)
+	}
+	if r.BudgetWarning != "" {
+		tail = append(tail, r.BudgetWarning)
 	}
 	line := fmt.Sprintf("%-13s %-9s %-12s %s", r.FamilyID, titleCase(string(r.Tier)), r.Level, source)
 	if len(tail) > 0 {

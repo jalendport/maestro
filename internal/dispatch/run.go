@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
+	"github.com/jalendport/maestro/internal/budget"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/discovery"
 	"github.com/jalendport/maestro/internal/harness"
@@ -34,6 +35,124 @@ type Env struct {
 	Reg     *harness.Registry
 	Project *config.Project
 	Root    string
+	Budget  *budget.File
+}
+
+// NewRouter builds the Router over this Env.
+func (env *Env) NewRouter() *router.Router {
+	return &router.Router{Roster: env.Roster, Disc: env.Disc, Reg: env.Reg, Budget: env.Budget}
+}
+
+// RefreshBudget probes every Account whose reading is stale and has a probe
+// (Claude: Haiku; Codex: app-server), before a Route (budget-model.md section 8).
+func (env *Env) RefreshBudget() {
+	if env.Budget == nil {
+		return
+	}
+	rt := env.NewRouter()
+	changed := false
+	for id, acct := range env.Roster.Accounts {
+		v := rt.View(id)
+		if !(v.State == "stale" || v.State == "unknown") {
+			continue
+		}
+		h, _ := env.Reg.Get(acct.Harness)
+		if h == nil || h.Bin() == "" {
+			continue
+		}
+		switch acct.Harness {
+		case "claude":
+			if v.State == "unknown" && len(env.Budget.Accounts) > 0 && env.Budget.Accounts[id] != nil {
+				continue // an expired reading; the next harvest refreshes it
+			}
+			if ws, err := budget.ProbeClaude(h.Bin(), harness.Env(env.Roster.StripEnv("claude"), map[string]string{"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1"})); err == nil {
+				env.Budget.Record(id, ws, budget.SourceProbe)
+				changed = true
+				ui.Eventf("budget", "%s probed: %s", id, describe(ws))
+			} else {
+				ui.Warnf("budget probe %s: %v", id, err)
+			}
+		case "codex":
+			if cl, err := budget.ReadCodex(h.Bin()); err == nil {
+				env.Budget.Record(id, cl.Windows, budget.SourceProbe)
+				env.Budget.Accounts[id].Credits = cl.Credits
+				env.Budget.Accounts[id].Plan = cl.Plan
+				changed = true
+				ui.Eventf("budget", "%s read: %s", id, describe(cl.Windows))
+			} else {
+				ui.Warnf("budget read %s: %v", id, err)
+			}
+		}
+	}
+	if changed {
+		_ = env.Budget.Save()
+	}
+}
+
+func describe(ws []harness.Window) string {
+	var parts []string
+	for _, w := range ws {
+		parts = append(parts, fmt.Sprintf("%s %.0f%%", w.Kind, w.Used*100))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// harvest stores the windows a Dispatch reported, at no extra cost.
+func (env *Env) harvest(account string, ws []harness.Window) {
+	if env.Budget == nil || len(ws) == 0 {
+		return
+	}
+	env.Budget.Record(account, ws, budget.SourceHarvest)
+	_ = env.Budget.Save()
+}
+
+// confirmLimit checks a limit message against a fresh reading before the
+// Account blocks (failure-handling.md section 6). It returns true when the
+// limit stands; a reading under the block point downgrades it.
+func (env *Env) confirmLimit(account, harnessName string) (bool, string) {
+	if env.Budget == nil {
+		return true, "no budget file"
+	}
+	h, _ := env.Reg.Get(harnessName)
+	until := time.Now().Add(time.Hour)
+	reason := "limit hit"
+	switch harnessName {
+	case "claude":
+		if ws, err := budget.ProbeClaude(h.Bin(), harness.Env(env.Roster.StripEnv("claude"), map[string]string{"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1"})); err == nil {
+			env.Budget.Record(account, ws, budget.SourceProbe)
+			if v := env.NewRouter().View(account); v.State != "blocked" {
+				_ = env.Budget.Save()
+				return false, "probe shows headroom: " + describe(ws)
+			}
+			until = nearestReset(ws, until)
+		}
+	case "codex":
+		if cl, err := budget.ReadCodex(h.Bin()); err == nil {
+			env.Budget.Record(account, cl.Windows, budget.SourceProbe)
+			if v := env.NewRouter().View(account); v.State != "blocked" && cl.Reached == "" {
+				_ = env.Budget.Save()
+				return false, "app-server shows headroom: " + describe(cl.Windows)
+			}
+			until = nearestReset(cl.Windows, until)
+		}
+	default:
+		reason = "limit hit (no reading; trusted for 1 h)"
+	}
+	env.Budget.Block(account, until, reason)
+	_ = env.Budget.Save()
+	return true, reason
+}
+
+func nearestReset(ws []harness.Window, fallback time.Time) time.Time {
+	best := fallback
+	for _, w := range ws {
+		if w.Used >= 0.9 && !w.ResetsAt.IsZero() && w.ResetsAt.After(time.Now()) {
+			if best == fallback || w.ResetsAt.Before(best) {
+				best = w.ResetsAt
+			}
+		}
+	}
+	return best
 }
 
 // InSolo reports whether this process runs inside a Solo tab.
@@ -48,7 +167,8 @@ func Prepare(env *Env, b *brief.Brief, req router.Request, runID, taskID string)
 // PrepareIn is Prepare with the Run directory given (Councils keep their
 // Seats under .agents/councils/<slug>/round-N/ instead of the runs folder).
 func PrepareIn(env *Env, b *brief.Brief, req router.Request, runID, taskID, runDir string) (*Task, error) {
-	rt := &router.Router{Roster: env.Roster, Disc: env.Disc, Reg: env.Reg}
+	env.RefreshBudget()
+	rt := env.NewRouter()
 	req.Brief = b
 	req.Project = env.Project
 	req.Access = b.EffectiveAccess()
@@ -377,8 +497,30 @@ loop:
 	}
 	rec.Budget.Tokens = out.Tokens
 	rec.Budget.CostUSD = out.CostUSD
+	if rec.Budget.CostUSD == nil {
+		rec.Budget.CostUSD = priced(env, rec.Outcome.ModelRan, t.Route.Model, out.Tokens)
+	}
 	rec.Budget.Windows = out.Windows
 	rec.Permission.Denials = append(rec.Permission.Denials, out.Denials...)
+	if t.Route.Budget != nil {
+		rec.Budget.Reading = &Reading{Used: t.Route.Budget.Used, Source: t.Route.Budget.Source, State: t.Route.Budget.State}
+		if ts, err := time.Parse(time.RFC3339, t.Route.Budget.ReadAt); err == nil {
+			rec.Budget.Reading.ReadAt = ts
+		}
+	}
+	rec.Budget.Warning = t.Route.BudgetWarning
+	// Harvest: Claude reports its windows in the stream; Codex writes them to its rollout file.
+	switch t.Route.Harness {
+	case "claude":
+		env.harvest(t.Route.Account, out.Windows)
+	case "codex":
+		if out.SessionID != "" {
+			if ws, err := budget.HarvestCodexRollout(out.SessionID); err == nil {
+				rec.Budget.Windows = ws
+				env.harvest(t.Route.Account, ws)
+			}
+		}
+	}
 
 	if cancelled {
 		rec.Outcome.Outcome = OutcomeCancelled
@@ -414,6 +556,11 @@ loop:
 	}
 	for _, s := range out.Signals {
 		if s.Class == "limit" {
+			stands, note := env.confirmLimit(t.Route.Account, t.Route.Harness)
+			rec.Outcome.LimitConfirmation = note
+			if !stands {
+				return fail(FailTransient, s.Text+" (downgraded: "+note+")")
+			}
 			return fail(FailLimit, s.Text)
 		}
 	}
@@ -623,4 +770,30 @@ func relOrAbs(root, p string) string {
 		return r
 	}
 	return p
+}
+
+// priced prices tokens with the embedded table when the Harness reports no cost.
+func priced(env *Env, modelRan, requested string, tk harness.Tokens) *float64 {
+	id := modelRan
+	if id == "" {
+		id = requested
+	}
+	if alias, ok := env.Roster.Aliases[id]; ok {
+		id = alias
+	}
+	p, ok := env.Roster.Prices[id]
+	if !ok || (tk.Input == nil && tk.Output == nil) {
+		return nil
+	}
+	n := func(x *int) float64 {
+		if x == nil {
+			return 0
+		}
+		return float64(*x)
+	}
+	cost := (n(tk.Input)-n(tk.CachedInput))*p.Input/1e6 + n(tk.CachedInput)*p.CachedInput/1e6 + n(tk.Output)*p.Output/1e6
+	if cost < 0 {
+		cost = n(tk.Input)*p.Input/1e6 + n(tk.Output)*p.Output/1e6
+	}
+	return &cost
 }

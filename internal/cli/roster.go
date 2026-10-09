@@ -14,7 +14,6 @@ import (
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/roster"
-	"github.com/jalendport/maestro/internal/router"
 	"github.com/jalendport/maestro/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -87,7 +86,7 @@ type rosterRow struct {
 }
 
 func rosterRows(env *dispatch.Env) []rosterRow {
-	rt := &router.Router{Roster: env.Roster, Disc: env.Disc, Reg: env.Reg}
+	rt := env.NewRouter()
 	var rows []rosterRow
 	for _, f := range env.Roster.SortedFamilies() {
 		row := rosterRow{Family: f.ID, Harness: f.Harness, Models: f.Models, Account: f.Account, Enabled: f.Enabled, Levels: map[string]string{}}
