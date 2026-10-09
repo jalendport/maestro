@@ -41,7 +41,7 @@ func InSolo() bool { return os.Getenv("SOLO_PROCESS_ID") != "" }
 
 // Prepare routes one Brief and lays out its Run folder. It returns the Task
 // to execute, inline or in a detached supervisor.
-func Prepare(env *Env, b *brief.Brief, req router.Request, runID string) (*Task, error) {
+func Prepare(env *Env, b *brief.Brief, req router.Request, runID, taskID string) (*Task, error) {
 	rt := &router.Router{Roster: env.Roster, Disc: env.Disc, Reg: env.Reg}
 	req.Brief = b
 	req.Project = env.Project
@@ -58,7 +58,9 @@ func Prepare(env *Env, b *brief.Brief, req router.Request, runID string) (*Task,
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, err
 	}
-	taskID := NewTaskID(runDir)
+	if taskID == "" {
+		taskID = NewTaskID(runDir)
+	}
 	folder := filepath.Join(runDir, taskID)
 	if err := os.MkdirAll(folder, 0o755); err != nil {
 		return nil, err
@@ -116,7 +118,14 @@ func Execute(env *Env, t *Task) (*Record, error) {
 
 	var rec *Record
 	var retry *brief.Retry
-	for attempt := 1; attempt <= t.MaxAttempt; attempt++ {
+	first := t.FirstAttempt
+	if first < 1 {
+		first = 1
+	}
+	if first > 1 {
+		retry = &brief.Retry{Attempt: first, Reason: "earlier attempt failed"}
+	}
+	for attempt := first; attempt <= t.MaxAttempt; attempt++ {
 		rec = runOnce(env, t, b, attempt, retry)
 		if err := ledger.Append(rec); err != nil {
 			ui.Warnf("ledger: %v", err)
@@ -286,10 +295,17 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	var waitErr error
 	ticker := time.NewTicker(time.Second)
 	lastTick := time.Now()
+	cancelled := false
 loop:
 	for {
 		select {
 		case waitErr = <-waitDone:
+			break loop
+		case <-t.Cancel:
+			cancelled = true
+			ui.Eventf("cancel", "task %s  stopping %s", t.Task, h.Name())
+			terminate(cmd)
+			waitErr = <-waitDone
 			break loop
 		case now := <-ticker.C:
 			// A clock jump after Mac sleep: a live Dispatch gets a fresh Idle timer.
@@ -343,6 +359,11 @@ loop:
 	rec.Budget.Windows = out.Windows
 	rec.Permission.Denials = append(rec.Permission.Denials, out.Denials...)
 
+	if cancelled {
+		rec.Outcome.Outcome = OutcomeCancelled
+		finish(rec)
+		return rec
+	}
 	if timer != "" {
 		rec.Outcome.Timer = timer
 		rec.Outcome.FailureClass = FailStall
@@ -421,10 +442,9 @@ loop:
 	// Verification: changed files, scope guard, commit range, checks.
 	runRel, _ := filepath.Rel(t.Project, config.RunsDir(t.Project))
 	rec.Verification.Changed = without(snap.Changed(t.Project), runRel)
-	if t.Access == brief.AccessRead {
-		// A read Lane writes nothing in the repository: every change is a violation.
-		rec.Verification.TouchViolations = append([]string{}, rec.Verification.Changed...)
-	}
+	// A read Lane's Enforcement keeps it from writing; tree changes seen during a
+	// read Dispatch belong to the edit Dispatch beside it, so they are recorded
+	// but never counted as violations.
 	if t.Access == brief.AccessEdit {
 		rec.Verification.TouchViolations = verify.ScopeViolations(rec.Verification.Changed, t.Touch, runRel)
 		if t.Commit {

@@ -108,3 +108,15 @@ func TestAgyRefusesEdit(t *testing.T) {
 		t.Fatal("agy must refuse an edit task")
 	}
 }
+
+func TestFloorShrinksTheList(t *testing.T) {
+	rt := testRouter(t)
+	b := mustBrief(t, "---\ntitle: x\ncategory: review\nlevel: significant\n---\n## Goal\ng\n## Done\nd\n")
+	r, err := rt.Route(Request{Brief: b, Access: "read", Floor: roster.TierFrontier, Excluded: []string{"claude-opus"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.FamilyID != "codex-astra" {
+		t.Fatalf("floor frontier picked %s", r.FamilyID)
+	}
+}

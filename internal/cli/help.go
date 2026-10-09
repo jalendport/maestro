@@ -38,9 +38,44 @@ Free text. Optional.
 - path/to/read/first.go
 `
 
+const planHelp = `A Plan file is one Markdown file for maestro run: a front matter of Run-wide
+defaults (any Brief field), an optional "# title", then one "## <task title>"
+section per Task. Each section may start with a "- key: value" list of the
+same fields as a Brief plus blocked_by (plan numbers or titles), then
+"### Goal", "### Done", "### Context", "### Files".
+
+---
+access: edit
+commit: false
+---
+# Probe feature
+
+## Add the probe command
+- category: implement
+- level: some
+- touch: [internal/probe/**]
+
+### Goal
+Add a probe verb that prints ok.
+
+### Done
+- ` + "`maestro probe`" + ` prints ok.
+
+## Document the probe command
+- category: prose
+- access: read
+- blocked_by: [1]
+
+### Goal
+Describe the probe verb in the README.
+
+### Done
+- The README has a Probe section.
+`
+
 func (a *app) helpTopicCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "help [brief|report]",
+		Use:   "help [brief|plan|report]",
 		Short: "Print the Brief file format or the Report shapes",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -51,6 +86,8 @@ func (a *app) helpTopicCmd() *cobra.Command {
 			switch args[0] {
 			case "brief":
 				fmt.Fprint(os.Stdout, briefHelp)
+			case "plan":
+				fmt.Fprint(os.Stdout, planHelp)
 			case "report":
 				fmt.Fprintln(os.Stdout, "edit shape (Summary / Changed / Checks / Blocked / Deviations / Open, then STATUS):")
 				fmt.Fprintln(os.Stdout)
@@ -60,7 +97,7 @@ func (a *app) helpTopicCmd() *cobra.Command {
 				fmt.Fprintln(os.Stdout)
 				fmt.Fprint(os.Stdout, brief.ReportShape(brief.AccessRead, "<run folder>/result.md", false))
 			default:
-				return fmt.Errorf("no help topic %q (brief, report)", args[0])
+				return fmt.Errorf("no help topic %q (brief, plan, report)", args[0])
 			}
 			return nil
 		},

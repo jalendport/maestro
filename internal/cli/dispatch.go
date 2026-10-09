@@ -46,7 +46,7 @@ func (a *app) dispatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			t, err := dispatch.Prepare(env, b, req, "")
+			t, err := dispatch.Prepare(env, b, req, "", "")
 			if err != nil {
 				var ask *router.AskOrchestrator
 				if asAsk(err, &ask) {
@@ -138,9 +138,9 @@ func (a *app) superviseCmd() *cobra.Command {
 
 func (a *app) waitCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "wait <task>",
-		Short: "Block until a Task ends; print its report",
-		Long:  "Wait for a Task (4-hex id) in the current project to end, then print its result. --json prints dispatch.json.",
+		Use:   "wait <task|run>",
+		Short: "Block until a Task or a Run ends; print its report",
+		Long:  "Wait for a Task (4-hex id) or a Run (r-NNNN) in the current project to end, then print its result. --json prints dispatch.json or run.json.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			cwd, _ := os.Getwd()
@@ -149,6 +149,13 @@ func (a *app) waitCmd() *cobra.Command {
 				return err
 			}
 			_ = cwd
+			if strings.HasPrefix(args[0], "r-") {
+				folder, _, err := findRun(env.Root, args[0])
+				if err != nil {
+					return err
+				}
+				return a.waitRun(folder)
+			}
 			folder, ok := dispatch.FindTask(env.Root, args[0])
 			if !ok {
 				return fmt.Errorf("no task %q under %s", args[0], env.Root)

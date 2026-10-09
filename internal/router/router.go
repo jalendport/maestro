@@ -109,14 +109,19 @@ func (rt *Router) Route(req Request) (*Route, error) {
 	}
 
 	cands, excluded := rt.candidates(req, level)
-	if req.Ceiling != "" {
+	if req.Ceiling != "" || req.Floor != "" {
+		// Floors and ceilings only shrink the list before the Route.
 		var kept []*roster.Family
 		for _, f := range cands {
-			if f.TierFor(level).Rank() > req.Ceiling.Rank() {
+			top := f.TierFor(f.HighestLevel())
+			switch {
+			case req.Ceiling != "" && f.TierFor(level).Rank() > req.Ceiling.Rank():
 				excluded = append(excluded, Exclusion{f.ID, "above ceiling"})
-				continue
+			case req.Floor != "" && top.Rank() < req.Floor.Rank():
+				excluded = append(excluded, Exclusion{f.ID, "below floor"})
+			default:
+				kept = append(kept, f)
 			}
-			kept = append(kept, f)
 		}
 		cands = kept
 	}

@@ -24,6 +24,49 @@ Add a probe verb.
 - internal/cli/cli.go
 `
 
+func TestSplitFrontMatter(t *testing.T) {
+	cases := []struct {
+		name  string
+		src   string
+		front string
+		body  string
+	}{
+		{
+			name: "no front matter",
+			src:  "# Brief\n\n## Goal\nAdd a probe verb.\n",
+			body: "# Brief\n\n## Goal\nAdd a probe verb.\n",
+		},
+		{
+			name: "unclosed front matter",
+			src:  "---\ntitle: Add the probe command\n\n## Goal\nAdd a probe verb.\n",
+			body: "---\ntitle: Add the probe command\n\n## Goal\nAdd a probe verb.\n",
+		},
+		{
+			name:  "CRLF line endings",
+			src:   "---\r\ntitle: Add the probe command\r\n---\r\n\r\n## Goal\r\nAdd a probe verb.\r\n",
+			front: "title: Add the probe command\r\n",
+			body:  "\n\r\n## Goal\r\nAdd a probe verb.\r\n",
+		},
+		{
+			name:  "UTF-8 BOM",
+			src:   "\ufeff---\ntitle: Add the probe command\n---\n\n## Goal\nAdd a probe verb.\n",
+			front: "title: Add the probe command\n",
+			body:  "\n\n## Goal\nAdd a probe verb.\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			front, body := SplitFrontMatter(tc.src)
+			if front != tc.front {
+				t.Errorf("front = %q, want %q", front, tc.front)
+			}
+			if body != tc.body {
+				t.Errorf("body = %q, want %q", body, tc.body)
+			}
+		})
+	}
+}
+
 func TestParseBrief(t *testing.T) {
 	b, err := ParseText(sample)
 	if err != nil {

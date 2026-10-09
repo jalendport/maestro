@@ -57,6 +57,10 @@ type Task struct {
 	ClaudeAuto bool           `json:"claude_auto"`
 	InSolo     bool           `json:"in_solo"`
 	MaxAttempt int            `json:"max_attempts"`
+	// FirstAttempt lets a re-Route inside a Run keep the attempt count.
+	FirstAttempt int `json:"first_attempt,omitempty"`
+	// Cancel, when closed, stops the running Lane (never serialized).
+	Cancel <-chan struct{} `json:"-"`
 }
 
 // Record is dispatch.json: the full Dispatch record. The ledger row is a copy.
