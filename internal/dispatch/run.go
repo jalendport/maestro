@@ -63,7 +63,7 @@ func (env *Env) RefreshBudget() {
 		}
 		switch acct.Harness {
 		case "claude":
-			if v.State == "unknown" && len(env.Budget.Accounts) > 0 && env.Budget.Accounts[id] != nil {
+			if v.State == "unknown" && env.Budget.Snapshot(id) != nil {
 				continue // an expired reading; the next harvest refreshes it
 			}
 			if ws, err := budget.ProbeClaude(h.Bin(), harness.Env(env.Roster.StripEnv("claude"), map[string]string{"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1"})); err == nil {
@@ -76,8 +76,7 @@ func (env *Env) RefreshBudget() {
 		case "codex":
 			if cl, err := budget.ReadCodex(h.Bin()); err == nil {
 				env.Budget.Record(id, cl.Windows, budget.SourceProbe)
-				env.Budget.Accounts[id].Credits = cl.Credits
-				env.Budget.Accounts[id].Plan = cl.Plan
+				env.Budget.SetCredits(id, cl.Credits, cl.Plan)
 				changed = true
 				ui.Eventf("budget", "%s read: %s", id, describe(cl.Windows))
 			} else {
@@ -114,7 +113,10 @@ func (env *Env) confirmLimit(account, harnessName string) (bool, string) {
 	if env.Budget == nil {
 		return true, "no budget file"
 	}
-	h, _ := env.Reg.Get(harnessName)
+	h, ok := env.Reg.Get(harnessName)
+	if !ok || h.Bin() == "" {
+		return true, "no harness to probe"
+	}
 	until := time.Now().Add(time.Hour)
 	reason := "limit hit"
 	switch harnessName {
@@ -257,7 +259,12 @@ func Execute(env *Env, t *Task) (*Record, error) {
 	if !t.Council {
 		env.Solo.TodoFor(t, b)
 	}
+	if t.MaxAttempt < first {
+		t.MaxAttempt = first
+	}
+attempts:
 	for attempt := first; attempt <= t.MaxAttempt; attempt++ {
+		clearAnswers(t.Folder)
 		rec = runOnce(env, t, b, attempt, retry)
 		if err := ledger.Append(rec); err != nil {
 			ui.Warnf("ledger: %v", err)
@@ -276,12 +283,18 @@ func Execute(env *Env, t *Task) (*Record, error) {
 		select {
 		case <-time.After(wait):
 		case <-t.Cancel:
-			rec.Outcome.Outcome = OutcomeCancelled
-			_ = rec.Save()
-			break
+			break attempts
 		}
 	}
 	return rec, nil
+}
+
+// clearAnswers drops answer markers left by an earlier attempt or a late
+// `maestro answer`, so a prompt never gets an answer nobody gave it.
+func clearAnswers(folder string) {
+	for _, ans := range []string{"allow", "deny"} {
+		_ = os.Remove(filepath.Join(folder, "answer-"+ans))
+	}
 }
 
 func retryWait(class string) (time.Duration, bool) {
@@ -299,7 +312,7 @@ func retryWait(class string) (time.Duration, bool) {
 func archiveAttempt(folder string, n int) {
 	dst := filepath.Join(folder, FileAttempts, strconv.Itoa(n))
 	_ = os.MkdirAll(dst, 0o755)
-	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord} {
+	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, "answer-allow", "answer-deny"} {
 		_ = os.Rename(filepath.Join(folder, f), filepath.Join(dst, f))
 	}
 }
@@ -382,7 +395,8 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 
 	// In Solo, Claude, Grok, and agy Lanes are interactive tabs; Codex stays
 	// one-shot until its TUI in Solo is re-verified; Council Seats are always one-shot.
-	if env.Solo != nil && !t.Council && h.Name() != "codex" {
+	// agy's print mode writes no file, so it stays one-shot too.
+	if env.Solo != nil && !t.Council && h.Name() != "codex" && h.Name() != "agy" {
 		return runTab(env, t, h, command, launch, rec, reportPath, allChecks, b)
 	}
 
@@ -403,6 +417,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		}
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 5 * time.Second // a grandchild holding stdout cannot hang Wait
 	if err := cmd.Start(); err != nil {
 		return fail(FailLane, "process did not start: "+err.Error())
 	}
@@ -445,7 +460,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	idle, _ := time.ParseDuration(t.IdleLimit)
 	wall, _ := time.ParseDuration(t.WallLimit)
 	waitDone := make(chan error, 1)
-	go func() { <-pumpDone; waitDone <- cmd.Wait() }()
+	go func() { err := cmd.Wait(); <-pumpDone; waitDone <- err }()
 	var timer string
 	var waitErr error
 	ticker := time.NewTicker(time.Second)
@@ -459,16 +474,17 @@ loop:
 		case <-t.Cancel:
 			cancelled = true
 			ui.Eventf("cancel", "task %s  stopping %s", t.Task, h.Name())
-			terminate(cmd)
-			waitErr = <-waitDone
+			waitErr = terminate(cmd, waitDone)
 			break loop
 		case now := <-ticker.C:
 			// A clock jump after Mac sleep: a live Dispatch gets a fresh Idle timer.
-			if jump := now.Sub(lastTick); jump > 2*time.Minute {
+			// Wall clocks, not monotonic readings: the monotonic clock stands still during sleep on macOS.
+			if jump := now.Round(0).Sub(lastTick.Round(0)); jump > 2*time.Minute {
 				rec.Outcome.SleepJumpS = jump.Seconds()
 				mu.Lock()
 				lastOutput = now
 				mu.Unlock()
+				rec.StartedAt = rec.StartedAt.Add(jump - time.Second)
 				rec.Events = append(rec.Events, Event{At: now, Kind: "wake", Text: fmt.Sprintf("clock jumped %s", jump.Round(time.Second))})
 			}
 			lastTick = now
@@ -483,8 +499,7 @@ loop:
 			}
 			if timer != "" {
 				ui.Eventf("stall", "task %s  %s limit passed; stopping %s", t.Task, timer, h.Name())
-				terminate(cmd)
-				waitErr = <-waitDone
+				waitErr = terminate(cmd, waitDone)
 				break loop
 			}
 		}
@@ -541,7 +556,21 @@ loop:
 		finish(rec)
 		return rec
 	}
+	limit := ""
+	for _, s := range out.Signals {
+		if s.Class == "limit" {
+			limit = s.Text
+		}
+	}
 	if timer != "" {
+		if limit != "" {
+			// A Lane that hit a vendor limit and then hung is a Limit hit, not a Stall.
+			stands, note := env.confirmLimit(t.Route.Account, t.Route.Harness)
+			rec.Outcome.LimitConfirmation = note
+			if stands {
+				return fail(FailLimit, limit)
+			}
+		}
 		rec.Outcome.Timer = timer
 		rec.Outcome.FailureClass = FailStall
 		rec.Outcome.Outcome = OutcomeTimedOut
@@ -549,10 +578,11 @@ loop:
 		return rec
 	}
 
-	// Collect the Report.
+	// Collect the Report. A crashed or errored process never gets a Report built from its stream.
 	report, found := rec.Report()
+	crashed := exitCode != 0 || out.IsError
 	if !found || strings.TrimSpace(report.Raw) == "" {
-		if strings.TrimSpace(out.Text) != "" {
+		if strings.TrimSpace(out.Text) != "" && !crashed {
 			// The Lane left no file; its final text is the Report. A status
 			// line in that text counts; without one the Report is unshaped.
 			report = brief.ParseReport(out.Text)
@@ -568,14 +598,18 @@ loop:
 		// Codex -o wrote the last message; the Lane may still have shaped it.
 		report = brief.ParseReport(report.Raw)
 	}
-	for _, s := range out.Signals {
-		if s.Class == "limit" {
-			stands, note := env.confirmLimit(t.Route.Account, t.Route.Harness)
-			rec.Outcome.LimitConfirmation = note
-			if !stands {
-				return fail(FailTransient, s.Text+" (downgraded: "+note+")")
-			}
-			return fail(FailLimit, s.Text)
+	if limit != "" {
+		stands, note := env.confirmLimit(t.Route.Account, t.Route.Harness)
+		rec.Outcome.LimitConfirmation = note
+		shaped := found && report.Status != brief.StatusUnshaped
+		switch {
+		case shaped:
+			// The work is done and reported; the Account blocks, the Report stands.
+			rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "limit", Text: note})
+		case !stands:
+			return fail(FailTransient, limit+" (downgraded: "+note+")")
+		default:
+			return fail(FailLimit, limit)
 		}
 	}
 	if !found {
@@ -585,9 +619,15 @@ loop:
 			text = tail(filepath.Join(t.Folder, FileStderr), 500)
 		}
 		for _, s := range out.Signals {
-			if s.Class == "lane" {
+			switch s.Class {
+			case "lane":
 				class = FailLane
+			case "bad":
+				class = FailBad
 			}
+		}
+		if text != "" && classifyErr(t.Route.Harness, text) == "lane" {
+			class = FailLane
 		}
 		if exitCode != 0 && text == "" {
 			text = fmt.Sprintf("%s exited %d with no report", h.Name(), exitCode)
@@ -597,14 +637,21 @@ loop:
 		}
 		return fail(class, text)
 	}
-	if out.IsError && report.Status == brief.StatusUnshaped {
+	if crashed && report.Status == brief.StatusUnshaped {
 		class := FailTransient
 		for _, s := range out.Signals {
-			if s.Class == "lane" {
+			switch s.Class {
+			case "lane":
 				class = FailLane
+			case "bad":
+				class = FailBad
 			}
 		}
-		return fail(class, out.ErrorText)
+		text := out.ErrorText
+		if text == "" {
+			text = fmt.Sprintf("%s exited %d", h.Name(), exitCode)
+		}
+		return fail(class, text)
 	}
 
 	if t.Council && report.Position != "" && report.Status == brief.StatusUnshaped {
@@ -675,6 +722,11 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 			rec.Outcome.Outcome = OutcomeFailed
 			rec.Outcome.FailureClass = FailBad
 			rec.Outcome.ErrorText = fmt.Sprintf("%d check(s) failed", failedChecks)
+		case t.Access == brief.AccessRead && len(rec.Permission.Denials) > 0 && strings.TrimSpace(report.Sections["Answer"]) == "" && report.Status == brief.StatusUnshaped:
+			// agy: denied actions and no answer is a failed Dispatch, never a success.
+			rec.Outcome.Outcome = OutcomeFailed
+			rec.Outcome.FailureClass = FailBad
+			rec.Outcome.ErrorText = "the lane was denied and answered nothing"
 		case t.Access == brief.AccessRead:
 			rec.Outcome.Outcome = OutcomeAnswered
 		default:
@@ -682,14 +734,21 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 			gate := runGate(env, t, rec, b.Goal, b.Done)
 			rec.Verification.Gate = gate.raw()
 			switch {
-			case gate.Skipped != "" && len(allChecks) == 0:
-				rec.Outcome.Outcome = OutcomeUnverified
 			case gate.Skipped != "":
-				rec.Outcome.Outcome = OutcomeVerified
-			case gate.Satisfies >= env.Roster.Threshold("satisfies") && len(allChecks) > 0:
+				// No gate ran (rules only, Jev down, empty diff): checks alone never close a Task.
+				rec.Outcome.Outcome = OutcomeUnverified
+				rec.Outcome.ErrorText = "gate skipped: " + gate.Skipped
+			case gate.Verdict != "pass" && gate.Verdict != "":
+				rec.Outcome.Outcome = OutcomeFailed
+				rec.Outcome.FailureClass = FailBad
+				rec.Outcome.ErrorText = fmt.Sprintf("gate: verdict %s, satisfies %.2f, risk %s", gate.Verdict, gate.Satisfies, gate.Risk)
+			case gate.Satisfies >= env.Roster.Threshold("satisfies") && len(allChecks) > 0 && gate.Risk != "critical":
 				rec.Outcome.Outcome = OutcomeVerified
 			case gate.Satisfies >= env.Roster.Threshold("satisfies"):
 				rec.Outcome.Outcome = OutcomeUnverified
+				if gate.Risk == "critical" {
+					rec.Outcome.ErrorText = "gate: risk critical"
+				}
 			case gate.Verdict == "pass":
 				// Checks pass and Jev sees no fault, but satisfies sits under the
 				// close threshold: not closed, not failed. The Orchestrator decides.
@@ -718,21 +777,27 @@ func finish(rec *Record) {
 	_ = rec.Save()
 }
 
-// terminate sends SIGTERM to the process group, waits 15 s, then SIGKILL.
-func terminate(cmd *exec.Cmd) {
+// terminate sends SIGTERM to the whole process group, waits up to 15 s for
+// Wait to return, then SIGKILLs the group. It returns Wait's error.
+func terminate(cmd *exec.Cmd, waitDone <-chan error) error {
 	if cmd.Process == nil {
-		return
+		return nil
 	}
 	pgid := -cmd.Process.Pid
 	_ = syscall.Kill(pgid, syscall.SIGTERM)
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if cmd.ProcessState != nil || syscall.Kill(cmd.Process.Pid, 0) != nil {
-			return
-		}
-		time.Sleep(200 * time.Millisecond)
+	select {
+	case err := <-waitDone:
+		_ = syscall.Kill(pgid, syscall.SIGKILL) // stragglers in the group
+		return err
+	case <-time.After(15 * time.Second):
 	}
 	_ = syscall.Kill(pgid, syscall.SIGKILL)
+	select {
+	case err := <-waitDone:
+		return err
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("process %d did not exit after SIGKILL", cmd.Process.Pid)
+	}
 }
 
 // keepAwake starts caffeinate -s tied to this process; no-op when off or absent.
@@ -749,6 +814,11 @@ func keepAwake(on bool) func() {
 		return func() {}
 	}
 	return func() { _ = c.Process.Kill(); _, _ = c.Process.Wait() }
+}
+
+// classifyErr maps stderr or error text to a class word for the failure path.
+func classifyErr(harnessName, text string) string {
+	return harness.ClassifyText(harnessName, text).Class
 }
 
 func cut(s string, n int) string {
@@ -855,13 +925,31 @@ func runTab(env *Env, t *Task, h harness.Harness, command *harness.Command, laun
 	}
 	rec.Outcome.ModelRan = t.Route.Model
 	report, found := rec.Report()
-	if !found {
-		rec.Outcome.FailureClass = FailTransient
+	if out != nil {
+		for _, sig := range out.Signals {
+			if sig.Class == "limit" {
+				stands, note := env.confirmLimit(t.Route.Account, t.Route.Harness)
+				rec.Outcome.LimitConfirmation = note
+				if stands && (!found || report.Status == brief.StatusUnshaped) {
+					rec.Outcome.FailureClass = FailLimit
+					rec.Outcome.Outcome = OutcomeFailed
+					rec.Outcome.ErrorText = sig.Text
+					finish(rec)
+					return rec
+				}
+			}
+		}
+	}
+	if !found || strings.TrimSpace(report.Raw) == "" {
+		class := FailTransient
+		if out != nil && out.ErrorText == "early exit" {
+			class = FailLane // the tab died before it did work
+		}
+		rec.Outcome.FailureClass = class
 		rec.Outcome.Outcome = OutcomeFailed
 		rec.Outcome.ErrorText = "the tab ended with no report"
 		finish(rec)
 		return rec
 	}
-	_ = out
 	return judge(env, t, rec, report, allChecks, b)
 }

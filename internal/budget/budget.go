@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
@@ -42,10 +44,12 @@ type Account struct {
 	Plan         string     `json:"plan,omitempty"`
 }
 
-// File is ~/.maestro/budget.json.
+// File is ~/.maestro/budget.json. Dispatches, Seats, and probes share one
+// File across goroutines, so every method takes the lock.
 type File struct {
 	Accounts  map[string]*Account `json:"accounts"`
 	UpdatedAt time.Time           `json:"updated_at"`
+	mu        sync.Mutex
 }
 
 // Load reads the file; missing is empty.
@@ -67,8 +71,10 @@ func Load() (*File, error) {
 	return &f, nil
 }
 
-// Save writes the file.
+// Save writes the file atomically.
 func (f *File) Save() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if err := config.EnsureHome(); err != nil {
 		return err
 	}
@@ -77,7 +83,42 @@ func (f *File) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(config.BudgetFile(), b, 0o644)
+	tmp := filepath.Join(filepath.Dir(config.BudgetFile()), ".budget.json.tmp")
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, config.BudgetFile())
+}
+
+// Credits records the reset credits and plan of an Account.
+func (f *File) SetCredits(id string, credits int, plan string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a := f.account(id)
+	a.Credits = credits
+	a.Plan = plan
+}
+
+// Unblock clears a block.
+func (f *File) Unblock(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a := f.account(id)
+	a.BlockedUntil = nil
+	a.BlockReason = ""
+}
+
+// Snapshot returns a copy of one Account for display.
+func (f *File) Snapshot(id string) *Account {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a := f.Accounts[id]
+	if a == nil {
+		return nil
+	}
+	c := *a
+	c.Windows = append([]Window(nil), a.Windows...)
+	return &c
 }
 
 func (f *File) account(id string) *Account {
@@ -95,6 +136,8 @@ func (f *File) Record(id string, windows []harness.Window, source string) {
 	if len(windows) == 0 {
 		return
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	a := f.account(id)
 	now := time.Now()
 	for _, w := range windows {
@@ -106,6 +149,8 @@ func (f *File) Record(id string, windows []harness.Window, source string) {
 // RecordManual stores one manual reading on every window of the Account, or
 // a weekly window when none exists. It lasts until the window resets.
 func (f *File) RecordManual(id string, used float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	a := f.account(id)
 	if len(a.Windows) == 0 {
 		a.Windows = []Window{{Kind: "weekly", Used: used, ReadAt: time.Now(), Source: SourceManual, ResetsAt: time.Now().Add(7 * 24 * time.Hour)}}
@@ -122,6 +167,8 @@ func (f *File) RecordManual(id string, used float64) {
 
 // Block marks an Account blocked until a time.
 func (f *File) Block(id string, until time.Time, reason string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	a := f.account(id)
 	a.BlockedUntil = &until
 	a.BlockReason = reason
@@ -159,6 +206,8 @@ type View struct {
 // older than StaleAfter is stale (a probe may refresh it); no reading is
 // unknown and usable with the assumed headroom.
 func (f *File) Evaluate(id string, r Rules, now time.Time) View {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	a := f.Accounts[id]
 	if a == nil || len(a.Windows) == 0 {
 		return View{Headroom: r.AssumedHeadroom, State: SourceUnknown, Reason: "budget unknown"}

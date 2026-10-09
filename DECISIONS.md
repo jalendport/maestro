@@ -15,3 +15,19 @@ The name is taken on Homebrew (the RunMaestro cask), npm (`maestro`, `maestro-cl
 - **Status:** accepted
 - **Considered options:** `baton` (free on Homebrew, abandoned npm and PyPI packages, clear on GitHub in this space); `kapell` (free on every registry, obscure); `podium`, `downbeat`, `upbeat`, `rehearsal` (weak conflicts); `tempo`, `tutti`, `cue` (strong conflicts: Temporal, the tutti-os agent platform, the CUE language).
 - **Consequences:** the README's install line always carries the tap path; a user with mobile.dev's `maestro` on PATH gets a name clash that the README names; no npm wrapper package, ever.
+
+## A passing gate verdict under the close threshold yields `unverified`, not failed
+
+The verification gate closes a task only at `satisfies` 0.90 or more, yet on the first dogfood tasks Jev marked correct diffs `pass` with `satisfies` 0.73 to 0.89. Rather than fail good work or lower a settled threshold before the ledger has data, a `pass` verdict under the threshold yields the outcome `unverified` (exit 0, not closed, gate numbers in the record) so the Orchestrator reads the diff before accepting it (decided 2026-10-09 during milestone 2). Tune `[router.thresholds.jev] satisfies` from `maestro router stats` once enough rows exist.
+
+- **Status:** accepted
+- **Considered options:** fail the task (loses correct work and triggers retries with no findings); lower the threshold to 0.70 (changes a settled number on four samples); `unverified` with the numbers kept.
+- **Consequences:** `unverified` counts as done for a Run's blockers and the report marks it `unverif.`; the end-of-Run Council sees these tasks like any other.
+
+## The project file carries `dirs`, a sixth key
+
+The roster decision fixed five tighten-only keys for `.agents/maestro.toml`. The Codex sandbox denies writes to the Go build cache under `~/Library/Caches`, which made every Go check inside a Lane fail until the Lane found a temporary cache. A per-project `dirs` list (extra writable directories passed as `--add-dir` on every edit dispatch) fixed it in one line, where the Brief-only `dirs:` field would have to be repeated on every brief (decided 2026-10-09 during milestone 2, flagged on todo 218 for Jalen).
+
+- **Status:** proposed
+- **Considered options:** repeat `dirs:` on every Brief; special-case Go in the adapter; a project-wide list.
+- **Consequences:** `dirs` loosens, not tightens, the sandbox for the project; the user file never carries it.

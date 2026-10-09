@@ -159,9 +159,11 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 	_ = rec.Save()
 	// Wait for the TUI to take input: alive and idle, with any startup dialog answered.
 	if err := l.awaitReady(pid, h.Name(), rec); err != nil {
+		_ = l.Client.CloseProcess(pid)
 		return nil, "", err
 	}
 	if err := l.Client.SendInput(pid, pointer+"\n"); err != nil {
+		_ = l.Client.CloseProcess(pid)
 		return nil, "", err
 	}
 	start := time.Now()
@@ -169,22 +171,41 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 	lastTail := ""
 	relayOpen := false
 	var relayAt time.Time
+	var relayTotal time.Duration
+	answeredTail := ""
 	nudged := false
+	var nudgedAt time.Time
 	reportPath := filepath.Join(t.Folder, FileReport)
+	stop := func(reason string) {
+		// Stop the Lane (Ctrl-C twice), then close the tab when it still runs.
+		_ = l.Client.SendKeys(pid, []byte{3})
+		time.Sleep(time.Second)
+		_ = l.Client.SendKeys(pid, []byte{3})
+		time.Sleep(3 * time.Second)
+		if st, err := l.Client.Status(pid); err == nil && st.Running() {
+			_ = l.Client.CloseProcess(pid)
+		}
+		rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "stop", Text: reason})
+	}
 	for {
-		if _, err := os.Stat(reportPath); err == nil {
-			time.Sleep(2 * time.Second) // let the Lane finish writing
-			break
+		if reportStable(reportPath) {
+			// The file is written and the Lane is quiet: judge it.
+			if st, err := l.Client.Status(pid); err != nil || !st.Running() || st.IdleSeconds >= 5 {
+				break
+			}
 		}
 		select {
 		case <-t.Cancel:
-			_ = l.Client.CloseProcess(pid)
+			stop("cancelled")
 			return nil, "cancelled", nil
 		default:
 		}
 		st, err := l.Client.Status(pid)
 		if err == nil && st.Status != "" && !st.Running() {
 			// The tab ended without a Report.
+			if st.Uptime < 30 {
+				return &harness.Outcome{ErrorText: "early exit"}, "", nil
+			}
 			break
 		}
 		tail, _ := l.Client.Output(pid, 40)
@@ -197,11 +218,12 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 		if err == nil && st.IdleSeconds > 0 && time.Duration(st.IdleSeconds*float64(time.Second)) < idleFor {
 			idleFor = time.Duration(st.IdleSeconds * float64(time.Second))
 		}
-		// A prompt: a marker in the last lines AND 30 s idle, both required.
-		if !relayOpen && idleFor > 30*time.Second && hasMarker(h.Name(), tail) {
+		// A prompt: a marker in the last lines AND 30 s idle, both required, and
+		// never the same tail twice (an answered prompt stays on screen).
+		q := lastLines(tail, 8)
+		if !relayOpen && idleFor > 30*time.Second && hasMarker(h.Name(), q) && q != answeredTail {
 			relayOpen = true
 			relayAt = time.Now()
-			q := lastLines(tail, 8)
 			rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "relay", Text: q})
 			_ = rec.Save()
 			ui.Eventf("relay", "task %s  %s asks:\n%s", t.Task, h.Name(), q)
@@ -216,11 +238,15 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 				_ = l.Client.SendKeys(pid, key)
 				rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "relay-answer", Text: ans})
 				relayOpen = false
+				relayTotal += time.Since(relayAt)
+				answeredTail = q
 				lastOutput = time.Now()
 			} else if time.Since(relayAt) > 10*time.Minute {
 				_ = l.Client.SendKeys(pid, []byte("\x1b"))
 				rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "relay-answer", Text: "denied: no answer"})
 				relayOpen = false
+				relayTotal += time.Since(relayAt)
+				answeredTail = q
 				lastOutput = time.Now()
 			}
 			time.Sleep(3 * time.Second)
@@ -228,15 +254,21 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 		}
 		if idle > 0 && idleFor > idle {
 			if !nudged {
+				// One nudge, then two more minutes; never a second Idle period.
 				nudged = true
+				nudgedAt = time.Now()
 				rec.Outcome.Nudged = true
 				_ = l.Client.SendInput(pid, "Write your report to `result.md` now, as the brief says.\n")
-				lastOutput = time.Now()
 				continue
 			}
-			return nil, "idle", nil
+			if time.Since(nudgedAt) > 2*time.Minute {
+				stop("idle limit")
+				return nil, "idle", nil
+			}
 		}
-		if wall > 0 && time.Since(start) > wall {
+		// The Wall limit does not count time spent in a Relay.
+		if wall > 0 && time.Since(start)-relayTotal > wall {
+			stop("wall limit")
 			return nil, "wall", nil
 		}
 		time.Sleep(5 * time.Second)
@@ -289,6 +321,7 @@ func tabArgs(harnessName string, command *harness.Command, t *Task) []string {
 			model += "-" + t.Route.Effort
 		}
 		args = append(args, "--model", model)
+		args = append(args, command.Flags...)
 	}
 	return args
 }
@@ -382,5 +415,16 @@ func (l *SoloLink) awaitReady(pid int, harnessName string, rec *Record) error {
 			return nil
 		}
 	}
-	return nil
+	return fmt.Errorf("the tab did not become ready in 60 s")
+}
+
+// reportStable reports a non-empty result.md whose size has not changed for 3 s.
+func reportStable(path string) bool {
+	st1, err := os.Stat(path)
+	if err != nil || st1.Size() == 0 {
+		return false
+	}
+	time.Sleep(3 * time.Second)
+	st2, err := os.Stat(path)
+	return err == nil && st2.Size() == st1.Size() && st2.ModTime().Equal(st1.ModTime())
 }

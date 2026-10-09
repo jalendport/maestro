@@ -114,8 +114,8 @@ func (a *app) budgetCmd() *cobra.Command {
 			if cl, err = budget.ReadCodex(h.Bin()); err == nil {
 				id := accountFor(env, "codex")
 				env.Budget.Record(id, cl.Windows, budget.SourceProbe)
-				env.Budget.Accounts[id].Credits = cl.Credits
-				env.Budget.Accounts[id].BlockedUntil = nil
+				env.Budget.SetCredits(id, cl.Credits, cl.Plan)
+				env.Budget.Unblock(id)
 				_ = env.Budget.Save()
 			}
 			ui.Successf("reset credit spent; %d left", cl.Credits)
@@ -176,7 +176,7 @@ func (a *app) printBudget(env *dispatch.Env) error {
 			rows = append(rows, budgetRow{Account: id, Billing: "metered", Plan: "—", Window: period, Used: fmt.Sprintf("$%.2f", spent), Headroom: fmt.Sprintf("$%.2f of $%.0f", cap-spent, cap), Reserve: "—", Resets: "—", Read: "—", Source: "computed", State: meteredState(spent, cap, env.Roster.Budget.WarnAt, env.Roster.Budget.BlockAt), Pace: "—"})
 			continue
 		}
-		rec := env.Budget.Accounts[id]
+		rec := env.Budget.Snapshot(id)
 		if rec == nil || len(rec.Windows) == 0 {
 			rows = append(rows, budgetRow{Account: id, Billing: acct.Billing, Plan: plan, Window: "—", Used: "?", Headroom: fmt.Sprintf("%.2f assumed", env.Roster.Budget.AssumedHeadroom), Reserve: "—", Resets: "—", Read: "—", Source: "unknown", State: v.State})
 			continue

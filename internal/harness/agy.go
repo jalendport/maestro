@@ -124,7 +124,7 @@ func (p *agyParser) Outcome() *Outcome {
 	if len(doc.Denied) > 0 && strings.TrimSpace(doc.Response) == "" {
 		p.out.IsError = true
 		p.out.ErrorText = "agy denied an action and returned no response"
-		p.out.Signals = append(p.out.Signals, Signal{Class: "lane", Text: p.out.ErrorText})
+		p.out.Signals = append(p.out.Signals, Signal{Class: "bad", Text: p.out.ErrorText})
 	}
 	if doc.Status != "" && doc.Status != "SUCCESS" {
 		p.out.IsError = true
