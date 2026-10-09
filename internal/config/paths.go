@@ -1,0 +1,63 @@
+// Package config resolves where Maestro keeps its global state and loads the
+// user file (~/.maestro/config.toml) and the project file (.agents/maestro.toml).
+package config
+
+import (
+	"os"
+	"path/filepath"
+)
+
+// Home is the global state directory, ~/.maestro by default. MAESTRO_HOME
+// overrides it so tests and parallel installs never share state.
+func Home() string {
+	if h := os.Getenv("MAESTRO_HOME"); h != "" {
+		return h
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".maestro"
+	}
+	return filepath.Join(home, ".maestro")
+}
+
+// Global file locations, all under Home().
+func UserFile() string      { return filepath.Join(Home(), "config.toml") }
+func EnvFile() string       { return filepath.Join(Home(), "env") }
+func LedgerFile() string    { return filepath.Join(Home(), "ledger.jsonl") }
+func BudgetFile() string    { return filepath.Join(Home(), "budget.json") }
+func DiscoveryFile() string { return filepath.Join(Home(), "cache", "discovery.json") }
+func RunsIndexDir() string  { return filepath.Join(Home(), "runs") }
+
+// Per-project locations relative to the project root.
+func ProjectFile(root string) string { return filepath.Join(root, ".agents", "maestro.toml") }
+func RunsDir(root string) string     { return filepath.Join(root, ".agents", "maestro", "runs") }
+func CouncilsDir(root string) string { return filepath.Join(root, ".agents", "councils") }
+
+// EnsureHome creates the global state directory tree.
+func EnsureHome() error {
+	for _, d := range []string{Home(), filepath.Join(Home(), "cache"), RunsIndexDir()} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// FindProjectRoot walks up from dir to the nearest folder that holds .git or
+// .agents; the current directory is the root when neither is found. Maestro
+// needs a root for the Run folder and the scope guard, not for its global verbs.
+func FindProjectRoot(dir string) string {
+	d := dir
+	for {
+		for _, marker := range []string{".git", ".agents"} {
+			if _, err := os.Stat(filepath.Join(d, marker)); err == nil {
+				return d
+			}
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return dir
+		}
+		d = parent
+	}
+}
