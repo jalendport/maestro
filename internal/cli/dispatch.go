@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -101,6 +103,7 @@ func detach(folder string) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	_ = os.WriteFile(filepath.Join(folder, "supervisor.pid"), []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
 	return cmd.Process.Release()
 }
 
@@ -147,14 +150,15 @@ func (a *app) waitCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("no task %q under %s", args[0], env.Root)
 			}
+			started := time.Now()
 			for {
 				rec, err := dispatch.LoadRecord(folder)
 				if err == nil && rec.State == "ended" {
 					return exit(dispatch.Print(rec, a.json))
 				}
-				if err == nil && rec.Pid > 0 && syscall.Kill(rec.Pid, 0) != nil && time.Since(rec.StartedAt) > 5*time.Second {
-					// The supervisor died without finishing: a Stall on the next start, per failure-handling.md section 4.
-					return &proc.ExitError{Code: proc.CodeFailed, Message: fmt.Sprintf("task %s: supervisor pid %d is gone; see %s/supervisor.log", args[0], rec.Pid, folder)}
+				// A dead supervisor never ends the record: say so instead of waiting forever.
+				if time.Since(started) > 5*time.Second && !supervisorAlive(folder, rec) {
+					return &proc.ExitError{Code: proc.CodeFailed, Message: fmt.Sprintf("task %s: its supervisor is gone before the dispatch ended; see %s", args[0], filepath.Join(folder, "supervisor.log"))}
 				}
 				time.Sleep(2 * time.Second)
 			}
@@ -175,4 +179,18 @@ func asAsk(err error, target **router.AskOrchestrator) bool {
 		return true
 	}
 	return false
+}
+
+// supervisorAlive checks the pid detach recorded, or the running record's pid.
+func supervisorAlive(folder string, rec *dispatch.Record) bool {
+	if b, err := os.ReadFile(filepath.Join(folder, "supervisor.pid")); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
+			return syscall.Kill(pid, 0) == nil
+		}
+	}
+	if rec != nil && rec.Pid > 0 {
+		return syscall.Kill(rec.Pid, 0) == nil
+	}
+	// No pid known (an inline --wait run writes none): keep waiting.
+	return true
 }

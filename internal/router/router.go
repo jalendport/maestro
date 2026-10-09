@@ -38,6 +38,7 @@ type Exclusion struct {
 type Route struct {
 	Family          *roster.Family `json:"-"`
 	FamilyID        string         `json:"family"`
+	Harness         string         `json:"harness"`
 	Tier            roster.Tier    `json:"tier"`
 	LevelEstimate   roster.Level   `json:"level_estimate"`
 	Level           roster.Level   `json:"level_score"`
@@ -340,7 +341,7 @@ func (rt *Router) finish(f *roster.Family, level, estimate roster.Level, categor
 	model, _ := rt.Disc.Resolve(f.Harness, f.Models)
 	h, _ := rt.Reg.Get(f.Harness)
 	r := &Route{
-		Family: f, FamilyID: f.ID, Tier: f.TierFor(level), LevelEstimate: estimate, Level: level,
+		Family: f, FamilyID: f.ID, Harness: f.Harness, Tier: f.TierFor(level), LevelEstimate: estimate, Level: level,
 		Effort: f.Levels[level], Model: model, Account: f.Account, Source: source,
 		DefaultsUsed: defaults, Category: category, Excluded: excluded, Enforcement: h.Enforcement(access),
 	}

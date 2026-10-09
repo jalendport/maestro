@@ -94,6 +94,14 @@ func Execute(env *Env, t *Task) (*Record, error) {
 	if err != nil {
 		return nil, err
 	}
+	// task.json carries the family id only; a reloaded Task gets its family back here.
+	if t.Route.Family == nil {
+		f, ok := env.Roster.Family(t.Route.FamilyID)
+		if !ok {
+			return nil, fmt.Errorf("task %s: family %q is not in the roster", t.Task, t.Route.FamilyID)
+		}
+		t.Route.Family = f
+	}
 	stopAwake := keepAwake(env.Roster.KeepAwake())
 	defer stopAwake()
 
@@ -154,9 +162,9 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		return rec
 	}
 
-	h, ok := env.Reg.Get(t.Route.Family.Harness)
+	h, ok := env.Reg.Get(t.Route.Harness)
 	if !ok {
-		return fail(FailLane, "unknown harness "+t.Route.Family.Harness)
+		return fail(FailLane, "unknown harness "+t.Route.Harness)
 	}
 	reportPath := filepath.Join(t.Folder, FileReport)
 	briefRel, _ := filepath.Rel(t.Project, filepath.Join(t.Folder, FileBrief))
@@ -177,7 +185,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		Model: t.Route.Model, Effort: t.Route.Effort, Access: t.Access, Root: t.Project, Dirs: t.Dirs,
 		AllowedCommands: allChecks, AllowCommit: t.Commit, RunFolder: t.Folder, ReportPath: reportPath,
 		Pointer: brief.Pointer(briefRel), ClaudeAuto: t.ClaudeAuto, InSolo: t.InSolo,
-		Env: harness.Env(env.Roster.StripEnv(t.Route.Family.Harness), map[string]string{
+		Env: harness.Env(env.Roster.StripEnv(t.Route.Harness), map[string]string{
 			"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
 			"GROK_CLAUDE_HOOKS_ENABLED":        "false",
 			"GROK_CLAUDE_SKILLS_ENABLED":       "false",
