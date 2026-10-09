@@ -85,6 +85,7 @@ func (a *app) doctorCmd() *cobra.Command {
 					failing++
 				}
 			}
+			rows = append(rows, doctorRow{Name: "adapters", Detail: adapterState(), State: "see maestro adapter"})
 			rows = append(rows, doctorRow{Name: "roster", Detail: fmt.Sprintf("%d families", len(env.Roster.Families)), State: fmt.Sprintf("%d fail pre-flight (see maestro roster)", failing)})
 			if a.json {
 				b, _ := json.MarshalIndent(rows, "", "  ")

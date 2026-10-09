@@ -85,6 +85,8 @@ func (a *app) build() *cobra.Command {
 	root.AddCommand(a.runSupervisorCmd())
 	root.AddCommand(a.councilCmd())
 	root.AddCommand(a.answerCmd())
+	root.AddCommand(a.hookCmd())
+	root.AddCommand(a.adapterCmd())
 	root.AddCommand(a.tellCmd())
 	root.AddCommand(a.councilSupervisorCmd())
 	root.AddCommand(a.rosterCmd())
@@ -175,6 +177,8 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, "    "+ui.Name.Render("budget reset codex")+"     Spend one Codex reset credit (manual only)")
 	ui.Fprintln(out, "  "+ui.Name.Render("router stats")+"             Jev vs rules agreement, verified rates per Route source")
 	ui.Fprintln(out, "  "+ui.Name.Render("key set")+"                  Store the Jev key in ~/.maestro/env (no echo)")
+	ui.Fprintln(out, "  "+ui.Name.Render("adapter [harness]")+"        Print the Adapter install lines (skill file + hook file)")
+	ui.Fprintln(out, "  "+ui.Name.Render("hook <harness>")+"           PreToolUse hook entry point (called by the Adapters)")
 	ui.Fprintln(out, "  "+ui.Name.Render("help brief|plan|report")+"   Print the Brief file, Plan file, or Report formats")
 	ui.Fprintln(out, "")
 	ui.Fprintln(out, ui.Section.Render("Route flags")+ui.Dim.Render("  (run, dispatch, council)"))
@@ -185,7 +189,7 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, ui.Section.Render("Output flags"))
 	ui.Fprintln(out, "  --json                     Machine output (one object)    --quiet  progress only, on stderr")
 	ui.Fprintln(out, "")
-	ui.Fprintln(out, ui.Dim.Render("Not in this build yet: hook, roster stats."))
+	ui.Fprintln(out, ui.Dim.Render("Not in this build yet: roster stats."))
 }
 
 // soloToolsMissing reports whether the cache has no Solo agent tool ids yet.
