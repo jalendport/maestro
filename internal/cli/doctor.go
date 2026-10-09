@@ -109,10 +109,10 @@ func jevRow() doctorRow {
 	switch {
 	case os.Getenv("TYPESAFE_API_KEY") != "":
 		row.Detail = "key in TYPESAFE_API_KEY"
-		row.State = "ok  (router lands in milestone 2)"
+		row.State = "ok"
 	case keyInEnvFile():
 		row.Detail = "key in " + config.EnvFile()
-		row.State = "ok  (router lands in milestone 2)"
+		row.State = "ok"
 	default:
 		row.Detail = "no key"
 		row.State = "rules table only (maestro key set, or TYPESAFE_API_KEY)"

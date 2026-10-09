@@ -59,6 +59,7 @@ type Route struct {
 	Category        string         `json:"category"`
 	Enforcement     string         `json:"enforcement"`
 	Excluded        []Exclusion    `json:"excluded,omitempty"`
+	Jev             *JevRoute      `json:"jev,omitempty"`
 }
 
 // AskOrchestrator is returned when no Lane can take the Task.
@@ -119,16 +120,68 @@ func (rt *Router) Route(req Request) (*Route, error) {
 		}
 		cands = kept
 	}
-	pick, tie := rt.rulesPick(cands, level, category)
-	if pick == nil {
+	rulesFamily, tie := rt.rulesPick(cands, level, category)
+	useRules := rt.Roster.Router.Backend == "rules" || (req.Project != nil && req.Project.Router == "rules")
+	if !useRules {
+		r, jr, err := rt.jevRoute(req, cands, level, category, defaults)
+		if err != nil {
+			if ask, ok := err.(*AskOrchestrator); ok {
+				ask.Excluded = excluded
+			}
+			return nil, err
+		}
+		if r != nil {
+			r.Jev = jr
+			r.Excluded = excluded
+			if rulesFamily != nil {
+				r.RulesPick = rulesFamily.ID
+			}
+			r.Agreed = r.RulesPick == r.FamilyID
+			tail := fmt.Sprintf("jev %.2f", r.Confidence)
+			if r.Band == "medium" {
+				tail += " medium confidence"
+			}
+			r.ReasonLine = reason(r, tail)
+			if !r.Agreed && r.RulesPick != "" {
+				r.ReasonLine += "  rules table: " + r.RulesPick
+			}
+			return r, nil
+		}
+		// Jev absent or below the floor: the rules table decides.
+		if rulesFamily == nil {
+			return nil, &AskOrchestrator{Reason: fmt.Sprintf("no lane passes the hard rules for a %s %s task at level %s", req.Access, category, level), Excluded: excluded}
+		}
+		why := "low confidence"
+		if jr != nil && jr.Error != "" {
+			why = jr.Error
+		}
+		r = rt.finish(rulesFamily, level, estimate, category, req.Access, "rules", defaults, excluded)
+		r.Jev = jr
+		r.RulesPick = rulesFamily.ID
+		r.Band = "fallback"
+		r.TieBreak = tie
+		r.ReasonLine = reason(r, "rules fallback ("+firstLine(why)+")")
+		return r, nil
+	}
+	if rulesFamily == nil {
 		return nil, &AskOrchestrator{Reason: fmt.Sprintf("no lane passes the hard rules for a %s %s task at level %s", req.Access, category, level), Excluded: excluded}
 	}
-	r := rt.finish(pick, level, estimate, category, req.Access, "rules", defaults, excluded)
-	r.RulesPick = pick.ID
+	r := rt.finish(rulesFamily, level, estimate, category, req.Access, "rules", defaults, excluded)
+	r.RulesPick = rulesFamily.ID
 	r.Agreed = true
 	r.TieBreak = tie
 	r.ReasonLine = reason(r, "rules table")
 	return r, nil
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 60 {
+		s = s[:60] + "…"
+	}
+	return s
 }
 
 func levelForTier(t roster.Tier) roster.Level {

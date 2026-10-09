@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -136,6 +138,19 @@ type Project struct {
 	Redact         []string `toml:"redact"`
 	Councils       string   `toml:"councils"`
 	ClaudeAuto     bool     `toml:"claude_auto"`
+	// Dirs are extra writable directories for every edit Dispatch in this
+	// project (a toolchain cache, for example). A Brief's dirs: adds to them.
+	Dirs []string `toml:"dirs"`
+}
+
+// ExpandHome replaces a leading ~ with the user's home directory.
+func ExpandHome(p string) string {
+	if strings.HasPrefix(p, "~/") || p == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(p, "~"))
+		}
+	}
+	return p
 }
 
 // ParseFile decodes one TOML document into a File. Unknown keys are reported

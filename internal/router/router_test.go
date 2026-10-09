@@ -14,8 +14,11 @@ import (
 
 func testRouter(t *testing.T) *Router {
 	t.Helper()
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("TYPESAFE_API_KEY", "")
 	d, _, _ := config.ParseFile(roster.Defaults)
 	r := roster.Merge(d, &config.File{})
+	r.Router.Backend = "rules"
 	disc := &discovery.Cache{RefreshedAt: time.Now(), Harness: map[string]discovery.Record{
 		"claude": {Path: "/bin/claude", Version: "2.1.296", Models: []harness.Model{{ID: "haiku"}, {ID: "sonnet"}, {ID: "opus"}, {ID: "fable"}}},
 		"codex":  {Path: "/bin/codex", Version: "0.162.0", Models: []harness.Model{{ID: "gpt-6.1-sol"}, {ID: "gpt-6-luna"}, {ID: "gpt-6-astra"}}},
@@ -60,7 +63,10 @@ func TestDefaultsLandOnDaily(t *testing.T) {
 func TestLightNeverEdits(t *testing.T) {
 	rt := testRouter(t)
 	b := mustBrief(t, "---\ntitle: x\nlevel: none\ncategory: refactor\n---\n## Goal\ng\n## Done\nd\n")
-	r, _ := rt.Route(Request{Brief: b, Access: "edit"})
+	r, err := rt.Route(Request{Brief: b, Access: "edit"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if r.Tier == roster.TierLight {
 		t.Fatalf("light took an edit: %+v", r)
 	}

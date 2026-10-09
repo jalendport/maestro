@@ -55,6 +55,9 @@ func (a *app) dispatchCmd() *cobra.Command {
 					}
 					return &proc.ExitError{Code: proc.CodeOrchestrator, Message: ask.Reason}
 				}
+				if cs, ok := err.(*router.CouncilSignal); ok {
+					return &proc.ExitError{Code: proc.CodeOrchestrator, Message: "this brief wants a council, not a task (" + cs.Reason + "); maestro council lands in milestone 4"}
+				}
 				return err
 			}
 			if wait {

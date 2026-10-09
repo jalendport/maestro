@@ -25,12 +25,14 @@ const (
 
 // Outcome values.
 const (
-	OutcomeVerified  = "verified"
-	OutcomeFailed    = "failed"
-	OutcomeEscalated = "escalated"
-	OutcomeTimedOut  = "timed_out"
-	OutcomeCancelled = "cancelled"
-	OutcomeBlocked   = "blocked"
+	OutcomeVerified   = "verified"
+	OutcomeFailed     = "failed"
+	OutcomeEscalated  = "escalated"
+	OutcomeTimedOut   = "timed_out"
+	OutcomeCancelled  = "cancelled"
+	OutcomeBlocked    = "blocked"
+	OutcomeAnswered   = "answered"   // a read Task whose Report came back
+	OutcomeUnverified = "unverified" // an edit Task with no deterministic check
 )
 
 // Task is the input half of a Dispatch, saved as task.json so a detached

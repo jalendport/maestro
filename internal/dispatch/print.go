@@ -61,6 +61,16 @@ func Print(rec *Record, asJSON bool) int {
 		}
 		fmt.Fprintf(os.Stdout, "%-8s %-40s %s\n", label, c.Command, res)
 	}
+	if len(rec.Verification.Gate) > 0 {
+		var g Gate
+		if json.Unmarshal(rec.Verification.Gate, &g) == nil {
+			if g.Skipped != "" {
+				fmt.Fprintf(os.Stdout, "gate     skipped (%s)\n", g.Skipped)
+			} else {
+				fmt.Fprintf(os.Stdout, "gate     satisfies %.2f  verdict %s  risk %s\n", g.Satisfies, g.Verdict, g.Risk)
+			}
+		}
+	}
 	if rec.Verification.CommitRange != "" {
 		fmt.Fprintf(os.Stdout, "commits  %s\n", rec.Verification.CommitRange)
 	}
@@ -94,7 +104,7 @@ func Print(rec *Record, asJSON bool) int {
 
 func exitCode(rec *Record) int {
 	switch rec.Outcome.Outcome {
-	case OutcomeVerified:
+	case OutcomeVerified, OutcomeAnswered, OutcomeUnverified:
 		return proc.CodeOK
 	case OutcomeBlocked:
 		return proc.CodeOrchestrator

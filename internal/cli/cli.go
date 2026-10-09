@@ -75,6 +75,8 @@ func (a *app) build() *cobra.Command {
 	root.AddCommand(a.rosterCmd())
 	root.AddCommand(a.doctorCmd())
 	root.AddCommand(a.helpTopicCmd())
+	root.AddCommand(a.keyCmd())
+	root.AddCommand(a.routerCmd())
 	root.AddCommand(a.superviseCmd())
 	return root
 }
@@ -127,6 +129,8 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, "  "+ui.Name.Render("roster")+"                   Show the effective Roster (families, models, levels, state)")
 	ui.Fprintln(out, "    "+ui.Name.Render("roster refresh")+"         Re-read the Harness catalogs")
 	ui.Fprintln(out, "    "+ui.Name.Render("roster prices")+"          Show the embedded price table")
+	ui.Fprintln(out, "  "+ui.Name.Render("router stats")+"             Jev vs rules agreement, verified rates per Route source")
+	ui.Fprintln(out, "  "+ui.Name.Render("key set")+"                  Store the Jev key in ~/.maestro/env (no echo)")
 	ui.Fprintln(out, "  "+ui.Name.Render("help brief|report")+"        Print the Brief file format or the Report shapes")
 	ui.Fprintln(out, "")
 	ui.Fprintln(out, ui.Section.Render("Route flags")+ui.Dim.Render("  (dispatch)"))
@@ -137,5 +141,5 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, ui.Section.Render("Output flags"))
 	ui.Fprintln(out, "  --json                     Machine output (one object)    --quiet  progress only, on stderr")
 	ui.Fprintln(out, "")
-	ui.Fprintln(out, ui.Dim.Render("Not in this build yet: run, council, status, budget, hook, router stats, roster stats|solo."))
+	ui.Fprintln(out, ui.Dim.Render("Not in this build yet: run, council, status, budget, hook, roster stats|solo."))
 }

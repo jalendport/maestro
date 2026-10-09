@@ -63,13 +63,22 @@ func Prepare(env *Env, b *brief.Brief, req router.Request, runID string) (*Task,
 	if err := os.MkdirAll(folder, 0o755); err != nil {
 		return nil, err
 	}
+	var dirs []string
+	if env.Project != nil {
+		for _, d := range env.Project.Dirs {
+			dirs = append(dirs, config.ExpandHome(d))
+		}
+	}
+	for _, d := range b.Dirs {
+		dirs = append(dirs, config.ExpandHome(d))
+	}
 	wall := env.Roster.WallLimit(route.Tier).Duration
 	if d := b.WallLimitDuration(); d > wall {
 		wall = d
 	}
 	t := &Task{
 		Project: env.Root, Run: runID, Task: taskID, BriefPath: b.Path, Title: b.Title,
-		Category: route.Category, Access: req.Access, Commit: b.WantsCommit(), Touch: b.Touch, Dirs: b.Dirs,
+		Category: route.Category, Access: req.Access, Commit: b.WantsCommit(), Touch: b.Touch, Dirs: dirs,
 		Checks: b.Checks, WallLimit: wall.String(), IdleLimit: env.Roster.Failure.IdleLimit.Duration.String(),
 		Route: route, Folder: folder, ClaudeAuto: env.Project != nil && env.Project.ClaudeAuto, InSolo: InSolo(),
 		MaxAttempt: 2,
@@ -451,8 +460,34 @@ loop:
 			rec.Outcome.Outcome = OutcomeFailed
 			rec.Outcome.FailureClass = FailBad
 			rec.Outcome.ErrorText = fmt.Sprintf("%d check(s) failed", failedChecks)
+		case t.Access == brief.AccessRead:
+			rec.Outcome.Outcome = OutcomeAnswered
 		default:
-			rec.Outcome.Outcome = OutcomeVerified
+			// Deterministic checks passed: the Jev gate judges the diff against the Brief.
+			gate := runGate(env, t, rec, b.Goal, b.Done)
+			rec.Verification.Gate = gate.raw()
+			switch {
+			case gate.Skipped != "" && len(allChecks) == 0:
+				rec.Outcome.Outcome = OutcomeUnverified
+			case gate.Skipped != "":
+				rec.Outcome.Outcome = OutcomeVerified
+			case gate.Satisfies >= env.Roster.Threshold("satisfies") && len(allChecks) > 0:
+				rec.Outcome.Outcome = OutcomeVerified
+			case gate.Satisfies >= env.Roster.Threshold("satisfies"):
+				rec.Outcome.Outcome = OutcomeUnverified
+			case gate.Verdict == "pass":
+				// Checks pass and Jev sees no fault, but satisfies sits under the
+				// close threshold: not closed, not failed. The Orchestrator decides.
+				rec.Outcome.Outcome = OutcomeUnverified
+				rec.Outcome.ErrorText = fmt.Sprintf("gate: satisfies %.2f under %.2f with verdict pass", gate.Satisfies, env.Roster.Threshold("satisfies"))
+			default:
+				rec.Outcome.Outcome = OutcomeFailed
+				rec.Outcome.FailureClass = FailBad
+				rec.Outcome.ErrorText = fmt.Sprintf("gate: satisfies %.2f, verdict %s, risk %s", gate.Satisfies, gate.Verdict, gate.Risk)
+			}
+			if gate.Skipped == "" {
+				ui.Eventf("gate", "task %s  satisfies %.2f  verdict %s  risk %s", t.Task, gate.Satisfies, gate.Verdict, gate.Risk)
+			}
 		}
 	}
 	finish(rec)
