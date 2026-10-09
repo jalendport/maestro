@@ -57,6 +57,8 @@ type Task struct {
 	ClaudeAuto bool           `json:"claude_auto"`
 	InSolo     bool           `json:"in_solo"`
 	MaxAttempt int            `json:"max_attempts"`
+	// Council marks a Seat Dispatch: the Report ends with POSITION, not STATUS.
+	Council bool `json:"council,omitempty"`
 	// FirstAttempt lets a re-Route inside a Run keep the attempt count.
 	FirstAttempt int `json:"first_attempt,omitempty"`
 	// Cancel, when closed, stops the running Lane (never serialized).
@@ -164,6 +166,7 @@ const (
 	FileOutput   = "output.jsonl"
 	FileStderr   = "stderr.log"
 	FileAttempts = "attempts" // attempts/<n>/ keeps earlier attempts' files
+	FileBaseline = "baseline.json"
 )
 
 // Save writes the record to its folder.

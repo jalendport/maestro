@@ -63,7 +63,17 @@ func Report(s *State) string {
 	if s.State == StatePaused {
 		fmt.Fprintf(&w, "resume with: maestro resume %s --task <n> (--lane F[:E] | --brief <file> | --skip)\n", s.Run)
 	}
-	w.WriteString("end-of-run council: not run (councils land in milestone 4)\n")
+	councils := []string{}
+	for _, slug := range s.Councils {
+		if strings.HasSuffix(slug, "-review") {
+			councils = append(councils, slug)
+		}
+	}
+	if len(councils) == 0 {
+		w.WriteString("end-of-run council: not run (no heavy task, risk under high)\n")
+	} else {
+		fmt.Fprintf(&w, "end-of-run council: %s  → maestro wait %s\n", councils[0], councils[0])
+	}
 	return w.String()
 }
 

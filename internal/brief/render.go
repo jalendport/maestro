@@ -18,6 +18,8 @@ type RenderOpts struct {
 	// ReportByMessage: the Lane cannot write files (Codex read-only sandbox);
 	// its final message is the Report and the Harness writes it to the path.
 	ReportByMessage bool
+	// Council: the read shape ends with a POSITION line instead of STATUS.
+	Council bool
 }
 
 // Retry is the "previous attempt" block on a retry Brief.
@@ -76,7 +78,11 @@ func Render(b *Brief, o RenderOpts) string {
 	}
 	w.WriteString("- Report every blocked or denied command in `## Blocked`.\n")
 	w.WriteString("- When the Done cannot be met, stop and report `STATUS: blocked` or `STATUS: partial`.\n\n")
-	w.WriteString(ReportShape(o.Access, o.ReportPath, o.ReportByMessage))
+	if o.Council {
+		w.WriteString(CouncilShape(o.ReportPath, o.ReportByMessage))
+	} else {
+		w.WriteString(ReportShape(o.Access, o.ReportPath, o.ReportByMessage))
+	}
 	if o.Retry != nil {
 		fmt.Fprintf(&w, "\n## Previous attempt\n\nThis is attempt %d. A previous attempt stopped partway (%s). Its changes are in the working tree. Check them, then keep or discard them.\n", o.Retry.Attempt, o.Retry.Reason)
 		if len(o.Retry.Findings) > 0 {
@@ -112,4 +118,17 @@ func quoteAll(xs []string) []string {
 		out[i] = "`" + x + "`"
 	}
 	return out
+}
+
+// CouncilShape is the Report section for a Council Seat (council.md section 7).
+func CouncilShape(reportPath string, byMessage bool) string {
+	var w strings.Builder
+	if byMessage {
+		w.WriteString("## Report\n\nYour final message is your report. It must contain exactly these headings, in this order, and end with the position line. Do not try to write a file.\n\n")
+	} else {
+		fmt.Fprintf(&w, "## Report\n\nWhen you finish, write the file `%s` with exactly these headings, in this order, and end with the position line.\n\n", reportPath)
+	}
+	w.WriteString("```markdown\n## Answer\n(your answer; PASS when nothing real is wrong)\n\n## Findings\n- `file:line` — one finding, with a confidence word (high, medium, low)\n\n## Concerns\n- (anything the answer rests on that you could not verify)\n\nPOSITION: confirmed\n```\n")
+	w.WriteString("\nThe position line is one of `POSITION: confirmed` (you stand by your answer), `POSITION: changed` (you refined it after reading the other answers), or `POSITION: withdrawn` (you no longer hold it).\n")
+	return w.String()
 }

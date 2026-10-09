@@ -42,6 +42,12 @@ func InSolo() bool { return os.Getenv("SOLO_PROCESS_ID") != "" }
 // Prepare routes one Brief and lays out its Run folder. It returns the Task
 // to execute, inline or in a detached supervisor.
 func Prepare(env *Env, b *brief.Brief, req router.Request, runID, taskID string) (*Task, error) {
+	return PrepareIn(env, b, req, runID, taskID, "")
+}
+
+// PrepareIn is Prepare with the Run directory given (Councils keep their
+// Seats under .agents/councils/<slug>/round-N/ instead of the runs folder).
+func PrepareIn(env *Env, b *brief.Brief, req router.Request, runID, taskID, runDir string) (*Task, error) {
 	rt := &router.Router{Roster: env.Roster, Disc: env.Disc, Reg: env.Reg}
 	req.Brief = b
 	req.Project = env.Project
@@ -54,7 +60,9 @@ func Prepare(env *Env, b *brief.Brief, req router.Request, runID, taskID string)
 	if runID == "" {
 		runID = NextRunID(env.Root)
 	}
-	runDir := filepath.Join(config.RunsDir(env.Root), runID)
+	if runDir == "" {
+		runDir = filepath.Join(config.RunsDir(env.Root), runID)
+	}
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -83,7 +91,7 @@ func Prepare(env *Env, b *brief.Brief, req router.Request, runID, taskID string)
 		Category: route.Category, Access: req.Access, Commit: b.WantsCommit(), Touch: b.Touch, Dirs: dirs,
 		Checks: b.Checks, WallLimit: wall.String(), IdleLimit: env.Roster.Failure.IdleLimit.Duration.String(),
 		Route: route, Folder: folder, ClaudeAuto: env.Project != nil && env.Project.ClaudeAuto, InSolo: InSolo(),
-		MaxAttempt: 2,
+		MaxAttempt: 2, Council: req.Seat != "",
 	}
 	if err := t.Save(); err != nil {
 		return nil, err
@@ -137,7 +145,13 @@ func Execute(env *Env, t *Task) (*Record, error) {
 		ui.Eventf("retry", "task %s  %s: %s; retrying on %s in %s", t.Task, rec.Outcome.FailureClass, firstLine(rec.Outcome.ErrorText), t.Route.FamilyID, wait)
 		archiveAttempt(t.Folder, attempt)
 		retry = &brief.Retry{Attempt: attempt + 1, Reason: rec.Outcome.FailureClass}
-		time.Sleep(wait)
+		select {
+		case <-time.After(wait):
+		case <-t.Cancel:
+			rec.Outcome.Outcome = OutcomeCancelled
+			_ = rec.Save()
+			break
+		}
 	}
 	return rec, nil
 }
@@ -223,12 +237,19 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 
 	rendered := brief.Render(b, brief.RenderOpts{
 		TaskID: t.Task, RunID: t.Run, Access: t.Access, ProjectChecks: projectChecks, BriefChecks: briefChecks,
-		ReportPath: reportRel, Retry: retry, ReportByMessage: command.ReportByText,
+		ReportPath: reportRel, Retry: retry, ReportByMessage: command.ReportByText, Council: t.Council,
 	})
 	if err := os.WriteFile(filepath.Join(t.Folder, FileBrief), []byte(rendered), 0o644); err != nil {
 		return fail(FailLane, err.Error())
 	}
-	snap := verify.Take(t.Project)
+	// One baseline per Task, taken before the first attempt and shared by every
+	// retry and re-Route, so a failed attempt's edits never escape the scope
+	// guard or the gate (found by the first dogfood Council).
+	snap, err := verify.LoadSnapshot(filepath.Join(t.Folder, FileBaseline))
+	if err != nil {
+		snap = verify.Take(t.Project)
+		_ = snap.SaveTo(filepath.Join(t.Folder, FileBaseline))
+	}
 	rec.Verification.StartCommit = snap.Commit
 
 	// Launch.
@@ -425,6 +446,10 @@ loop:
 		return fail(class, out.ErrorText)
 	}
 
+	if t.Council && report.Position != "" && report.Status == brief.StatusUnshaped {
+		// A Seat ends with POSITION, not STATUS; a position line is a shaped Report.
+		report.Status = brief.StatusDone
+	}
 	rec.Outcome.Status = report.Status
 	rec.Permission.Blocked = report.Blocked
 	switch report.Status {

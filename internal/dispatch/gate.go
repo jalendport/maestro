@@ -123,3 +123,8 @@ func (g *Gate) raw() json.RawMessage {
 	b, _ := json.Marshal(g)
 	return b
 }
+
+// DiffFor returns the diff of a finished Dispatch's changed paths.
+func DiffFor(root string, rec *Record) string {
+	return collectDiff(root, rec.Verification.StartCommit, rec.Verification.Changed)
+}

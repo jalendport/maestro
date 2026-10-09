@@ -26,6 +26,9 @@ type Request struct {
 	Project  *config.Project
 	Excluded []string // families removed for this Task (failed attempts)
 	InSolo   bool
+	// Seat pins a Council Seat: family id and effort, Route source "council".
+	Seat       string
+	SeatEffort string
 }
 
 // Exclusion records why a family left the list.
@@ -104,6 +107,22 @@ func (rt *Router) Route(req Request) (*Route, error) {
 		level = levelForTier(req.Floor)
 	}
 
+	if req.Seat != "" {
+		f, ok := rt.Roster.Family(req.Seat)
+		if !ok {
+			return nil, fmt.Errorf("unknown family %q", req.Seat)
+		}
+		useLevel := level
+		if !f.Serves(useLevel) {
+			useLevel = nearestLevel(f, level)
+		}
+		r := rt.finish(f, useLevel, estimate, category, req.Access, "council", defaults, nil)
+		if req.SeatEffort != "" {
+			r.Effort = req.SeatEffort
+		}
+		r.ReasonLine = reason(r, "council seat")
+		return r, nil
+	}
 	if req.Lane != "" {
 		return rt.requested(req, level, estimate, category, defaults)
 	}

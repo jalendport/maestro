@@ -12,6 +12,7 @@ import (
 
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/council"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/ledger"
 	"github.com/jalendport/maestro/internal/roster"
@@ -89,7 +90,27 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 	if len(approval) == 0 {
 		s.State = StateLive
 	}
-	return s, s.Save()
+	if err := s.Save(); err != nil {
+		return nil, err
+	}
+	if len(approval) > 0 {
+		// Plan Council (council.md section 11): Heavy, over the Plan file, so the
+		// Orchestrator approves the breakdown with the Merge in hand.
+		rel, _ := filepath.Rel(env.Root, plan.Path)
+		c, err := council.Create(env, council.Opts{
+			Question: "Review this plan before it runs: are the tasks complete, correctly ordered, and bounded? Name any task whose Goal or Done is too thin to start.",
+			Files:    []string{rel}, Tier: roster.TierHeavy, Trigger: council.TriggerPlan, Run: runID, Slug: runID + "-plan",
+		})
+		if err != nil {
+			ui.Warnf("plan council: %v", err)
+		} else {
+			s.Councils = append(s.Councils, c.Slug)
+			_ = s.Save()
+			go func() { _, _ = council.Start(env, c.Path) }()
+			ui.Eventf("council", "plan council %s started (%d seats); maestro wait %s", c.Slug, len(c.Seats), c.Slug)
+		}
+	}
+	return s, nil
 }
 
 func firstNonEmpty(a, b string) string {
@@ -546,6 +567,9 @@ func (sup *Supervisor) end(state string) error {
 		}
 	}
 	_ = s.Save()
+	if state == StateFinished {
+		sup.endOfRunCouncil()
+	}
 	report := Report(s)
 	_ = os.WriteFile(filepath.Join(s.Folder, FileReport), []byte(report), 0o644)
 	if err := ledger.Append(ledgerRow(s)); err != nil {
@@ -556,6 +580,63 @@ func (sup *Supervisor) end(state string) error {
 	ui.Eventf(state, "%s  → %s", summary, filepath.Join(s.Folder, FileReport))
 	notify(summary)
 	return nil
+}
+
+// endOfRunCouncil runs when the Run had a Heavy or Frontier Task, when the
+// gate scored a high risk, or always when the project asks for it.
+func (sup *Supervisor) endOfRunCouncil() {
+	s := sup.State
+	var top roster.Tier
+	trigger := false
+	var authors []string
+	var changed []string
+	seen := map[string]bool{}
+	for _, t := range s.Tasks {
+		if t.Route == nil || t.State != TaskDone {
+			continue
+		}
+		if top == "" || t.Route.Tier.Rank() > top.Rank() {
+			top = t.Route.Tier
+		}
+		if t.Route.Tier.Rank() >= roster.TierHeavy.Rank() {
+			trigger = true
+		}
+		authors = appendUnique(authors, t.Route.FamilyID)
+		if rec, err := dispatch.LoadRecord(t.Folder); err == nil {
+			var g struct {
+				Risk string `json:"risk"`
+			}
+			if len(rec.Verification.Gate) > 0 && jsonUnmarshal(rec.Verification.Gate, &g) == nil && (g.Risk == "high" || g.Risk == "critical") {
+				trigger = true
+			}
+			for _, p := range rec.Verification.Changed {
+				if !seen[p] {
+					seen[p] = true
+					changed = append(changed, p)
+				}
+			}
+		}
+	}
+	if sup.Env.Project != nil && sup.Env.Project.Councils == "always" {
+		trigger = true
+	}
+	if !trigger || top == "" || len(changed) == 0 {
+		return
+	}
+	c, err := council.Create(sup.Env, council.Opts{
+		Question: fmt.Sprintf("Review the changes of run %s (%s) as one diff: is the work correct, complete, and safe to keep? The files changed are listed under Files; read them in full.", s.Run, s.Title),
+		Files:    changed, Tier: top, Trigger: council.TriggerEndOfRun, Run: s.Run, Authors: authors, Slug: s.Run + "-review",
+	})
+	if err != nil {
+		ui.Warnf("end-of-run council: %v", err)
+		return
+	}
+	s.Councils = append(s.Councils, c.Slug)
+	_ = s.Save()
+	ui.Eventf("council", "end-of-run council %s  %s  %d seats", c.Slug, c.Tier, len(c.Seats))
+	if _, err := council.Start(sup.Env, c.Path); err != nil {
+		ui.Warnf("end-of-run council: %v", err)
+	}
 }
 
 func ledgerRow(s *State) map[string]any {

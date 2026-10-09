@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+
+	"github.com/jalendport/maestro/internal/council"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,7 +58,26 @@ func (a *app) dispatchCmd() *cobra.Command {
 					return &proc.ExitError{Code: proc.CodeOrchestrator, Message: ask.Reason}
 				}
 				if cs, ok := err.(*router.CouncilSignal); ok {
-					return &proc.ExitError{Code: proc.CodeOrchestrator, Message: "this brief wants a council, not a task (" + cs.Reason + "); maestro council lands in milestone 4"}
+					// The Jev Council gate: the Brief is the question, the Merge is the result.
+					ui.Eventf("route", "council gate: %s", cs.Reason)
+					c, err := council.Create(env, council.Opts{Question: b.Goal + "\n\nDone when: " + b.Done, Files: b.Files, Trigger: council.TriggerJevGate, Slug: council.Slugify(b.Title)})
+					if err != nil {
+						return err
+					}
+					printSeats(env, c)
+					if wait {
+						if _, err := council.Start(env, c.Path); err != nil {
+							return err
+						}
+						done, _ := council.Load(c.Path)
+						council.PrintMerge(done, a.json)
+						return nil
+					}
+					if err := detachCouncil(c.Path); err != nil {
+						return err
+					}
+					ui.Outf("council %s started.  Collect with: maestro wait %s", c.Slug, c.Slug)
+					return nil
 				}
 				return err
 			}
@@ -149,16 +170,15 @@ func (a *app) waitCmd() *cobra.Command {
 				return err
 			}
 			_ = cwd
-			if strings.HasPrefix(args[0], "r-") {
-				folder, _, err := findRun(env.Root, args[0])
-				if err != nil {
-					return err
-				}
+			if folder, _, err := findRun(env.Root, args[0]); err == nil {
 				return a.waitRun(folder)
 			}
 			folder, ok := dispatch.FindTask(env.Root, args[0])
 			if !ok {
-				return fmt.Errorf("no task %q under %s", args[0], env.Root)
+				if cf, isCouncil := council.Find(env.Root, args[0]); isCouncil {
+					return a.waitCouncil(cf)
+				}
+				return fmt.Errorf("no task or council %q under %s", args[0], env.Root)
 			}
 			started := time.Now()
 			for {
