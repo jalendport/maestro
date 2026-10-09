@@ -5,6 +5,37 @@ import (
 	"testing"
 )
 
+func TestParseDetectsHarness(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		harness string
+		wantErr bool
+	}{
+		{name: "claude", payload: `{"tool_name":"Agent"}`, harness: "claude"},
+		{name: "grok", payload: `{"toolName":"spawn_subagent","hookEventName":"PreToolUse"}`, harness: "grok"},
+		{name: "agy", payload: `{"toolCall":{"name":"invoke_subagent"}}`, harness: "agy"},
+		{name: "non-JSON", payload: "not JSON", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Parse("", []byte(tc.payload))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected an error for a non-JSON payload")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Harness != tc.harness {
+				t.Fatalf("Harness = %q, want %q", c.Harness, tc.harness)
+			}
+		})
+	}
+}
+
 func TestClaudeAgentWriteDenied(t *testing.T) {
 	c, err := Parse("claude", []byte(`{"tool_name":"Agent","tool_input":{"subagent_type":"grunt","prompt":"x"}}`))
 	if err != nil {
