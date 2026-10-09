@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/hook"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/spf13/cobra"
@@ -80,14 +81,31 @@ func hookJSON(command, matcher string) string {
 	return fmt.Sprintf(`{"hooks":{"PreToolUse":[{"matcher":%q,"hooks":[{"type":"command","command":%q,"timeout":10}]}]}}`, matcher, command)
 }
 
+// SkillMD is the embedded skill file, set by main.
+var SkillMD string
+
 func (a *app) adapterCmd() *cobra.Command {
-	return &cobra.Command{
+	var writeSkill bool
+	c := &cobra.Command{
 		Use:   "adapter [claude|codex|grok|agy]",
 		Short: "Print the Adapter install lines per Harness (skill file + hook file)",
-		Long:  "Maestro never writes a Harness's settings files. This prints what to add: the shared skill file and one PreToolUse hook that calls maestro hook <harness>.",
+		Long:  "Maestro never writes a Harness's settings files. This prints what to add: the shared skill file and one PreToolUse hook that calls maestro hook <harness>. --write-skill installs the skill file under ~/.maestro/skills/maestro/ so the symlinks have a target.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			repo := repoRoot()
+			if writeSkill {
+				dir := filepath.Join(config.Home(), "skills", "maestro")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					return err
+				}
+				if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(SkillMD), 0o644); err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stdout, "skill written to %s\n\n", filepath.Join(dir, "SKILL.md"))
+				repo = config.Home()
+			} else if _, err := os.Stat(filepath.Join(config.Home(), "skills", "maestro", "SKILL.md")); err == nil {
+				repo = config.Home()
+			}
 			names := []string{"claude", "codex", "grok", "agy"}
 			if len(args) == 1 {
 				names = []string{args[0]}
@@ -102,6 +120,8 @@ func (a *app) adapterCmd() *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&writeSkill, "write-skill", false, "install the embedded skill file under ~/.maestro/skills/maestro/")
+	return c
 }
 
 // repoRoot guesses where the skill file lives: beside the binary's source
@@ -119,7 +139,7 @@ func repoRoot() string {
 			return share
 		}
 	}
-	return "<maestro checkout>"
+	return "<run: maestro adapter --write-skill>"
 }
 
 // adapterState reports which Adapters are in place on this machine (doctor).
