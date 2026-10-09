@@ -8,7 +8,6 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -75,8 +74,7 @@ func ScopeViolations(changed, touch []string, ignore string) []string {
 		ok := false
 		for _, g := range touch {
 			if Match(g, p) {
-				ok = true
-				break
+				ok = !strings.HasPrefix(g, "!")
 			}
 		}
 		if !ok {
@@ -86,42 +84,73 @@ func ScopeViolations(changed, touch []string, ignore string) []string {
 	return out
 }
 
-// Match is a gitignore-style glob: `*` within a segment, `**` across
-// segments, a trailing `/` or bare directory name covers everything under it.
+// Match uses case-sensitive gitignore patterns: * and ? stay within a segment,
+// ** crosses directories only as a whole segment, bracket classes and backslash
+// escapes work, slashless patterns match base names at any depth, and a leading
+// / anchors to the root. Directory matches cover descendants; a trailing / matches
+// only directories. A leading ! marks a negation for ScopeViolations, where the
+// last matching pattern decides whether a path is in scope.
 func Match(glob, path string) bool {
+	glob = strings.TrimPrefix(glob, "!")
 	glob = filepath.ToSlash(strings.TrimPrefix(glob, "./"))
 	path = filepath.ToSlash(path)
-	if glob == path {
-		return true
+	anchored := strings.HasPrefix(glob, "/")
+	glob = strings.TrimPrefix(glob, "/")
+	directory := strings.HasSuffix(glob, "/")
+	glob = strings.TrimSuffix(glob, "/")
+	if glob == "" || path == "" {
+		return false
 	}
-	if strings.HasSuffix(glob, "/") {
-		glob += "**"
-	}
-	if !strings.ContainsAny(glob, "*?") && strings.HasPrefix(path, glob+"/") {
-		return true
-	}
-	var re strings.Builder
-	re.WriteString("^")
-	for i := 0; i < len(glob); i++ {
-		c := glob[i]
-		switch {
-		case c == '*' && i+1 < len(glob) && glob[i+1] == '*':
+	// filepath.Match uses ^ for a negated class; gitignore also accepts !.
+	chars := []byte(glob)
+	for i := 0; i < len(chars); i++ {
+		if chars[i] == '\\' {
 			i++
-			if i+1 < len(glob) && glob[i+1] == '/' {
-				i++
-				re.WriteString("(?:.*/)?")
-			} else {
-				re.WriteString(".*")
-			}
-		case c == '*':
-			re.WriteString("[^/]*")
-		case c == '?':
-			re.WriteString("[^/]")
-		default:
-			re.WriteString(regexp.QuoteMeta(string(c)))
+		} else if chars[i] == '[' && i+1 < len(chars) && chars[i+1] == '!' {
+			chars[i+1] = '^'
 		}
 	}
-	re.WriteString("$")
-	ok, _ := regexp.MatchString(re.String(), path)
-	return ok
+	glob = string(chars)
+	parts := strings.Split(path, "/")
+	limit := len(parts)
+	if directory {
+		limit--
+	}
+	if !anchored && !strings.Contains(glob, "/") {
+		for _, part := range parts[:limit] {
+			if ok, _ := filepath.Match(glob, part); ok {
+				return true
+			}
+		}
+		return false
+	}
+	var match func([]string, []string) bool
+	match = func(pattern, parts []string) bool {
+		if len(pattern) == 0 {
+			return len(parts) == 0
+		}
+		if pattern[0] == "**" {
+			if len(pattern) == 1 {
+				return len(parts) > 0
+			}
+			for i := 0; i <= len(parts); i++ {
+				if match(pattern[1:], parts[i:]) {
+					return true
+				}
+			}
+			return false
+		}
+		if len(parts) == 0 {
+			return false
+		}
+		ok, _ := filepath.Match(pattern[0], parts[0])
+		return ok && match(pattern[1:], parts[1:])
+	}
+	pattern := strings.Split(glob, "/")
+	for i := 1; i <= limit; i++ {
+		if match(pattern, parts[:i]) {
+			return true
+		}
+	}
+	return false
 }
