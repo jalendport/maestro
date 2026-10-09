@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/ui"
@@ -65,7 +66,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				rows = append(rows, row)
 			}
 			rows = append(rows, jevRow())
-			rows = append(rows, soloRow())
+			rows = append(rows, soloRow(env))
 			cfg := doctorRow{Name: "config", Detail: config.UserFile()}
 			if _, err := os.Stat(config.UserFile()); err != nil {
 				cfg.Detail += " (absent: embedded defaults only)"
@@ -124,11 +125,20 @@ func keyInEnvFile() bool {
 	return err == nil && strings.Contains(string(b), "TYPESAFE_API_KEY=")
 }
 
-func soloRow() doctorRow {
-	if id := os.Getenv("SOLO_PROCESS_ID"); id != "" {
-		return doctorRow{Name: "solo", Detail: "SOLO_PROCESS_ID " + id, State: "ok  (tab lanes land in milestone 6)"}
+func soloRow(env *dispatch.Env) doctorRow {
+	if env.Solo == nil {
+		if os.Getenv("SOLO_PROCESS_ID") != "" {
+			return doctorRow{Name: "solo", Detail: "SOLO_PROCESS_ID set, helper unreachable", State: "one-shot lanes only"}
+		}
+		return doctorRow{Name: "solo", Detail: "not inside a Solo tab", State: "one-shot lanes only"}
 	}
-	return doctorRow{Name: "solo", Detail: "not inside a Solo tab", State: "one-shot lanes only"}
+	var tools []string
+	for _, name := range env.Reg.Names() {
+		if id := env.Disc.Harness[name].SoloTool; id != 0 {
+			tools = append(tools, fmt.Sprintf("%s %d", name, id))
+		}
+	}
+	return doctorRow{Name: "solo", Detail: fmt.Sprintf("project %d, orchestrator process %d   agent tools: %s", env.Solo.ProjectID, env.Solo.Orchestrator, strings.Join(tools, ", ")), State: "ok"}
 }
 
 var _ = ui.Quiet

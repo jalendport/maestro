@@ -1,0 +1,28 @@
+{
+  "text": "OK",
+  "stopReason": "end_turn",
+  "sessionId": "01a122d1-6d61-7fc0-9427-5900715d6efb",
+  "requestId": "fca44eb4-13f6-4103-8951-cfe4d059c1a0",
+  "thought": "The user wants a single-word reply: OK.",
+  "usage": {
+    "input_tokens": 10120,
+    "cache_read_input_tokens": 7040,
+    "cache_creation_input_tokens": 0,
+    "output_tokens": 60,
+    "reasoning_tokens": 59,
+    "total_tokens": 17220
+  },
+  "num_turns": 1,
+  "total_cost_usd": 0.0082008,
+  "total_cost_usd_ticks": 82008000,
+  "modelUsage": {
+    "grok-4.7-build": {
+      "inputTokens": 10120,
+      "outputTokens": 60,
+      "cacheReadInputTokens": 7040,
+      "cacheCreationInputTokens": 0,
+      "modelCalls": 1,
+      "costUSD": 0.0082008
+    }
+  }
+}

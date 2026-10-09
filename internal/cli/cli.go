@@ -3,8 +3,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/jalendport/maestro/internal/budget"
 	"github.com/jalendport/maestro/internal/config"
@@ -82,6 +84,8 @@ func (a *app) build() *cobra.Command {
 	root.AddCommand(a.cleanCmd())
 	root.AddCommand(a.runSupervisorCmd())
 	root.AddCommand(a.councilCmd())
+	root.AddCommand(a.answerCmd())
+	root.AddCommand(a.tellCmd())
 	root.AddCommand(a.councilSupervisorCmd())
 	root.AddCommand(a.rosterCmd())
 	root.AddCommand(a.doctorCmd())
@@ -129,7 +133,14 @@ func (a *app) env(refresh bool) (*dispatch.Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &dispatch.Env{Roster: r, Disc: disc, Reg: reg, Project: project, Root: root, Budget: bf}, nil
+	env := &dispatch.Env{Roster: r, Disc: disc, Reg: reg, Project: project, Root: root, Budget: bf}
+	if dispatch.InSolo() {
+		env.Solo = dispatch.ConnectSolo()
+		if env.Solo != nil && (refresh || soloToolsMissing(disc)) {
+			recordSoloTools(env)
+		}
+	}
+	return env, nil
 }
 
 func (a *app) renderHelp() {
@@ -146,6 +157,8 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, ui.Section.Render("Mid-run"))
 	ui.Fprintln(out, "  "+ui.Name.Render("add <brief.md>")+"           Add a Task to the live Run")
 	ui.Fprintln(out, "  "+ui.Name.Render("cancel <task>")+"            Cancel a Task (a running Dispatch is stopped)")
+	ui.Fprintln(out, "  "+ui.Name.Render("tell <task> <text>")+"       Send a note into a running Lane (Solo tab only)")
+	ui.Fprintln(out, "  "+ui.Name.Render("answer <task> allow|deny")+" Answer a relayed permission prompt")
 	ui.Fprintln(out, "  "+ui.Name.Render("approve <run>")+"            Approve a breakdown that was held for approval")
 	ui.Fprintln(out, "  "+ui.Name.Render("resume <run> --task <n>")+"  (--lane F[:E] | --brief <file> | --skip)  Continue a paused Run")
 	ui.Fprintln(out, "  "+ui.Name.Render("clean [--older-than 30d]")+" Remove old Run and Council folders (never the ledger)")
@@ -155,6 +168,7 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, "  "+ui.Name.Render("roster")+"                   Show the effective Roster (families, models, levels, state)")
 	ui.Fprintln(out, "    "+ui.Name.Render("roster refresh")+"         Re-read the Harness catalogs")
 	ui.Fprintln(out, "    "+ui.Name.Render("roster prices")+"          Show the embedded price table")
+	ui.Fprintln(out, "    "+ui.Name.Render("roster solo")+"            Print Solo preset command lines to type in by hand")
 	ui.Fprintln(out, "  "+ui.Name.Render("budget")+"                   Show Budget readings per Account")
 	ui.Fprintln(out, "    "+ui.Name.Render("budget set <account> <percent>")+"   Record a manual reading")
 	ui.Fprintln(out, "    "+ui.Name.Render("budget record claude")+"   Read a Claude statusline JSON on stdin (statusline tee)")
@@ -171,5 +185,60 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, ui.Section.Render("Output flags"))
 	ui.Fprintln(out, "  --json                     Machine output (one object)    --quiet  progress only, on stderr")
 	ui.Fprintln(out, "")
-	ui.Fprintln(out, ui.Dim.Render("Not in this build yet: tell, answer, hook, roster stats|solo."))
+	ui.Fprintln(out, ui.Dim.Render("Not in this build yet: hook, roster stats."))
+}
+
+// soloToolsMissing reports whether the cache has no Solo agent tool ids yet.
+func soloToolsMissing(disc *discovery.Cache) bool {
+	for _, rec := range disc.Harness {
+		if rec.SoloTool != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// recordSoloTools maps Solo's agent tools onto Harness names in the cache.
+func recordSoloTools(env *dispatch.Env) {
+	res, err := env.Solo.Client.Call("list_agent_tools", nil)
+	if err != nil {
+		return
+	}
+	var tools []struct {
+		ID       int    `json:"id"`
+		Name     string `json:"name"`
+		ToolType string `json:"tool_type"`
+		Enabled  bool   `json:"enabled"`
+	}
+	if json.Unmarshal(res, &tools) != nil {
+		return
+	}
+	byHarness := map[string]int{}
+	for _, t := range tools {
+		if !t.Enabled {
+			continue
+		}
+		switch {
+		case t.ToolType == "claude":
+			byHarness["claude"] = t.ID
+		case t.ToolType == "codex":
+			byHarness["codex"] = t.ID
+		case t.ToolType == "antigravity":
+			byHarness["agy"] = t.ID
+		case strings.EqualFold(t.Name, "grok") || t.ToolType == "grok":
+			byHarness["grok"] = t.ID
+		}
+	}
+	changed := false
+	for name, id := range byHarness {
+		rec := env.Disc.Harness[name]
+		if rec.SoloTool != id {
+			rec.SoloTool = id
+			env.Disc.Harness[name] = rec
+			changed = true
+		}
+	}
+	if changed {
+		_ = env.Disc.Save()
+	}
 }

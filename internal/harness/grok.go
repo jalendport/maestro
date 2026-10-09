@@ -1,14 +1,18 @@
 package harness
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
 
-// Grok is the Grok CLI adapter. Day one: catalog and version only; its
-// launch shapes land with the Solo-tab milestone.
+// Grok is the Grok CLI adapter. Its read shape is best-effort on macOS
+// (permission-contract.md section 3), so it takes no automatic read work;
+// the shape still exists for an explicit --lane request.
 type Grok struct{ bin string }
 
 func (g *Grok) Name() string { return "grok" }
@@ -40,14 +44,110 @@ func (g *Grok) Catalog() ([]Model, string, error) {
 
 func (g *Grok) Enforcement(access string) string {
 	switch access {
-	case "read":
-		return BestEffort
-	case "edit":
+	case "read", "edit":
 		return BestEffort
 	}
 	return NoShape
 }
 
-func (g *Grok) Build(l Launch) (*Command, error) { return nil, ErrNotReady }
+// Build: the Pointer goes through --prompt-file (Grok reads no stdin prompt).
+func (g *Grok) Build(l Launch) (*Command, error) {
+	if g.bin == "" {
+		return nil, fmt.Errorf("grok is not installed")
+	}
+	promptFile := filepath.Join(l.RunFolder, "pointer.txt")
+	if l.RunFolder != "" && l.Pointer != "" {
+		if err := os.WriteFile(promptFile, []byte(l.Pointer+"\n"), 0o644); err != nil {
+			return nil, err
+		}
+	}
+	args := []string{"--prompt-file", promptFile, "--output-format", "json", "--no-subagents", "--model", l.Model}
+	if l.Effort != "" {
+		args = append(args, "--reasoning-effort", l.Effort)
+	}
+	var flags []string
+	switch l.Access {
+	case "read":
+		flags = append(flags, "--permission-mode", "dontAsk", "--deny", "Write", "--deny", "Edit")
+	case "edit":
+		flags = append(flags, "--permission-mode", "acceptEdits")
+		for _, cmd := range l.AllowedCommands {
+			flags = append(flags, "--allow", "Bash("+cmd+" *)", "--allow", "Bash("+cmd+")")
+		}
+	default:
+		return nil, fmt.Errorf("grok has no %q shape", l.Access)
+	}
+	args = append(args, flags...)
+	cmd := exec.Command(g.bin, args...)
+	cmd.Dir = l.Root
+	cmd.Env = l.Env
+	return &Command{Cmd: cmd, Flags: flags, PromptStdin: false}, nil
+}
 
-func (g *Grok) NewParser() Parser { return &textParser{out: &Outcome{}} }
+func (g *Grok) NewParser() Parser { return &grokParser{out: &Outcome{}} }
+
+// grokParser reads the one JSON object Grok prints at the end; progress is
+// any non-empty line.
+type grokParser struct {
+	out *Outcome
+	buf strings.Builder
+}
+
+func (p *grokParser) Outcome() *Outcome {
+	text := strings.TrimSpace(p.buf.String())
+	if text == "" {
+		return p.out
+	}
+	var doc struct {
+		Text      string `json:"text"`
+		Stop      string `json:"stopReason"`
+		SessionID string `json:"sessionId"`
+		Thought   string `json:"thought"`
+		Usage     struct {
+			Input     *int `json:"input_tokens"`
+			CacheRead *int `json:"cache_read_input_tokens"`
+			Output    *int `json:"output_tokens"`
+			Reasoning *int `json:"reasoning_tokens"`
+		} `json:"usage"`
+		Cost       *float64                   `json:"total_cost_usd"`
+		ModelUsage map[string]json.RawMessage `json:"modelUsage"`
+		Error      string                     `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(text), &doc); err != nil {
+		// Not JSON: an error message on stdout.
+		p.out.IsError = true
+		p.out.ErrorText = cutText(text, 500)
+		p.out.Signals = append(p.out.Signals, classifyText("grok", text))
+		return p.out
+	}
+	p.out.SessionID = doc.SessionID
+	p.out.Text = doc.Text
+	p.out.CostUSD = doc.Cost
+	p.out.Tokens = Tokens{Input: doc.Usage.Input, CachedInput: doc.Usage.CacheRead, Output: doc.Usage.Output, Reasoning: doc.Usage.Reasoning}
+	for model := range doc.ModelUsage {
+		p.out.ModelRan = model
+	}
+	if doc.Error != "" {
+		p.out.IsError = true
+		p.out.ErrorText = doc.Error
+		p.out.Signals = append(p.out.Signals, classifyText("grok", doc.Error))
+	}
+	// Grok exits 0 on a denial; the thought text is the only trace.
+	if strings.Contains(strings.ToLower(doc.Thought), "denied") || strings.Contains(strings.ToLower(doc.Thought), "permission") {
+		p.out.Denials = append(p.out.Denials, Denial{Tool: "thought", Input: cutText(doc.Thought, 300)})
+	}
+	return p.out
+}
+
+func (p *grokParser) Line(line []byte) bool {
+	p.buf.Write(line)
+	p.buf.WriteByte('\n')
+	return len(strings.TrimSpace(string(line))) > 0
+}
+
+func cutText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}

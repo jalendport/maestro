@@ -47,6 +47,7 @@ type Launch struct {
 	Env             []string
 	ClaudeAuto      bool
 	InSolo          bool
+	WallLimit       time.Duration // agy takes a print timeout
 }
 
 // Command is the built process plus the facts the ledger records.

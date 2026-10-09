@@ -44,6 +44,29 @@ func (a *app) rosterCmd() *cobra.Command {
 		},
 	})
 	c.AddCommand(&cobra.Command{
+		Use:   "solo",
+		Short: "Print Solo preset command lines to type in by hand",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			env, err := a.env(false)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stdout, "Solo → Settings → Agents. One preset per Harness; Maestro passes model, effort, and permission flags per launch in extra_args.")
+			fmt.Fprintln(os.Stdout)
+			for _, name := range env.Reg.Names() {
+				h, _ := env.Reg.Get(name)
+				id := env.Disc.Harness[name].SoloTool
+				known := "not found in Solo"
+				if id != 0 {
+					known = fmt.Sprintf("agent tool id %d", id)
+				}
+				toolType := map[string]string{"claude": "claude", "codex": "codex", "agy": "antigravity", "grok": "generic"}[name]
+				fmt.Fprintf(os.Stdout, "  %-6s  Name: %s   Command: %s   Tool type: %s   Default arguments: (none)   — %s\n", name, strings.ToUpper(name[:1])+name[1:], h.Bin(), toolType, known)
+			}
+			return nil
+		},
+	})
+	c.AddCommand(&cobra.Command{
 		Use:   "prices",
 		Short: "Show the embedded price table",
 		RunE: func(_ *cobra.Command, _ []string) error {

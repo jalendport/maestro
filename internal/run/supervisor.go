@@ -579,6 +579,10 @@ func (sup *Supervisor) end(state string) error {
 	summary := fmt.Sprintf("Run %s %s: %d done, %d blocked, %d failed", s.Run, state, done, blocked, failed)
 	ui.Eventf(state, "%s  → %s", summary, filepath.Join(s.Folder, FileReport))
 	notify(summary)
+	if sup.Env.Solo != nil {
+		rel, _ := filepath.Rel(s.Project, filepath.Join(s.Folder, FileReport))
+		sup.Env.Solo.Wake(fmt.Sprintf("%s. Read %s", summary, rel))
+	}
 	return nil
 }
 

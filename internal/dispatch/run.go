@@ -36,6 +36,7 @@ type Env struct {
 	Project *config.Project
 	Root    string
 	Budget  *budget.File
+	Solo    *SoloLink // nil outside Solo
 }
 
 // NewRouter builds the Router over this Env.
@@ -253,11 +254,18 @@ func Execute(env *Env, t *Task) (*Record, error) {
 	if first > 1 {
 		retry = &brief.Retry{Attempt: first, Reason: "earlier attempt failed"}
 	}
+	if !t.Council {
+		env.Solo.TodoFor(t, b)
+	}
 	for attempt := first; attempt <= t.MaxAttempt; attempt++ {
 		rec = runOnce(env, t, b, attempt, retry)
 		if err := ledger.Append(rec); err != nil {
 			ui.Warnf("ledger: %v", err)
 		}
+		if !t.Council {
+			env.Solo.ReportComment(t, rec)
+		}
+		env.Solo.CloseTab(env, rec)
 		wait, again := retryWait(rec.Outcome.FailureClass)
 		if !again || attempt == t.MaxAttempt {
 			break
@@ -336,7 +344,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	launch := harness.Launch{
 		Model: t.Route.Model, Effort: t.Route.Effort, Access: t.Access, Root: t.Project, Dirs: t.Dirs,
 		AllowedCommands: allChecks, AllowCommit: t.Commit, RunFolder: t.Folder, ReportPath: reportPath,
-		Pointer: brief.Pointer(briefRel), ClaudeAuto: t.ClaudeAuto, InSolo: t.InSolo,
+		Pointer: brief.Pointer(briefRel), ClaudeAuto: t.ClaudeAuto, InSolo: t.InSolo, WallLimit: wallOf(t.WallLimit),
 		Env: harness.Env(env.Roster.StripEnv(t.Route.Harness), map[string]string{
 			"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
 			"GROK_CLAUDE_HOOKS_ENABLED":        "false",
@@ -371,6 +379,12 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		_ = snap.SaveTo(filepath.Join(t.Folder, FileBaseline))
 	}
 	rec.Verification.StartCommit = snap.Commit
+
+	// In Solo, Claude, Grok, and agy Lanes are interactive tabs; Codex stays
+	// one-shot until its TUI in Solo is re-verified; Council Seats are always one-shot.
+	if env.Solo != nil && !t.Council && h.Name() != "codex" {
+		return runTab(env, t, h, command, launch, rec, reportPath, allChecks, b)
+	}
 
 	// Launch.
 	cmd := command.Cmd
@@ -597,6 +611,15 @@ loop:
 		// A Seat ends with POSITION, not STATUS; a position line is a shaped Report.
 		report.Status = brief.StatusDone
 	}
+	return judge(env, t, rec, report, allChecks, b)
+}
+
+// judge applies the Report status, the scope guard, the checks, and the gate.
+func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []string, b *brief.Brief) *Record {
+	snap, err := verify.LoadSnapshot(filepath.Join(t.Folder, FileBaseline))
+	if err != nil {
+		snap = verify.Snapshot{Commit: rec.Verification.StartCommit}
+	}
 	rec.Outcome.Status = report.Status
 	rec.Permission.Blocked = report.Blocked
 	switch report.Status {
@@ -796,4 +819,49 @@ func priced(env *Env, modelRan, requested string, tk harness.Tokens) *float64 {
 		cost = n(tk.Input)*p.Input/1e6 + n(tk.Output)*p.Output/1e6
 	}
 	return &cost
+}
+
+func wallOf(s string) time.Duration {
+	d, _ := time.ParseDuration(s)
+	return d
+}
+
+// runTab is runOnce's tail for a Solo tab Lane.
+func runTab(env *Env, t *Task, h harness.Harness, command *harness.Command, launch harness.Launch, rec *Record, reportPath string, allChecks []string, b *brief.Brief) *Record {
+	idle, _ := time.ParseDuration(t.IdleLimit)
+	wall, _ := time.ParseDuration(t.WallLimit)
+	ui.Eventf("dispatch", "task %s  %s %s %s  %s  tab  wall %s  → %s", t.Task, h.Name(), t.Route.Model, t.Route.Effort, t.Access, t.WallLimit, relOrAbs(t.Project, t.Folder))
+	out, timer, err := env.Solo.TabLane(env, t, h, command, launch.Pointer, rec, idle, wall)
+	if err != nil {
+		rec.Outcome.FailureClass = FailLane
+		rec.Outcome.Outcome = OutcomeFailed
+		rec.Outcome.ErrorText = cut(err.Error(), 500)
+		finish(rec)
+		ui.Eventf("failed", "task %s  %s: %s", t.Task, FailLane, firstLine(err.Error()))
+		return rec
+	}
+	switch timer {
+	case "cancelled":
+		rec.Outcome.Outcome = OutcomeCancelled
+		finish(rec)
+		return rec
+	case "idle", "wall":
+		rec.Outcome.Timer = timer
+		rec.Outcome.FailureClass = FailStall
+		rec.Outcome.Outcome = OutcomeTimedOut
+		finish(rec)
+		ui.Eventf("stall", "task %s  %s limit passed in the tab", t.Task, timer)
+		return rec
+	}
+	rec.Outcome.ModelRan = t.Route.Model
+	report, found := rec.Report()
+	if !found {
+		rec.Outcome.FailureClass = FailTransient
+		rec.Outcome.Outcome = OutcomeFailed
+		rec.Outcome.ErrorText = "the tab ended with no report"
+		finish(rec)
+		return rec
+	}
+	_ = out
+	return judge(env, t, rec, report, allChecks, b)
 }

@@ -450,3 +450,53 @@ func (a *app) waitRun(folder string) error {
 		time.Sleep(2 * time.Second)
 	}
 }
+
+func (a *app) answerCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "answer <task> allow|deny",
+		Short: "Answer a relayed permission prompt",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if args[1] != "allow" && args[1] != "deny" {
+				return fmt.Errorf("the answer is allow or deny")
+			}
+			cwd, _ := os.Getwd()
+			root := config.FindProjectRoot(cwd)
+			folder, ok := dispatch.FindTask(root, args[0])
+			if !ok {
+				return fmt.Errorf("no task %q under %s", args[0], root)
+			}
+			if err := os.WriteFile(filepath.Join(folder, "answer-"+args[1]), nil, 0o644); err != nil {
+				return err
+			}
+			ui.Outf("task %s: %s", args[0], args[1])
+			return nil
+		},
+	}
+}
+
+func (a *app) tellCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "tell <task> <text>",
+		Short: "Send a note into a running Lane (Solo tab only)",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			env, err := a.env(false)
+			if err != nil {
+				return err
+			}
+			if env.Solo == nil {
+				return fmt.Errorf("tell works only inside Solo")
+			}
+			folder, ok := dispatch.FindTask(env.Root, args[0])
+			if !ok {
+				return fmt.Errorf("no task %q under %s", args[0], env.Root)
+			}
+			rec, err := dispatch.LoadRecord(folder)
+			if err != nil || rec.SoloProcess == 0 || rec.State != "running" {
+				return fmt.Errorf("task %s has no running Solo tab", args[0])
+			}
+			return env.Solo.Client.SendInput(rec.SoloProcess, strings.Join(args[1:], " ")+"\n")
+		},
+	}
+}

@@ -49,3 +49,17 @@ func TestClassify(t *testing.T) {
 		t.Fatal("unknown must be transient")
 	}
 }
+
+func TestGrokParserFixture(t *testing.T) {
+	o := feed(t, (&Grok{}).NewParser(), "testdata/grok-out.json")
+	if o.SessionID == "" || o.Text != "OK" || o.ModelRan != "grok-4.7-build" || o.IsError || o.CostUSD == nil {
+		t.Fatalf("%+v", o)
+	}
+}
+
+func TestAgyParserFixture(t *testing.T) {
+	o := feed(t, (&Agy{}).NewParser(), "testdata/agy-out.json")
+	if o.SessionID == "" || strings.TrimSpace(o.Text) != "OK" || o.IsError || o.Tokens.Input == nil {
+		t.Fatalf("%+v", o)
+	}
+}

@@ -59,6 +59,8 @@ type Task struct {
 	MaxAttempt int            `json:"max_attempts"`
 	// Council marks a Seat Dispatch: the Report ends with POSITION, not STATUS.
 	Council bool `json:"council,omitempty"`
+	// Todo is the Solo todo of this Task, 0 outside Solo.
+	Todo int `json:"todo,omitempty"`
 	// FirstAttempt lets a re-Route inside a Run keep the attempt count.
 	FirstAttempt int `json:"first_attempt,omitempty"`
 	// Cancel, when closed, stops the running Lane (never serialized).
@@ -79,6 +81,8 @@ type Record struct {
 	DurationS float64   `json:"duration_s"`
 	Path      string    `json:"path"`
 	SessionID string    `json:"session_id,omitempty"`
+	// SoloProcess is the Lane's tab when it ran as one.
+	SoloProcess int `json:"solo_process,omitempty"`
 
 	TaskInfo     TaskInfo      `json:"task_info"`
 	Route        *router.Route `json:"route"`

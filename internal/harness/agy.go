@@ -1,13 +1,17 @@
 package harness
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 )
 
-// Agy is the Antigravity CLI adapter. Day one: catalog and version only.
+// Agy is the Antigravity CLI adapter: read only (its edit needs the bypass
+// flag Maestro never passes). Print mode auto-denies every command not in its
+// own settings allowlist, which makes its read shape enforced.
 type Agy struct{ bin string }
 
 func (a *Agy) Name() string { return "agy" }
@@ -54,22 +58,88 @@ func (a *Agy) Enforcement(access string) string {
 	return NoShape
 }
 
-func (a *Agy) Build(l Launch) (*Command, error) { return nil, ErrNotReady }
+// Build: the Pointer is the positional prompt; agy's effort rides in the
+// model name (gemini-3.8-flash-high), so the effort is folded into the model.
+func (a *Agy) Build(l Launch) (*Command, error) {
+	if a.bin == "" {
+		return nil, fmt.Errorf("agy is not installed")
+	}
+	if l.Access != "read" {
+		return nil, fmt.Errorf("agy has no %q shape", l.Access)
+	}
+	model := l.Model
+	if l.Effort != "" && !strings.HasSuffix(model, "-"+l.Effort) {
+		model += "-" + l.Effort
+	}
+	timeout := "0s"
+	if l.WallLimit > 0 {
+		timeout = l.WallLimit.String()
+	}
+	args := []string{"-p", l.Pointer, "--output-format", "json", "--model", model, "--print-timeout", timeout, "--disable-slash-commands"}
+	flags := []string{"--print-timeout", timeout}
+	cmd := exec.Command(a.bin, args...)
+	cmd.Dir = l.Root
+	cmd.Env = l.Env
+	return &Command{Cmd: cmd, Flags: flags, PromptStdin: false, ReportByText: true}, nil
+}
 
-func (a *Agy) NewParser() Parser { return &textParser{out: &Outcome{}} }
+func (a *Agy) NewParser() Parser { return &agyParser{out: &Outcome{}} }
 
-// textParser keeps the raw text for adapters without a JSON stream yet.
-type textParser struct {
+type agyParser struct {
 	out *Outcome
 	buf strings.Builder
 }
 
-func (p *textParser) Outcome() *Outcome { p.out.Text = p.buf.String(); return p.out }
+func (p *agyParser) Outcome() *Outcome {
+	text := strings.TrimSpace(p.buf.String())
+	if text == "" {
+		return p.out
+	}
+	var doc struct {
+		ConversationID string `json:"conversation_id"`
+		Status         string `json:"status"`
+		Response       string `json:"response"`
+		Error          string `json:"error"`
+		Usage          struct {
+			Input     *int `json:"input_tokens"`
+			Output    *int `json:"output_tokens"`
+			Thinking  *int `json:"thinking_tokens"`
+			CacheRead *int `json:"cache_read_tokens"`
+		} `json:"usage"`
+		Denied []json.RawMessage `json:"denied_actions"`
+	}
+	if err := json.Unmarshal([]byte(text), &doc); err != nil {
+		p.out.IsError = true
+		p.out.ErrorText = cutText(text, 500)
+		p.out.Signals = append(p.out.Signals, classifyText("agy", text))
+		return p.out
+	}
+	p.out.SessionID = doc.ConversationID
+	p.out.Text = doc.Response
+	p.out.Tokens = Tokens{Input: doc.Usage.Input, CachedInput: doc.Usage.CacheRead, Output: doc.Usage.Output, Reasoning: doc.Usage.Thinking}
+	for _, d := range doc.Denied {
+		p.out.Denials = append(p.out.Denials, Denial{Tool: "agy", Input: cutText(string(d), 300)})
+	}
+	// Denials with an empty response = a failed Dispatch, never a success.
+	if len(doc.Denied) > 0 && strings.TrimSpace(doc.Response) == "" {
+		p.out.IsError = true
+		p.out.ErrorText = "agy denied an action and returned no response"
+		p.out.Signals = append(p.out.Signals, Signal{Class: "lane", Text: p.out.ErrorText})
+	}
+	if doc.Status != "" && doc.Status != "SUCCESS" {
+		p.out.IsError = true
+		if p.out.ErrorText == "" {
+			p.out.ErrorText = doc.Status + " " + doc.Error
+		}
+		p.out.Signals = append(p.out.Signals, classifyText("agy", doc.Status+" "+doc.Error))
+	}
+	return p.out
+}
 
-func (p *textParser) Line(line []byte) bool {
+func (p *agyParser) Line(line []byte) bool {
 	p.buf.Write(line)
 	p.buf.WriteByte('\n')
 	return len(strings.TrimSpace(string(line))) > 0
 }
 
-var _ = fmt.Sprintf
+var _ = time.Second
