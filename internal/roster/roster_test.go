@@ -1,10 +1,70 @@
 package roster
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/jalendport/maestro/internal/config"
 )
+
+func TestStripEnvBilling(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		user    string
+		harness string
+		want    []string
+	}{
+		{
+			name:    "subscription Claude",
+			harness: "claude",
+			want:    []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"},
+		},
+		{
+			name:    "subscription Codex",
+			harness: "codex",
+			want:    []string{"OPENAI_API_KEY"},
+		},
+		{
+			name: "metered Claude",
+			user: `[accounts.claude-api]
+harness = "claude"
+billing = "metered"
+`,
+			harness: "claude",
+			want:    []string{"CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"},
+		},
+		{
+			name: "metered Codex with mixed entries",
+			user: `[accounts.codex-api]
+harness = "codex"
+billing = "metered"
+[harness.codex]
+strip_env = ["OPENAI_API_KEY", "CLAUDE_CODE_EFFORT_LEVEL", "CUSTOM_API_KEY_SUFFIX", "CUSTOM_AUTH_TOKEN_SUFFIX", "GROK_SANDBOX"]
+`,
+			harness: "codex",
+			want:    []string{"CLAUDE_CODE_EFFORT_LEVEL", "GROK_SANDBOX"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d, _, err := config.ParseFile(Defaults)
+			if err != nil {
+				t.Fatal(err)
+			}
+			u, _, err := config.ParseFile(tt.user)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := Merge(d, u)
+			names := slices.Clone(r.Harness[tt.harness].StripEnv)
+			if got := r.StripEnv(tt.harness); !slices.Equal(got, tt.want) {
+				t.Fatalf("StripEnv(%q) = %v, want %v", tt.harness, got, tt.want)
+			}
+			if !slices.Equal(r.Harness[tt.harness].StripEnv, names) {
+				t.Fatal("StripEnv changed the Harness configuration")
+			}
+		})
+	}
+}
 
 func TestDefaultsParseAndBind(t *testing.T) {
 	d, unknown, err := config.ParseFile(Defaults)

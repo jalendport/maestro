@@ -591,6 +591,20 @@ func (r *Roster) Threshold(key string) float64 {
 }
 
 // StripEnv returns the environment names a Harness's Dispatches drop.
+// Metered Accounts keep API credentials; other entries are always dropped.
 func (r *Roster) StripEnv(harness string) []string {
-	return r.Harness[harness].StripEnv
+	names := r.Harness[harness].StripEnv
+	for _, account := range r.Accounts {
+		if account.Harness != harness || account.Billing != "metered" {
+			continue
+		}
+		var out []string
+		for _, name := range names {
+			if !strings.Contains(name, "API_KEY") && !strings.Contains(name, "AUTH_TOKEN") {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
+	return names
 }
