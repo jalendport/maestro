@@ -167,6 +167,8 @@ Exit codes: `0` ok, `1` failed, `2` needs the orchestrator (a held breakdown, a 
 
 Maestro works with no configuration: the roster, the rules table, the prices, and the thresholds are compiled in. Two optional files refine it.
 
+Every key, its type, and its default are in [docs/configuration.md](docs/configuration.md).
+
 `~/.maestro/config.toml` holds your accounts, harness overrides, and deltas on families and chains. Maestro never rewrites it.
 
 ```toml
