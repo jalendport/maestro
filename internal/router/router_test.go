@@ -178,6 +178,7 @@ func TestMeteredCapBindsRouterViewAndRequestedRoute(t *testing.T) {
 			rt := testRouter(t)
 			rt.Roster.Budget.WarnAt = .8
 			account := rt.Roster.Accounts["agy"]
+			account.Billing = "metered"
 			account.Cap = &config.Cap{USD: 20, Period: "30d"}
 			rt.Roster.Accounts["agy"] = account
 			for _, row := range []map[string]any{

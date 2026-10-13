@@ -35,11 +35,7 @@ func TestDefaultsParseAndBind(t *testing.T) {
 	}
 	for _, name := range []string{"claude", "codex", "grok", "agy"} {
 		account := r.Accounts[name]
-		billing := "subscription"
-		if name == "agy" {
-			billing = "metered"
-		}
-		if account.Harness != name || account.Billing != billing || account.PlanPrice != 0 || account.Reserve != 0 || account.Cap != nil {
+		if account.Harness != name || account.Billing != "subscription" || account.PlanPrice != 0 || account.Reserve != 0 || account.Cap != nil {
 			t.Fatalf("account %s is not neutral: %+v", name, account)
 		}
 	}
@@ -121,8 +117,8 @@ plan_price = 10
 		t.Fatalf("lost defaults: %+v", claude)
 	}
 	agy := r.Accounts["agy"]
-	if agy.PlanPrice != 10 || agy.Billing != "metered" || agy.Cap != nil {
-		t.Fatalf("lost metered defaults: %+v", agy)
+	if agy.PlanPrice != 10 || agy.Billing != "subscription" || agy.Cap != nil {
+		t.Fatalf("lost defaults: %+v", agy)
 	}
 }
 

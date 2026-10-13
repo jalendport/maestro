@@ -24,7 +24,7 @@ block_at      = 0.90
 
 [accounts.agy]
 harness       = "agy"
-billing       = "metered"
+billing       = "subscription"
 block_at      = 0.90
 
 [harness.claude]

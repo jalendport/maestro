@@ -38,7 +38,7 @@ Default entries:
 | `claude` | `"claude"` | `"subscription"` | `0.90` |
 | `codex` | `"codex"` | `"subscription"` | `0.90` |
 | `grok` | `"grok"` | `"subscription"` | `0.90` |
-| `agy` | `"agy"` | `"metered"` | `0.90` |
+| `agy` | `"agy"` | `"subscription"` | `0.90` |
 
 ### [harness]
 
