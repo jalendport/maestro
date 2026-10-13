@@ -274,7 +274,7 @@ These keys set how many Lanes run at the same time.
 
 ## .agents/maestro.toml
 
-This file is in the root of a project. It can only tighten what the user file allows, and it applies to that project only. A missing file is empty.
+This file is in the root of a project, and it applies to that project only. A missing file is empty. The keys `forbid`, `checks`, `router`, `redact`, and `councils` tighten what the user file allows. The keys `allow`, `dirs`, and `claude_auto` widen it: they give edit Dispatches more permission rules, more writable directories, or the Claude Code auto permission mode.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -283,7 +283,7 @@ This file is in the root of a project. It can only tighten what the user file al
 | `allow` | array of strings | none | Lists extra permission rules that Maestro gives to every edit Dispatch in this project. |
 | `router` | string | none | When it is `rules`, Maestro never calls Jev for this project, so no text of the project leaves the machine. |
 | `redact` | array of strings | none | Lists strings that Maestro replaces before it sends text to Jev. |
-| `councils` | string | none | When it is `always`, every Run in this project ends with a Council. |
+| `councils` | string | none | When it is `always`, every Run in this project ends with a Council, except a Run in which every Task is read-only and no file changed; that Run ends without a Council. |
 | `claude_auto` | boolean | `false` | Lets Maestro use the Claude Code auto permission mode for Dispatches in this project. |
 | `dirs` | array of strings | none | Lists extra writable directories for every edit Dispatch in this project, for example a toolchain cache; a leading `~` is the home directory, and a Brief's `dirs:` adds to the list. The key exists because a Harness sandbox can deny a build cache outside the project, which fails every check until the cache folder is writable. |
 

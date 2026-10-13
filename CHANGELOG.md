@@ -47,6 +47,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fixed a finished Lane that was reported as a stall
 - Fixed stream lines over 64 MB
 - Fixed the limit probe that could hang
+- Fixed a Run that hung behind a blocked Task; a Run with a failed or blocked Task now ends paused, and a Plan with a dependency cycle is rejected
+- Fixed the plan Council that stopped when `maestro run` exited, and the end-of-run Council that delayed the end of a Run
+- Fixed `maestro resume --brief` and `maestro run --level` so the new values reach the Task
+- Fixed Run and Task ids so two starts never share a folder, and a reused short id finds the newest Run
+- Fixed committed work that escaped the `touch:` guard and the gate
+- Fixed `maestro cancel`, `wait`, and `clean` for a standalone Dispatch, which could hang or remove a live folder
+- Fixed lost last lines of Lane output, quota messages in a Solo tab, and check commands that outlived their time limit
+- Fixed repeated-error detection so it names the failed check
+- Fixed Jev picks that broke the floor, the ceiling, or the edit rule, and the Frontier Tier that no Route could reach
+- Fixed fan-out efforts such as `ultra` that a Route could pick; they now run only when a Brief names the Lane and effort
+- Fixed `[aliases]` overrides that did not choose the launched model
+- Fixed the Grok read shape to be enforced by the harness, so Grok takes automatic read Routes and Council Seats again
+- Fixed the Jev key `TYPESAFE_API_KEY` so it is never passed to a Lane
+- Fixed unknown keys in the project file, a Brief, and a Plan, which now give a warning or an error that names the key
+- Fixed `budget.json` and the ledger so several Maestro processes no longer overwrite each other
+- Fixed budget blocks: an explicit block wins over a missing reading, and a Reserve never weakens the block point
+- Fixed `maestro budget reset codex` so it ends within its deadline
+- Fixed `maestro adapter install` so it keeps other hook handlers in the same entry
+- Fixed the project root so it is never the home directory
+- Fixed `--json` so every verb prints one JSON object
+- Fixed a Council with `--challenge` that stopped after round 1, a blocked Seat that counted as an answer, and a Council that lost its `--task` context
+- Fixed the help text and the example Plan to match the verbs
+- Fixed `install.sh` so it verifies the archive against `checksums.txt` and names `maestro adapter install`
 
 ## 1.0.0 - 2026-10-13
 

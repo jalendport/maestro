@@ -40,13 +40,32 @@ if ! command -v tar >/dev/null 2>&1; then
 	exit 1
 fi
 
+if command -v shasum >/dev/null 2>&1; then
+	checksum_command="shasum -a 256"
+elif command -v sha256sum >/dev/null 2>&1; then
+	checksum_command="sha256sum"
+else
+	echo "shasum or sha256sum is required to verify the download." >&2
+	exit 1
+fi
+
 archive="maestro_${os}_${arch}.tar.gz"
-download_url="https://github.com/${repository}/releases/latest/download/${archive}"
+release_url="https://github.com/${repository}/releases/latest/download"
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT HUP INT TERM
 
 echo "Downloading ${archive} from the latest maestro release..."
-curl -fsSL "$download_url" -o "$temporary_directory/$archive"
+curl -fsSL "${release_url}/${archive}" -o "$temporary_directory/$archive"
+curl -fsSL "${release_url}/checksums.txt" -o "$temporary_directory/checksums.txt"
+
+expected="$(grep " ${archive}\$" "$temporary_directory/checksums.txt" | cut -d ' ' -f 1)"
+actual="$($checksum_command "$temporary_directory/$archive" | cut -d ' ' -f 1)"
+if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+	echo "Checksum mismatch for ${archive}; nothing was installed." >&2
+	exit 1
+fi
+echo "Verified the checksum of ${archive}."
+
 tar -xzf "$temporary_directory/$archive" -C "$temporary_directory"
 
 if { [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; } || { [ ! -e /usr/local/bin ] && [ -w /usr/local ]; }; then
@@ -68,4 +87,4 @@ if [ "$install_directory" = "${HOME}/.local/bin" ]; then
 	esac
 fi
 
-echo "Next: maestro doctor, then maestro adapter for the per-harness install lines."
+echo "Next: maestro doctor, then maestro adapter install."

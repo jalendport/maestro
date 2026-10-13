@@ -15,7 +15,7 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Route** — the decision "this Task goes to this Lane".
 - **Router** — the part of Maestro that makes Routes: Jev, with a rules fallback.
 - **Dispatch** — starting a Lane on a Task and collecting its result.
-- **Council** — several Lanes answering the same question in parallel, then synthesized.
+- **Council** — several Lanes answering the same question in parallel. The Orchestrator synthesizes; Maestro returns a Merge.
 - **Adapter** — the small per-Harness piece that connects an Orchestrator to Maestro: one shared skill file plus one hook file. Maestro itself works without any Adapter. `maestro adapter install` writes it.
 - **Run** — one invocation of Maestro on a plan: its Tasks, their Routes and Dispatches, the checks, and the report back to the Orchestrator.
 - **Brief** — the text a Lane receives for one Task: the goal, the definition of done, the files, the checks, and the permission mode.
@@ -30,7 +30,7 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Window** — one usage period a vendor counts for an Account, such as Claude's five-hour and seven-day windows or Codex's weekly window.
 - **Reading** — one stored Budget value for a window, with the time it was read and where it came from.
 - **Block point** — the used share of a window at which a Lane leaves the Route list.
-- **Reserve** — the part of the Claude weekly window that automatic Dispatches may not use. It keeps room for the Orchestrator.
+- **Reserve** — the part of an Account's weekly window that automatic Dispatches may not use. It applies to any Account and keeps room for the Orchestrator.
 - **Probe** — a cheap call Maestro makes only to read a Budget.
 - **Harvest** — reading a Budget from the output of a Dispatch that ran anyway.
 - **Family** — one Harness × model pair, the unit the Router chooses between. A Lane is a Family plus one effort. Written `<harness>-<short model>`, for example `codex-sol`.

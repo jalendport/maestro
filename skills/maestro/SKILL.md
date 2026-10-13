@@ -21,7 +21,7 @@ You are the Orchestrator. You plan and judge; Maestro owns the work after the th
 
 ## Brief file
 
-`maestro help brief` prints the format. Required: `title`, `## Goal`, `## Done`. Write the Goal as definitions, not commands; write the Done as what must be true when the Lane stops. The `touch:` list includes every path the Done names, or the Lane stops blocked. Optional: `category` (implement, fix, refactor, spec, research, review, prose, triage, second opinion, large input), `level` (none, some, significant, expert), `access` (read, edit), `touch:` (scope guard globs), `checks:`, `commit: true`, `lane:`, `wall_limit:`, `facts:`, `## Files`.
+`maestro help brief` prints the format. Required: `title`, `## Goal`, `## Done`. Write the Goal as definitions, not commands; write the Done as what must be true when the Lane stops. The `touch:` list includes every path the Done names, or the Lane stops blocked. Optional: `category` (implement, fix, refactor, spec, research, review, prose, triage, second opinion, large input), `level` (none, some, significant, expert), `access` (read, edit), `touch:` (scope guard globs), `dirs:` (extra writable directories), `checks:`, `commit: true`, `lane:` (also `floor:` and `ceiling:`), `wall_limit:`, `facts:`, `todo:` (adopt an existing Solo todo), `## Files`.
 
 ## Plan file
 

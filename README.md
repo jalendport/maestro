@@ -4,12 +4,12 @@
 
 Maestro is a local command-line tool that owns agent work after the thinking is done. An orchestrating session writes a brief or a plan; Maestro routes each task to a lane that is strong enough for it across Claude Code, Codex, Grok, and Antigravity, dispatches it, checks the result, and runs councils for second opinions, with one ledger of what ran and why.
 
-Antigravity takes explicit requests only. Its read Access remains `best-effort`; it does not take automatic Routes or Council Seats.
+Claude Code, Codex, and Grok take automatic Routes and Council Seats, because each holds read Access with its own sandbox or allowlist. Antigravity takes explicit requests only. Its read Access remains `best-effort`, and it has no edit shape; it does not take automatic Routes or Council Seats.
 
 ## Features
 
 - **Routing with a reason** — every task goes to one harness, model, and effort, picked by [Jev](https://typesafe.ai) with a deterministic rules table as the fallback, and every route prints one reason line
-- **Subscriptions first** — day-to-day work spreads across the subscriptions you already pay for; token-billed lanes take only read-only work, and the orchestrator's own model is never spent automatically
+- **Subscriptions first** — day-to-day work spreads across the subscriptions you already pay for; token-billed lanes take only read-only work, and the orchestrator's own model is never spent automatically once you set `[router] orchestrator = "<family>"` in `~/.maestro/config.toml`
 - **Budgets that bind** — usage windows are harvested from every dispatch and probed when stale, with a block point, a warning, and a reserve for the orchestrator
 - **A permission contract** — a lane gets `read` or `edit` access through each harness's own sandbox or allowlist; Maestro never passes a bypass flag
 - **Checks and a gate** — the project's verification commands run after every edit, a `touch:` list guards the scope, and Jev judges the diff against the brief before a task closes
@@ -170,6 +170,8 @@ maestro wait r-0012                          # the run report
 maestro resume r-0012 --task 4 --lane claude-opus:high   # or --brief <file>, or --skip
 ```
 
+A run holds for approval, with exit code 2, when any one of these is true: the plan has more than four tasks, a task has a medium or fallback route, the level you gave a task is two levels from the router's, the router asks the orchestrator a question, or the router signals a council. A held run starts a plan council over the plan file.
+
 Ask several lanes one question:
 
 ```sh
@@ -215,10 +217,11 @@ enabled = false
 implement = ["codex-sol", "claude-opus"]
 
 [router]
-backend = "jev"               # or rules
+backend      = "jev"           # or rules
+orchestrator = "claude-opus"   # the family your orchestrator runs on; Maestro never spends it automatically
 ```
 
-`.agents/maestro.toml` in a project tightens things for that repository only:
+`.agents/maestro.toml` in a project changes things for that repository only; `forbid`, `checks`, `router`, `redact`, and `councils` tighten, and `allow`, `dirs`, and `claude_auto` widen:
 
 ```toml
 checks   = ["go build ./...", "go vet ./...", "go test ./..."]   # run after every edit
