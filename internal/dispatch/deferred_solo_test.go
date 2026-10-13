@@ -148,7 +148,6 @@ func TestWakeUsesOnlyFixedFields(t *testing.T) {
 	want := []string{
 		`Maestro relay: id="abcd" title="Brief title" harness="claude". Run: maestro answer abcd allow|deny`,
 		`Maestro run end: id="r-test" title="Run title" harness="". Run: maestro wait r-test`,
-		`Maestro council end: id="c-test" title="Council title" harness="codex". Run: maestro wait c-test`,
 	}
 	if len(bodies) != len(want) {
 		t.Fatalf("wake bodies: %q", bodies)

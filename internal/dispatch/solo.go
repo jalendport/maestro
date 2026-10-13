@@ -125,7 +125,7 @@ func (l *SoloLink) Wake(kind, id, title, harnessName string) {
 	switch kind {
 	case "relay":
 		verb = "maestro answer " + id + " allow|deny"
-	case "run end", "council end":
+	case "run end":
 	default:
 		return
 	}
@@ -137,7 +137,7 @@ func (l *SoloLink) Wake(kind, id, title, harnessName string) {
 
 // TabLane runs a Lane as an interactive Solo tab: spawn the preset with the
 // Lane flags and Pointer, poll for result.md, and relay prompts. It returns the Outcome the parser would have.
-func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harness.Command, rec *Record, idle, wall time.Duration) (*harness.Outcome, string, error) {
+func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harness.Command, rec *Record, idle, wall time.Duration) (out *harness.Outcome, timer string, err error) {
 	toolID := l.toolID(env, h.Name())
 	if toolID == 0 {
 		return nil, "", fmt.Errorf("no Solo agent tool for %s (set [harness.%s] solo_tool)", h.Name(), h.Name())
@@ -152,7 +152,16 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 	rec.SoloProcess = pid
 	rec.Events = append(rec.Events, Event{At: launched, Kind: "tab", Text: fmt.Sprintf("solo process %d", pid)})
 	_ = rec.Save()
-	defer l.saveTabLog(pid, t.Folder)
+	defer func() {
+		l.saveTabLog(pid, t.Folder)
+		if out == nil {
+			out = &harness.Outcome{}
+		}
+		if raw, err := os.ReadFile(filepath.Join(t.Folder, "tab.log")); err == nil {
+			out.Text = string(raw)
+			out.Signals = append(out.Signals, harness.ClassifyText(h.Name(), out.Text))
+		}
+	}()
 	start := time.Now()
 	lastOutput := time.Now()
 	lastTail := ""
@@ -243,11 +252,7 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 	default:
 	}
 	stop("report ready or tab ended")
-	out := &harness.Outcome{}
-	if raw, err := os.ReadFile(filepath.Join(t.Folder, "tab.log")); err == nil {
-		out.Text = string(raw)
-	}
-	return out, "", nil
+	return &harness.Outcome{}, "", nil
 }
 
 // CloseTab applies close_tabs after the Dispatch is judged.

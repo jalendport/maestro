@@ -1,6 +1,8 @@
 package budget
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -101,5 +103,22 @@ func TestFindCodexRolloutUsesLaunchTimeAndWorkspace(t *testing.T) {
 	}
 	if _, err := FindCodexRollout(start, "/missing"); err == nil {
 		t.Fatal("accepted a different workspace")
+	}
+}
+
+func TestClaudeProbeHonoursDeadline(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 5\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := ProbeClaude(ctx, bin, nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("deadline took %s", elapsed)
 	}
 }

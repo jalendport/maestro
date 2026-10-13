@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -28,6 +29,9 @@ func RunChecks(root string, cmds []string, timeout time.Duration) []CheckResult 
 		start := time.Now()
 		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", c)
 		cmd.Dir = root
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.WaitDelay = time.Second
+		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 		var buf bytes.Buffer
 		cmd.Stdout = &buf
 		cmd.Stderr = &buf

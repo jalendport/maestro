@@ -59,22 +59,34 @@ func Take(root string) (Snapshot, error) {
 	return s, nil
 }
 
-// Changed lists repo-relative paths that the Lane touched: paths dirty now
-// that were clean at the start, and paths dirty at the start whose
-// modification time moved after it.
+// Changed includes dirty paths touched during the attempt and committed changes.
 func (s Snapshot) Changed(root string) []string {
 	seen := map[string]bool{}
-	var out []string
 	paths, _ := statusPaths(root)
+	for p := range s.Dirty {
+		paths = append(paths, p)
+	}
 	for _, p := range paths {
 		at, was := s.Dirty[p]
-		if was && !mtime(filepath.Join(root, p)).After(at) {
-			continue
-		}
-		if !seen[p] {
+		if !was || !mtime(filepath.Join(root, p)).Equal(at) {
 			seen[p] = true
-			out = append(out, p)
 		}
+	}
+	args := []string{"diff", "--name-only", "--no-renames", "-z", s.Commit + "..HEAD", "--"}
+	if s.Commit == "" {
+		args = []string{"ls-tree", "-r", "--name-only", "-z", "HEAD"}
+	}
+	b, err := exec.Command("git", append([]string{"-C", root}, args...)...).Output()
+	if err == nil {
+		for _, p := range strings.Split(string(b), "\x00") {
+			if p != "" {
+				seen[p] = true
+			}
+		}
+	}
+	var out []string
+	for p := range seen {
+		out = append(out, p)
 	}
 	sort.Strings(out)
 	return out

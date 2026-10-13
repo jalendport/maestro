@@ -20,12 +20,9 @@ import (
 // ProbeClaude runs a one-word Haiku prompt and harvests its rate_limit_event.
 // It costs a few thousand cached tokens; it runs only when a reading is stale
 // and a Claude Lane is a candidate.
-func ProbeClaude(bin string, env []string) ([]harness.Window, error) {
-	return ProbeClaudeContext(context.Background(), bin, env)
-}
-
-// ProbeClaudeContext permits a caller to bound a Probe's lifetime.
-func ProbeClaudeContext(ctx context.Context, bin string, env []string) ([]harness.Window, error) {
+func ProbeClaude(ctx context.Context, bin string, env []string) ([]harness.Window, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 	if bin == "" {
 		return nil, fmt.Errorf("claude is not installed")
 	}

@@ -24,6 +24,9 @@ func Print(rec *Record, asJSON bool) int {
 	if status == "" {
 		status = rec.Outcome.FailureClass
 	}
+	if rec.Outcome.Outcome == OutcomeUnverified && rec.Outcome.ErrorText != "" {
+		status += " (" + rec.Outcome.ErrorText + ")"
+	}
 	lane := rec.Route.FamilyID
 	if rec.Route.Effort != "" {
 		lane += " " + rec.Route.Effort

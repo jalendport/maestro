@@ -84,9 +84,13 @@ func runGate(env *Env, t *Task, rec *Record, goal, done string, snap attemptBase
 func collectDiff(root, start string, changed []string) string {
 	var w strings.Builder
 	if start != "" && len(changed) > 0 {
-		args := append([]string{"-C", root, "diff", start, "--"}, changed...)
-		if b, err := exec.Command("git", args...).Output(); err == nil {
-			w.Write(b)
+		for _, rev := range [][]string{{start + "..HEAD"}, {"HEAD"}} {
+			args := append([]string{"-C", root, "diff"}, rev...)
+			args = append(args, "--")
+			args = append(args, changed...)
+			if b, err := exec.Command("git", args...).Output(); err == nil {
+				w.Write(b)
+			}
 		}
 	}
 	for _, p := range changed {
@@ -94,8 +98,8 @@ func collectDiff(root, start string, changed []string) string {
 			break
 		}
 		if start != "" {
-			if err := exec.Command("git", "-C", root, "cat-file", "-e", start+":"+p).Run(); err == nil {
-				continue // tracked at start: covered by git diff
+			if err := exec.Command("git", "-C", root, "cat-file", "-e", "HEAD:"+p).Run(); err == nil {
+				continue // tracked now: covered by git diff
 			}
 		}
 		b, err := os.ReadFile(filepath.Join(root, p))

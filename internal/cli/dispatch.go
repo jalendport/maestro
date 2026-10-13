@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/jalendport/maestro/internal/council"
@@ -149,6 +150,9 @@ func (a *app) superviseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			ctx, stop := context.WithCancel(context.Background())
+			defer stop()
+			t.Cancel = dispatch.WatchCancel(ctx, t.Folder)
 			rec, err := dispatch.Execute(env, t)
 			if err != nil {
 				return err

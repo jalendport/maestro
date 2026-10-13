@@ -64,14 +64,22 @@ func TestSoloTabHelper(t *testing.T) {
 			case "todo_create":
 				text = `{"todo_id":7}`
 			case "spawn_agent":
-				if err := os.WriteFile(os.Getenv("MAESTRO_TEST_REPORT"), []byte("## Answer\nPASS\n\n## Findings\n- none\n\n## Concerns\n- none\n\nPOSITION: confirmed\n"), 0o644); err != nil {
-					panic(err)
+				if os.Getenv("MAESTRO_TEST_TAB_LIMIT") == "" {
+					if err := os.WriteFile(os.Getenv("MAESTRO_TEST_REPORT"), []byte("## Answer\nPASS\n\n## Findings\n- none\n\n## Concerns\n- none\n\nPOSITION: confirmed\n"), 0o644); err != nil {
+						panic(err)
+					}
 				}
 				text = `{"process_id":42}`
 			case "get_process_status":
 				text = `{"status":"Exited","uptime_seconds":100}`
+				if os.Getenv("MAESTRO_TEST_TAB_LIMIT") != "" {
+					text = `{"status":"Exited","uptime_seconds":1}`
+				}
 			case "get_process_output":
 				text = `{"output":"Council Seat finished"}`
+				if os.Getenv("MAESTRO_TEST_TAB_LIMIT") != "" {
+					text = `{"output":"Quota exceeded"}`
+				}
 			}
 			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}}
 		}
@@ -176,5 +184,35 @@ func TestMissingSoloPresetFallsBackWithoutChangingEnv(t *testing.T) {
 	rec := runOnce(env, task, &brief.Brief{Title: "Read task"}, 1, nil)
 	if rec.SoloProcess != 0 || rec.Outcome.Outcome != OutcomeAnswered || !rec.Outcome.ReportByText || env.Solo != link {
 		t.Fatalf("one-shot fallback: %+v", rec)
+	}
+}
+
+func TestTabLimitBeforeEarlyExitIsClassified(t *testing.T) {
+	root, folder := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("MAESTRO_TEST_SOLO_HELPER", "1")
+	t.Setenv("MAESTRO_TEST_TAB_LIMIT", "1")
+	t.Setenv("MAESTRO_TEST_CALLS", filepath.Join(t.TempDir(), "calls"))
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MAESTRO_TEST_BINARY", bin)
+	helper := filepath.Join(t.TempDir(), "solo-helper")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nexec \"$MAESTRO_TEST_BINARY\" -test.run=TestSoloTabHelper\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MAESTRO_SOLO_MCP", helper)
+	client, err := solo.Connect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	r := &roster.Roster{Harness: map[string]config.Harness{"codex": {SoloTool: 9}}}
+	env := &Env{Root: root, Roster: r, Reg: harness.New(map[string]string{"codex": "/must-not-run"}), Solo: &SoloLink{Client: client, ProjectID: 1}}
+	task := &Task{Project: root, Folder: folder, Task: "abcd", Access: brief.AccessRead, Route: &router.Route{Harness: "codex"}, WallLimit: "1m", IdleLimit: "1m"}
+	rec := runOnce(env, task, &brief.Brief{}, 1, nil)
+	if rec.Outcome.FailureClass != FailLimit || rec.Outcome.ErrorText != "Quota exceeded" {
+		t.Fatalf("outcome: %+v", rec.Outcome)
 	}
 }

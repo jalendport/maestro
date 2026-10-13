@@ -19,13 +19,18 @@ import (
 
 func statusOutput(t *testing.T, args ...string) (string, int) {
 	t.Helper()
+	return cliOutput(t, append([]string{"status"}, args...)...)
+}
+
+func cliOutput(t *testing.T, args ...string) (string, int) {
+	t.Helper()
 	oldArgs, oldOut := os.Args, os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	os.Args = append([]string{"maestro", "status"}, args...)
+	os.Args = append([]string{"maestro"}, args...)
 	os.Stdout = w
 	defer func() { os.Args, os.Stdout = oldArgs, oldOut }()
 	code := cli.Execute("test")

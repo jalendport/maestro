@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -72,15 +73,28 @@ func FindTask(root, id string) (string, bool) {
 		}
 		return "", false
 	}
-	runs, _ := os.ReadDir(config.RunsDir(root))
-	// Newest Run first so a reused id resolves to the latest.
-	for i := len(runs) - 1; i >= 0; i-- {
-		r := runs[i]
+	runs, _ := RunFolders(root)
+	for _, r := range runs {
 		if !r.IsDir() {
 			continue
 		}
 		if r.Name() == id {
-			return filepath.Join(config.RunsDir(root), r.Name()), true
+			folder := filepath.Join(config.RunsDir(root), r.Name())
+			if _, err := os.Stat(filepath.Join(folder, "run.json")); !os.IsNotExist(err) {
+				return "", false
+			}
+			tasks, _ := os.ReadDir(folder)
+			found := ""
+			for _, task := range tasks {
+				path := filepath.Join(folder, task.Name())
+				if _, err := LoadTask(path); task.IsDir() && err == nil {
+					if found != "" {
+						return "", false
+					}
+					found = path
+				}
+			}
+			return found, found != ""
 		}
 		p := filepath.Join(config.RunsDir(root), r.Name(), id)
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
@@ -88,4 +102,24 @@ func FindTask(root, id string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// RunFolders returns Run folders in descending numeric id order.
+func RunFolders(root string) ([]os.DirEntry, error) {
+	entries, err := os.ReadDir(config.RunsDir(root))
+	if err != nil {
+		return nil, err
+	}
+	runs := entries[:0]
+	for _, entry := range entries {
+		if entry.IsDir() {
+			runs = append(runs, entry)
+		}
+	}
+	sort.SliceStable(runs, func(i, j int) bool {
+		a, _ := strconv.Atoi(strings.TrimPrefix(runs[i].Name(), "r-"))
+		b, _ := strconv.Atoi(strings.TrimPrefix(runs[j].Name(), "r-"))
+		return a > b
+	})
+	return runs, nil
 }

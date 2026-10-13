@@ -93,3 +93,74 @@ func TestTakeRequiresGitAndRepository(t *testing.T) {
 		}
 	})
 }
+
+func TestSnapshotChangedIncludesCommittedPaths(t *testing.T) {
+	root := snapshotRepo(t)
+	s, err := Take(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "z-committed.txt"), []byte("attempt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "-C", root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-am", "Attempt")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dirty.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"dirty.txt", "z-committed.txt"}
+	if got := s.Changed(root); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Changed = %v, want %v", got, want)
+	}
+	if got := ScopeViolations(s.Changed(root), []string{"dirty.txt"}, ""); !reflect.DeepEqual(got, []string{"z-committed.txt"}) {
+		t.Fatalf("violations: %v", got)
+	}
+}
+
+func TestSnapshotChangedIncludesDeletedDirtyPaths(t *testing.T) {
+	root := snapshotRepo(t)
+	for _, p := range []string{"untracked.txt", "z-committed.txt"} {
+		if err := os.WriteFile(filepath.Join(root, p), []byte("dirty\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := Take(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for p := range s.Dirty {
+		if err := os.Remove(filepath.Join(root, p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{"untracked.txt", "z-committed.txt"}
+	if got := s.Changed(root); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Changed = %v, want %v", got, want)
+	}
+}
+
+func TestSnapshotChangedIncludesFirstCommit(t *testing.T) {
+	root := t.TempDir()
+	if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
+		t.Fatalf("init: %v %s", err, out)
+	}
+	s, err := Take(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "first.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", root, "add", "first.txt").CombinedOutput(); err != nil {
+		t.Fatalf("add: %v %s", err, out)
+	}
+	cmd := exec.Command("git", "-C", root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-m", "First")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v %s", err, out)
+	}
+	if got := s.Changed(root); !reflect.DeepEqual(got, []string{"first.txt"}) {
+		t.Fatalf("Changed = %v", got)
+	}
+}

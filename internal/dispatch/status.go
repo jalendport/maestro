@@ -14,7 +14,7 @@ import (
 // Tasks in a Run are shown by the Run, and Council Seats live elsewhere.
 func List(root string) []*Record {
 	out := []*Record{}
-	runs, _ := os.ReadDir(config.RunsDir(root))
+	runs, _ := RunFolders(root)
 	for _, r := range runs {
 		if !r.IsDir() {
 			continue
@@ -58,6 +58,9 @@ func Status(rec *Record) string {
 		elapsed = time.Since(rec.StartedAt).Seconds()
 	} else if rec.Outcome.Outcome != "" {
 		state = rec.Outcome.Outcome
+	}
+	if rec.Outcome.Outcome == OutcomeUnverified && rec.Outcome.ErrorText != "" {
+		state += " (" + rec.Outcome.ErrorText + ")"
 	}
 	tab := "tab no"
 	if rec.SoloProcess > 0 {

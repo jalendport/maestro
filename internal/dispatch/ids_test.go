@@ -130,6 +130,9 @@ func TestFindTask(t *testing.T) {
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := (&Task{Folder: taskDir, Task: "4f73"}).Save(); err != nil {
+		t.Fatal(err)
+	}
 	for _, tt := range []struct {
 		name string
 		id   string
@@ -138,7 +141,7 @@ func TestFindTask(t *testing.T) {
 	}{
 		{name: "task id", id: "4f73", want: taskDir, ok: true},
 		{name: "run and task id", id: "r-0007/4f73", want: taskDir, ok: true},
-		{name: "run id", id: "r-0007", want: runDir, ok: true},
+		{name: "run id", id: "r-0007", want: taskDir, ok: true},
 		{name: "unknown id", id: "ffff"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -147,5 +150,35 @@ func TestFindTask(t *testing.T) {
 				t.Fatalf("FindTask(%q) = (%q, %t), want (%q, %t)", tt.id, got, ok, tt.want, tt.ok)
 			}
 		})
+	}
+}
+
+func TestFindTaskUsesNewestNumericRun(t *testing.T) {
+	root := t.TempDir()
+	for _, id := range []string{"r-0001", "r-9999", "r-10000"} {
+		folder := filepath.Join(config.RunsDir(root), id, "abcd")
+		if err := os.MkdirAll(folder, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := filepath.Join(config.RunsDir(root), "r-10000", "abcd")
+	if got, ok := FindTask(root, "abcd"); !ok || got != want {
+		t.Fatalf("FindTask = %q, %v; want %q", got, ok, want)
+	}
+}
+
+func TestFindTaskRejectsAmbiguousRun(t *testing.T) {
+	root := t.TempDir()
+	for _, id := range []string{"abcd", "efab"} {
+		folder := filepath.Join(config.RunsDir(root), "r-0001", id)
+		if err := os.MkdirAll(folder, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := (&Task{Folder: folder}).Save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if folder, ok := FindTask(root, "r-0001"); ok {
+		t.Fatalf("ambiguous Run resolved to %s", folder)
 	}
 }

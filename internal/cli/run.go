@@ -324,6 +324,19 @@ func (a *app) cancelCmd() *cobra.Command {
 					return nil
 				}
 			}
+			if folder, ok := dispatch.FindTask(env.Root, args[0]); ok {
+				if _, err := os.Stat(filepath.Join(filepath.Dir(folder), "run.json")); os.IsNotExist(err) {
+					if rec, err := dispatch.LoadRecord(folder); err == nil && rec.State == "ended" {
+						ui.Outf("task %s already finished (%s)", rec.Task, rec.Outcome.Outcome)
+						return nil
+					}
+					if err := dispatch.RequestCancel(folder); err != nil {
+						return err
+					}
+					ui.Outf("task %s cancel requested", args[0])
+					return nil
+				}
+			}
 			folder, s, err := findRun(env.Root, args[0])
 			if err != nil {
 				return fmt.Errorf("no live task or run %q under %s", args[0], env.Root)
@@ -477,10 +490,13 @@ func (a *app) cleanCmd() *cobra.Command {
 			removed := 0
 			for _, dir := range []string{config.RunsDir(root), config.CouncilsDir(root)} {
 				entries, _ := os.ReadDir(dir)
+				if dir == config.RunsDir(root) {
+					entries, _ = dispatch.RunFolders(root)
+				}
 				for _, e := range entries {
 					p := filepath.Join(dir, e.Name())
 					st, err := os.Stat(p)
-					if err != nil || !st.IsDir() || live[p] || time.Since(st.ModTime()) < d {
+					if err != nil || !st.IsDir() || live[p] || dispatch.HasRunningRecord(p) || time.Since(st.ModTime()) < d {
 						continue
 					}
 					if err := os.RemoveAll(p); err == nil {

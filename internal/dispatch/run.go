@@ -66,7 +66,7 @@ func (env *Env) RefreshBudget() {
 			if v.State == "unknown" && env.Budget.Snapshot(id) != nil {
 				continue // an expired reading; the next harvest refreshes it
 			}
-			if ws, err := budget.ProbeClaude(h.Bin(), harness.Env(env.Roster.StripEnv("claude"), map[string]string{"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1"})); err == nil {
+			if ws, err := budget.ProbeClaude(context.Background(), h.Bin(), harness.Env(env.Roster.StripEnv("claude"), map[string]string{"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1"})); err == nil {
 				env.Budget.Record(id, ws, budget.SourceProbe)
 				changed = true
 				ui.Eventf("budget", "%s probed: %s", id, describe(ws))
@@ -129,7 +129,7 @@ func (env *Env) confirmLimitContext(ctx context.Context, rec *Record, account, h
 	reason := "limit hit"
 	switch harnessName {
 	case "claude":
-		if ws, err := budget.ProbeClaudeContext(ctx, h.Bin(), harness.Env(env.Roster.StripEnv("claude"), map[string]string{"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1"})); err == nil {
+		if ws, err := budget.ProbeClaude(ctx, h.Bin(), harness.Env(env.Roster.StripEnv("claude"), map[string]string{"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1"})); err == nil {
 			env.Budget.Record(account, ws, budget.SourceProbe)
 			if v := env.NewRouter().View(account); v.State != "blocked" {
 				_ = env.Budget.Save()
@@ -520,7 +520,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	idle, _ := time.ParseDuration(t.IdleLimit)
 	wall, _ := time.ParseDuration(t.WallLimit)
 	waitDone := make(chan error, 1)
-	go func() { err := cmd.Wait(); <-pumpDone; waitDone <- err }()
+	go func() { <-pumpDone; waitDone <- cmd.Wait() }()
 	var timer string
 	var waitErr error
 	ticker := time.NewTicker(time.Second)
@@ -795,7 +795,12 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 		case failedChecks > 0:
 			rec.Outcome.Outcome = OutcomeFailed
 			rec.Outcome.FailureClass = FailBad
-			rec.Outcome.ErrorText = fmt.Sprintf("%d check(s) failed", failedChecks)
+			for _, c := range rec.Verification.Checks {
+				if !c.OK {
+					rec.Outcome.ErrorText = fmt.Sprintf("check failed: %s: %s", c.Command, firstLine(c.Output))
+					break
+				}
+			}
 		case t.Access == brief.AccessRead && len(rec.Permission.Denials) > 0 && strings.TrimSpace(report.Sections["Answer"]) == "" && report.Status == brief.StatusUnshaped:
 			// agy: denied actions and no answer is a failed Dispatch, never a success.
 			rec.Outcome.Outcome = OutcomeFailed
@@ -822,6 +827,8 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 				rec.Outcome.Outcome = OutcomeUnverified
 				if gate.Risk == "critical" {
 					rec.Outcome.ErrorText = "gate: risk critical"
+				} else if len(allChecks) == 0 {
+					rec.Outcome.ErrorText = "no checks configured"
 				}
 			case gate.Verdict == "pass":
 				// Checks pass and Jev sees no fault, but satisfies sits under the
@@ -985,17 +992,9 @@ func runTab(env *Env, t *Task, h harness.Harness, command *harness.Command, laun
 		ui.Eventf("failed", "task %s  %s: %s", t.Task, FailLane, firstLine(err.Error()))
 		return rec
 	}
-	switch timer {
-	case "cancelled":
+	if timer == "cancelled" {
 		rec.Outcome.Outcome = OutcomeCancelled
 		finish(rec)
-		return rec
-	case "idle", "wall":
-		rec.Outcome.Timer = timer
-		rec.Outcome.FailureClass = FailStall
-		rec.Outcome.Outcome = OutcomeTimedOut
-		finish(rec)
-		ui.Eventf("stall", "task %s  %s limit passed in the tab", t.Task, timer)
 		return rec
 	}
 	rec.Outcome.ModelRan = t.Route.Model
@@ -1014,6 +1013,14 @@ func runTab(env *Env, t *Task, h harness.Harness, command *harness.Command, laun
 				}
 			}
 		}
+	}
+	if timer == "idle" || timer == "wall" {
+		rec.Outcome.Timer = timer
+		rec.Outcome.FailureClass = FailStall
+		rec.Outcome.Outcome = OutcomeTimedOut
+		finish(rec)
+		ui.Eventf("stall", "task %s  %s limit passed in the tab", t.Task, timer)
+		return rec
 	}
 	if !found || strings.TrimSpace(report.Raw) == "" {
 		class := FailTransient
@@ -1036,7 +1043,7 @@ func harvestTab(env *Env, t *Task, h harness.Harness, launch harness.Launch, rec
 	switch h.Name() {
 	case "claude":
 		if env.Budget != nil {
-			if ws, err := budget.ProbeClaude(h.Bin(), launch.Env); err == nil {
+			if ws, err := budget.ProbeClaude(context.Background(), h.Bin(), launch.Env); err == nil {
 				rec.Budget.Windows = ws
 				env.harvest(t.Route.Account, ws)
 			}
