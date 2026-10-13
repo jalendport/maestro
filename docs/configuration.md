@@ -72,8 +72,8 @@ Default entries:
 
 | Alias | Model |
 |---|---|
-| `haiku` | `"claude-haiku-4-5"` |
-| `sonnet` | `"claude-sonnet-5"` |
+| `haiku` | `"claude-haiku-5-5"` |
+| `sonnet` | `"claude-sonnet-5-5"` |
 | `opus` | `"claude-opus-5-5"` |
 | `fable` | `"claude-fable-5-1"` |
 
@@ -175,12 +175,14 @@ Default entries:
 
 | Model | `input` | `cached_input` | `output` |
 |---|---|---|---|
-| `claude-fable-5-1` | `10.00` | `1.00` | `50.00` |
-| `claude-opus-5-5` | `4.00` | `0.40` | `20.00` |
+| `claude-fable-5-1` | `10.00` | `0.25` | `50.00` |
+| `claude-opus-5-5` | `4.00` | `0.20` | `20.00` |
+| `claude-sonnet-5-5` | `2.00` | `0.10` | `10.00` |
 | `claude-sonnet-5` | `2.00` | `0.20` | `10.00` |
+| `claude-haiku-5-5` | `0.10` | `0.01` | `0.50` |
 | `claude-haiku-4-5` | `1.00` | `0.10` | `5.00` |
 | `gpt-6-astra` | `10.00` | `1.00` | `50.00` |
-| `gpt-6.1-sol` | `2.00` | `0.20` | `10.00` |
+| `gpt-6.1-sol` | `2.00` | `0.10` | `10.00` |
 | `gpt-6-sol` | `2.00` | `0.20` | `10.00` |
 | `gpt-6-luna` | `0.10` | `0.01` | `0.50` |
 | `grok-4.7` | `2.00` | `0.50` | `6.00` |

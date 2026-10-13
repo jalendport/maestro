@@ -44,8 +44,8 @@ min_version = "1.2.9"
 strip_env   = []
 
 [aliases]
-haiku  = "claude-haiku-4-5"
-sonnet = "claude-sonnet-5"
+haiku  = "claude-haiku-5-5"
+sonnet = "claude-sonnet-5-5"
 opus   = "claude-opus-5-5"
 fable  = "claude-fable-5-1"
 
@@ -147,19 +147,27 @@ default = ["codex-astra"]
 
 [prices."claude-fable-5-1"]
 input = 10.00
-cached_input = 1.00
+cached_input = 0.25
 output = 50.00
 
 [prices."claude-opus-5-5"]
 input = 4.00
-cached_input = 0.40
+cached_input = 0.20
 output = 20.00
 
+[prices."claude-sonnet-5-5"]
+input = 2.00
+cached_input = 0.10
+output = 10.00
 [prices."claude-sonnet-5"]
 input = 2.00
 cached_input = 0.20
 output = 10.00
 
+[prices."claude-haiku-5-5"]
+input = 0.10
+cached_input = 0.01
+output = 0.50
 [prices."claude-haiku-4-5"]
 input = 1.00
 cached_input = 0.10
@@ -172,7 +180,7 @@ output = 50.00
 
 [prices."gpt-6.1-sol"]
 input = 2.00
-cached_input = 0.20
+cached_input = 0.10
 output = 10.00
 
 [prices."gpt-6-sol"]

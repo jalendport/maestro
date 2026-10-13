@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added the `todo` brief field to attach a task to an existing Solo todo
 
 ### Changed
+- Changed the `sonnet` and `haiku` aliases to Sonnet 5.5 and Haiku 5.5, and refreshed the price table against the vendors' pages
 - Changed the default gate `satisfies` threshold from `0.90` to `0.65`
 - Changed the supervisor to block a Task and pause the Run when two consecutive attempts fail with the same error text
 - Councils now live under `.agents/maestro/councils/`.
