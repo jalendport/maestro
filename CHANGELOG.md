@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added the `todo` brief field to attach a task to an existing Solo todo
 
 ### Changed
+- Changed Antigravity read Enforcement to use its settings command permissions, so safe settings permit automatic read Routes and Council Seats
 - Changed `strip_env` to remove API credentials only for subscription Accounts, so metered Accounts keep their API keys and auth tokens
 - Changed the `sonnet` and `haiku` aliases to Sonnet 5.5 and Haiku 5.5, and refreshed the price table against the vendors' pages
 - Changed the default gate `satisfies` threshold from `0.90` to `0.65`

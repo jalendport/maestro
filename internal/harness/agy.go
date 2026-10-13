@@ -2,16 +2,90 @@ package harness
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Agy is the Antigravity CLI adapter: read only (its edit needs the bypass
-// flag Maestro never passes). Print mode requests terminal restrictions,
-// but read remains best-effort until a live write probe proves enforcement.
-type Agy struct{ bin string }
+// flag Maestro never passes). Print mode denies commands outside settings rules.
+type Agy struct {
+	bin      string
+	settings *AgySettings
+}
+
+type AgySettings struct {
+	Path     string    `json:"path"`
+	Absent   bool      `json:"absent"`
+	Commands []string  `json:"commands"`
+	ReadAt   time.Time `json:"read_at"`
+	Error    string    `json:"error,omitempty"`
+}
+
+func (a *Agy) Settings() AgySettings {
+	if a.settings != nil {
+		return *a.settings
+	}
+	return readAgySettings()
+}
+
+func readAgySettings() AgySettings {
+	s := AgySettings{ReadAt: time.Now(), Commands: []string{}}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		s.Error = err.Error()
+		return s
+	}
+	s.Path = filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")
+	b, err := os.ReadFile(s.Path)
+	if errors.Is(err, os.ErrNotExist) {
+		s.Absent = true
+		return s
+	}
+	if err != nil {
+		s.Error = err.Error()
+		return s
+	}
+	var doc struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		s.Error = err.Error()
+		return s
+	}
+	for _, rule := range doc.Permissions.Allow {
+		rule = strings.TrimSpace(rule)
+		if strings.HasPrefix(rule, "command(") && strings.HasSuffix(rule, ")") {
+			s.Commands = append(s.Commands, strings.TrimSuffix(strings.TrimPrefix(rule, "command("), ")"))
+		}
+	}
+	return s
+}
+
+func (s AgySettings) Reason() string {
+	if s.Error != "" {
+		return "settings unreadable: " + s.Error
+	}
+	for _, target := range s.Commands {
+		switch target {
+		case "cat", "ls", "head", "tail", "grep", "rg", "find", "wc", "pwd", "echo", "which", "env", "date",
+			"git log", "git diff", "git show", "git status", "git branch", "git blame":
+			continue
+		default:
+			return "settings allow " + target
+		}
+	}
+	return ""
+}
+
+func (a *Agy) EnforcementReason() string { return a.Settings().Reason() }
 
 func (a *Agy) Name() string { return "agy" }
 func (a *Agy) Bin() string  { return a.bin }
@@ -52,7 +126,10 @@ func (a *Agy) Catalog() ([]Model, string, error) {
 
 func (a *Agy) Enforcement(access string) string {
 	if access == "read" {
-		return BestEffort
+		if a.EnforcementReason() != "" {
+			return BestEffort
+		}
+		return Enforced
 	}
 	return NoShape
 }

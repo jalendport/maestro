@@ -132,7 +132,8 @@ func New(bins map[string]string) *Registry {
 	r.byName["claude"] = &Claude{bin: resolve("claude", bins["claude"])}
 	r.byName["codex"] = &Codex{bin: resolve("codex", bins["codex"])}
 	r.byName["grok"] = &Grok{bin: resolve("grok", bins["grok"])}
-	r.byName["agy"] = &Agy{bin: resolve("agy", bins["agy"])}
+	settings := readAgySettings()
+	r.byName["agy"] = &Agy{bin: resolve("agy", bins["agy"]), settings: &settings}
 	return r
 }
 

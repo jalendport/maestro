@@ -59,6 +59,9 @@ func (a *app) doctorCmd() *cobra.Command {
 						row.State = "catalog only in this build"
 					case h.Enforcement("read") == harness.BestEffort:
 						row.State = "ok  (read = best-effort: no automatic read work)"
+						if agy, ok := h.(*harness.Agy); ok {
+							row.State += "  " + agy.EnforcementReason()
+						}
 					default:
 						row.State = "ok"
 					}

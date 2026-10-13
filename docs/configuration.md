@@ -60,6 +60,8 @@ Default entries:
 | `grok` | `"1.0.50"` | `["GROK_SANDBOX"]` |
 | `agy` | `"1.2.9"` | `[]` |
 
+Antigravity read work is enforced only while its settings grant no command permission beyond the fixed read-only list; Maestro reads `~/.gemini/antigravity-cli/settings.json` to decide.
+
 ### [aliases]
 
 An alias is a short model name that a Family lists in `models`. Maestro replaces it with the full model name. Each key is the alias and each value is the model name.

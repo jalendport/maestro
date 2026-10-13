@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -123,6 +125,17 @@ func TestRequestedLaneRefusesAccess(t *testing.T) {
 	} {
 		for _, source := range []string{"brief", "flag", "seat"} {
 			t.Run(tc.lane+"/"+tc.access+"/"+source, func(t *testing.T) {
+				// Antigravity's read enforcement is measured from its settings file;
+				// pin it to best-effort with a non-read-only command rule.
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				dir := filepath.Join(home, ".gemini", "antigravity-cli")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"permissions":{"allow":["command(rm)"]}}`), 0o644); err != nil {
+					t.Fatal(err)
+				}
 				rt := testRouter(t)
 				req := Request{Brief: &brief.Brief{}, Access: tc.access}
 				id := strings.Split(tc.lane, ":")[0]

@@ -91,9 +91,6 @@ func TestClaudeReadShapeIsolatesSettingsAndSoloTools(t *testing.T) {
 			t.Fatalf("missing %s", name)
 		}
 	}
-	if (&Agy{}).Enforcement("read") != BestEffort {
-		t.Fatal("agy read shape claims enforcement")
-	}
 }
 
 func TestGrokReadAllowsOnlyReadTools(t *testing.T) {

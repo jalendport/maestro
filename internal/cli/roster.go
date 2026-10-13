@@ -144,7 +144,11 @@ func rosterRows(env *dispatch.Env) []rosterRow {
 			state = append(state, "read only")
 		}
 		if h != nil && h.Enforcement("read") == harness.BestEffort {
-			state = append(state, "read: best-effort")
+			detail := "read: best-effort"
+			if agy, ok := h.(*harness.Agy); ok {
+				detail += " (" + agy.EnforcementReason() + ")"
+			}
+			state = append(state, detail)
 		}
 		row.State = strings.Join(state, "  ")
 		rows = append(rows, row)

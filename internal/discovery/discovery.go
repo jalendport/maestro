@@ -18,14 +18,15 @@ import (
 
 // Record is one Harness's discovery result.
 type Record struct {
-	Path         string          `json:"path"`
-	Version      string          `json:"version"`
-	LoginHint    string          `json:"login_hint,omitempty"`
-	Models       []harness.Model `json:"models"`
-	SoloTool     int             `json:"solo_tool,omitempty"`
-	SoloPresets  []SoloPreset    `json:"solo_presets,omitempty"`
-	DiscoveredAt time.Time       `json:"discovered_at"`
-	Error        string          `json:"error,omitempty"`
+	Path         string               `json:"path"`
+	Version      string               `json:"version"`
+	LoginHint    string               `json:"login_hint,omitempty"`
+	Models       []harness.Model      `json:"models"`
+	SoloTool     int                  `json:"solo_tool,omitempty"`
+	SoloPresets  []SoloPreset         `json:"solo_presets,omitempty"`
+	DiscoveredAt time.Time            `json:"discovered_at"`
+	Error        string               `json:"error,omitempty"`
+	Settings     *harness.AgySettings `json:"settings,omitempty"`
 }
 
 // Cache is the discovery file.
@@ -73,6 +74,10 @@ func Scan(reg *harness.Registry) *Cache {
 	for _, name := range reg.Names() {
 		h, _ := reg.Get(name)
 		rec := Record{Path: h.Bin(), DiscoveredAt: time.Now()}
+		if agy, ok := h.(*harness.Agy); ok {
+			settings := agy.Settings()
+			rec.Settings = &settings
+		}
 		if h.Bin() == "" {
 			rec.Error = "not installed"
 			c.Harness[name] = rec
