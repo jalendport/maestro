@@ -27,7 +27,7 @@ brew install jalendport/tap/maestro
 Or with the install script (macOS and Linux):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jalendport/maestro/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jalendport/maestro/master/install.sh | sh
 ```
 
 Then check the machine and connect the harnesses:
