@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/jalendport/maestro/internal/adapter"
 	"github.com/jalendport/maestro/internal/budget"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/discovery"
@@ -45,13 +45,16 @@ func Execute(version string) int {
 func (a *app) build() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "maestro",
+		Version:       a.version,
 		Short:         "routes, dispatches, checks, and reviews agent work",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		PersistentPreRun: func(_ *cobra.Command, _ []string) {
+		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
 			ui.Quiet = a.quiet || a.json
+			return nil
 		},
 	}
+	root.SetVersionTemplate("maestro {{.Version}}\n")
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.PersistentFlags().BoolVar(&a.json, "json", false, "machine output: exactly one JSON object")
 	root.PersistentFlags().BoolVar(&a.quiet, "quiet", false, "reason lines and progress only, on stderr")
@@ -102,12 +105,24 @@ func (a *app) build() *cobra.Command {
 // env loads everything a Dispatch reads. refresh forces a discovery refresh;
 // otherwise a stale cache is refreshed on the way.
 func (a *app) env(refresh bool) (*dispatch.Env, error) {
+	return a.loadEnv(refresh, true)
+}
+
+func refreshSkill(_ *cobra.Command, _ []string) error {
+	_, err := adapter.EnsureSkill(SkillMD)
+	return err
+}
+
+func (a *app) loadEnv(refresh, persist bool) (*dispatch.Env, error) {
 	r, err := roster.Load()
 	if err != nil {
 		return nil, err
 	}
 	for _, w := range r.Warnings {
 		ui.Warnf("%s", w)
+	}
+	if err := r.ValidateAccounts(); err != nil {
+		return nil, err
 	}
 	bins := map[string]string{}
 	for name, h := range r.Harness {
@@ -119,8 +134,14 @@ func (a *app) env(refresh bool) (*dispatch.Env, error) {
 		return nil, err
 	}
 	if refresh || disc.Stale() {
-		ui.Eventf("roster", "refreshing the discovery cache")
-		disc, err = discovery.Refresh(reg)
+		if persist {
+			ui.Eventf("roster", "refreshing the discovery cache")
+		}
+		if persist {
+			disc, err = discovery.Refresh(reg)
+		} else {
+			disc = discovery.Scan(reg)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -139,7 +160,7 @@ func (a *app) env(refresh bool) (*dispatch.Env, error) {
 	if dispatch.InSolo() {
 		env.Solo = dispatch.ConnectSolo()
 		if env.Solo != nil && (refresh || soloToolsMissing(disc)) {
-			recordSoloTools(env)
+			recordSoloTools(env, persist)
 		}
 	}
 	return env, nil
@@ -192,10 +213,10 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, ui.Dim.Render("Not in this build yet: roster stats."))
 }
 
-// soloToolsMissing reports whether the cache has no Solo agent tool ids yet.
+// soloToolsMissing also refreshes old caches that did not record preset choices.
 func soloToolsMissing(disc *discovery.Cache) bool {
 	for _, rec := range disc.Harness {
-		if rec.SoloTool != 0 {
+		if len(rec.SoloPresets) > 0 {
 			return false
 		}
 	}
@@ -203,46 +224,16 @@ func soloToolsMissing(disc *discovery.Cache) bool {
 }
 
 // recordSoloTools maps Solo's agent tools onto Harness names in the cache.
-func recordSoloTools(env *dispatch.Env) {
+func recordSoloTools(env *dispatch.Env, persist bool) {
 	res, err := env.Solo.Client.Call("list_agent_tools", nil)
 	if err != nil {
 		return
 	}
-	var tools []struct {
-		ID       int    `json:"id"`
-		Name     string `json:"name"`
-		ToolType string `json:"tool_type"`
-		Enabled  bool   `json:"enabled"`
-	}
+	var tools []discovery.SoloAgentTool
 	if json.Unmarshal(res, &tools) != nil {
 		return
 	}
-	byHarness := map[string]int{}
-	for _, t := range tools {
-		if !t.Enabled {
-			continue
-		}
-		switch {
-		case t.ToolType == "claude":
-			byHarness["claude"] = t.ID
-		case t.ToolType == "codex":
-			byHarness["codex"] = t.ID
-		case t.ToolType == "antigravity":
-			byHarness["agy"] = t.ID
-		case strings.EqualFold(t.Name, "grok") || t.ToolType == "grok":
-			byHarness["grok"] = t.ID
-		}
-	}
-	changed := false
-	for name, id := range byHarness {
-		rec := env.Disc.Harness[name]
-		if rec.SoloTool != id {
-			rec.SoloTool = id
-			env.Disc.Harness[name] = rec
-			changed = true
-		}
-	}
-	if changed {
+	if env.Disc.RecordSoloTools(tools) && persist {
 		_ = env.Disc.Save()
 	}
 }

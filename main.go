@@ -10,8 +10,7 @@ import (
 // version is overridden at build time via -ldflags "-X main.version=...".
 var version = "dev"
 
-// skill is the shared Adapter skill file, compiled in so `maestro adapter
-// --write-skill` can install it without a source checkout.
+// skill is compiled in so Maestro can refresh it without a source checkout.
 //
 //go:embed skills/maestro/SKILL.md
 var skill string

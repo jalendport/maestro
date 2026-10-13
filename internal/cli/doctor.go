@@ -7,9 +7,11 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/jalendport/maestro/internal/adapter"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/harness"
+	"github.com/jalendport/maestro/internal/jev"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/ui"
 	"github.com/spf13/cobra"
@@ -25,9 +27,9 @@ func (a *app) doctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check Harnesses, versions, logins, the Jev key, and Solo",
-		Long:  "Refresh the discovery cache and report every Harness, the Jev key, Solo, the config files, and the Roster's pre-flight state.",
+		Long:  "Read current discovery facts and report every Harness, the Jev key, Solo, the config files, and the Roster's pre-flight state.",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			env, err := a.env(true)
+			env, err := a.loadEnv(true, false)
 			if err != nil {
 				return err
 			}
@@ -40,8 +42,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				switch {
 				case rec.Path == "":
 					row.Detail = "not installed"
-					row.State = "missing"
-					problems++
+					row.State = "not installed"
 				default:
 					row.Detail = fmt.Sprintf("%-8s %s", rec.Version, rec.Path)
 					if rec.LoginHint != "" {
@@ -66,6 +67,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				rows = append(rows, row)
 			}
 			rows = append(rows, jevRow())
+			rows = append(rows, orchestratorRow(env.Roster.Router.Orchestrator))
 			rows = append(rows, soloRow(env))
 			cfg := doctorRow{Name: "config", Detail: config.UserFile()}
 			if _, err := os.Stat(config.UserFile()); err != nil {
@@ -85,7 +87,17 @@ func (a *app) doctorCmd() *cobra.Command {
 					failing++
 				}
 			}
-			rows = append(rows, doctorRow{Name: "adapters", Detail: adapterState(), State: "see maestro adapter"})
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			for _, name := range adapter.Harnesses {
+				state := adapter.State(name, home)
+				rows = append(rows, doctorRow{Name: "adapter " + name, Detail: fmt.Sprintf("skill %s, link %s, hook %s", state.Skill, state.Link, state.Hook), State: state.Overall})
+				if env.Disc.Harness[name].Path != "" && (state.Overall == "partial" || state.Overall == "wrong") {
+					problems++
+				}
+			}
 			rows = append(rows, doctorRow{Name: "roster", Detail: fmt.Sprintf("%d families", len(env.Roster.Families)), State: fmt.Sprintf("%d fail pre-flight (see maestro roster)", failing)})
 			if a.json {
 				b, _ := json.MarshalIndent(rows, "", "  ")
@@ -105,25 +117,28 @@ func (a *app) doctorCmd() *cobra.Command {
 	}
 }
 
-func jevRow() doctorRow {
-	row := doctorRow{Name: "jev"}
-	switch {
-	case os.Getenv("TYPESAFE_API_KEY") != "":
-		row.Detail = "key in TYPESAFE_API_KEY"
-		row.State = "ok"
-	case keyInEnvFile():
-		row.Detail = "key in " + config.EnvFile()
-		row.State = "ok"
-	default:
-		row.Detail = "no key"
-		row.State = "rules table only (maestro key set, or TYPESAFE_API_KEY)"
+func orchestratorRow(family string) doctorRow {
+	if family == "" {
+		family = "not set"
 	}
-	return row
+	return doctorRow{Name: "orchestrator", Detail: family, State: "info"}
 }
 
-func keyInEnvFile() bool {
-	b, err := os.ReadFile(config.EnvFile())
-	return err == nil && strings.Contains(string(b), "TYPESAFE_API_KEY=")
+func jevRow() doctorRow {
+	row := doctorRow{Name: "jev"}
+	key, err := jev.Key()
+	if err != nil || key == "" {
+		row.Detail = "no key"
+		row.State = "rules table only; edits will end unverified"
+	} else {
+		if os.Getenv("TYPESAFE_API_KEY") != "" {
+			row.Detail = "key in TYPESAFE_API_KEY"
+		} else {
+			row.Detail = "key in " + config.EnvFile()
+		}
+		row.State = "ok"
+	}
+	return row
 }
 
 func soloRow(env *dispatch.Env) doctorRow {
