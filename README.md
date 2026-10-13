@@ -33,9 +33,95 @@ curl -fsSL https://raw.githubusercontent.com/jalendport/maestro/master/install.s
 Then check the machine and connect the harnesses:
 
 ```sh
-maestro doctor      # harness versions, logins, the Jev key, Solo
-maestro key set     # store the Jev key in ~/.maestro/env (optional; the rules table works without it)
-maestro adapter     # the skill file and hook to add per harness
+maestro doctor           # harness versions, logins, the Jev key, Solo
+maestro key set          # store the Jev key in ~/.maestro/env (optional; the rules table works without it)
+maestro adapter install  # connect every harness found on this machine
+```
+
+`maestro adapter` prints the steps for each harness and writes nothing. `maestro adapter install` does the steps. Maestro touches nothing else in the configuration of a harness. To connect one harness only, give its name: `maestro adapter install claude`.
+
+### Connect Claude Code
+
+```sh
+maestro adapter install claude
+```
+
+It writes two paths:
+
+- `~/.claude/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
+- `~/.claude/settings.json` gets one `PreToolUse` hook entry for `maestro hook`; Maestro adds or replaces only its own entry and keeps all other settings.
+
+Manual step: start a new Claude Code session. It loads the hook.
+
+Verify: `maestro doctor` shows `adapter claude` as `ok`.
+
+Probe the hook. A sub-agent that can write code must get a `deny`:
+
+```sh
+echo '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose"}}' | maestro hook
+```
+
+### Connect Codex
+
+```sh
+maestro adapter install codex
+```
+
+It writes two paths:
+
+- `~/.agents/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
+- `~/.codex/hooks.json` gets one `PreToolUse` hook entry for `maestro hook`; Maestro adds or replaces only its own entry and keeps all other hooks.
+
+Manual step: start Codex, open `/hooks`, and trust the Maestro `PreToolUse` hook. This review is a security boundary. Only you cross it. An agent must not trust the hook for you.
+
+Verify: `maestro doctor` shows `adapter codex` as `ok`.
+
+Probe the hook. A sub-agent that can write code must get a `deny`:
+
+```sh
+echo '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose"}}' | maestro hook
+```
+
+### Connect Grok
+
+```sh
+maestro adapter install grok
+```
+
+It writes two paths:
+
+- `~/.agents/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
+- `~/.grok/hooks/maestro.json` is a file that Maestro owns; Maestro writes the whole file.
+
+Manual step: start a new Grok session. It binds the hook.
+
+Verify: `maestro doctor` shows `adapter grok` as `ok`.
+
+Probe the hook. A sub-agent that can write code must get a `deny`:
+
+```sh
+echo '{"toolName":"spawn_subagent","toolInput":{"agent":"general-purpose"}}' | maestro hook
+```
+
+### Connect Antigravity
+
+```sh
+maestro adapter install agy
+```
+
+It writes two paths:
+
+- `~/.gemini/antigravity-cli/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
+- `~/.gemini/config/hooks.json` gets one `maestro` key; Maestro sets only that key and keeps all other keys.
+
+Manual step: start a new Antigravity session. It loads the hook.
+
+Verify: `maestro doctor` shows `adapter agy` as `ok`.
+
+Probe the hook. A sub-agent that can write code must get a `deny`:
+
+```sh
+echo '{"toolCall":{"name":"invoke_subagent","args":{"agent":"general-purpose"}}}' | maestro hook
 ```
 
 ## Usage

@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-### Fixed
-- Fixed `maestro doctor` reporting the Claude adapter missing right after a plugin install, before Claude Code had loaded the plugin once
+### Added
+- Added `maestro adapter install` to write the skill link and the hook file for each harness
+- Added `maestro --version` to print the installed version
+
+### Removed
+- Removed the Claude Code plugin; anyone who installed it runs `claude plugin uninstall maestro@jalendport`
 
 ## 1.0.0 - 2026-10-13
 
