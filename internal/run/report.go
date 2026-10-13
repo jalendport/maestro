@@ -65,12 +65,16 @@ func Report(s *State) string {
 	}
 	councils := []string{}
 	for _, slug := range s.Councils {
-		if strings.HasSuffix(slug, "-review") {
+		if strings.HasPrefix(slug, s.Run+"-review") {
 			councils = append(councils, slug)
 		}
 	}
 	if len(councils) == 0 {
-		w.WriteString("end-of-run council: not run (no heavy task, risk under high)\n")
+		reason := s.CouncilSkip
+		if reason == "" {
+			reason = "Run did not finish"
+		}
+		fmt.Fprintf(&w, "end-of-run council: not run (%s)\n", reason)
 	} else {
 		fmt.Fprintf(&w, "end-of-run council: %s  → maestro wait %s\n", councils[0], councils[0])
 	}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
 )
 
@@ -41,27 +42,28 @@ const (
 
 // TaskState is one Task's live record in run.json.
 type TaskState struct {
-	Number      int           `json:"number"`
-	ID          string        `json:"id"`
-	Title       string        `json:"title"`
-	BriefPath   string        `json:"brief_path"`
-	Access      string        `json:"access"`
-	Category    string        `json:"category"`
-	BlockedBy   []string      `json:"blocked_by"`
-	State       string        `json:"state"`
-	Waiting     string        `json:"waiting,omitempty"`
-	Route       *router.Route `json:"route,omitempty"`
-	Provisional bool          `json:"provisional"`
-	Attempt     int           `json:"attempt"`
-	Outcome     string        `json:"outcome,omitempty"`
-	Status      string        `json:"status,omitempty"`
-	Error       string        `json:"error,omitempty"`
-	StartedAt   time.Time     `json:"started_at,omitempty"`
-	EndedAt     time.Time     `json:"ended_at,omitempty"`
-	LastOutput  time.Time     `json:"last_output,omitempty"`
-	Folder      string        `json:"folder,omitempty"`
-	Excluded    []string      `json:"excluded_families,omitempty"`
-	Escalations int           `json:"escalations"`
+	Number            int           `json:"number"`
+	ID                string        `json:"id"`
+	Title             string        `json:"title"`
+	BriefPath         string        `json:"brief_path"`
+	Access            string        `json:"access"`
+	Category          string        `json:"category"`
+	BlockedBy         []string      `json:"blocked_by"`
+	State             string        `json:"state"`
+	DependencyBlocked bool          `json:"dependency_blocked,omitempty"`
+	Waiting           string        `json:"waiting,omitempty"`
+	Route             *router.Route `json:"route,omitempty"`
+	Provisional       bool          `json:"provisional"`
+	Attempt           int           `json:"attempt"`
+	Outcome           string        `json:"outcome,omitempty"`
+	Status            string        `json:"status,omitempty"`
+	Error             string        `json:"error,omitempty"`
+	StartedAt         time.Time     `json:"started_at,omitempty"`
+	EndedAt           time.Time     `json:"ended_at,omitempty"`
+	LastOutput        time.Time     `json:"last_output,omitempty"`
+	Folder            string        `json:"folder,omitempty"`
+	Excluded          []string      `json:"excluded_families,omitempty"`
+	Escalations       int           `json:"escalations"`
 	// Resume answers from the Orchestrator, consumed on the next start.
 	ResumeLane  string `json:"resume_lane,omitempty"`
 	ResumeBrief string `json:"resume_brief,omitempty"`
@@ -86,6 +88,10 @@ type State struct {
 	Awake       bool         `json:"caffeinate"`
 	Folder      string       `json:"folder"`
 	Lane        string       `json:"lane,omitempty"` // --lane for every Task
+	Level       roster.Level `json:"level,omitempty"`
+	Floor       roster.Tier  `json:"floor,omitempty"`
+	Ceiling     roster.Tier  `json:"ceiling,omitempty"`
+	CouncilSkip string       `json:"council_skip,omitempty"`
 }
 
 const FileState = "run.json"

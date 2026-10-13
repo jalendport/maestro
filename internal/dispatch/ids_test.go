@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/jalendport/maestro/internal/config"
@@ -29,8 +30,54 @@ func TestNextRunID(t *testing.T) {
 			if got := NextRunID(root); got != tt.want {
 				t.Fatalf("NextRunID() = %q, want %q", got, tt.want)
 			}
+			if info, err := os.Stat(filepath.Join(config.RunsDir(root), tt.want)); err != nil || !info.IsDir() {
+				t.Fatalf("reserved folder: info=%v err=%v", info, err)
+			}
 		})
 	}
+}
+
+func TestNextRunIDConcurrent(t *testing.T) {
+	root := t.TempDir()
+	const count = 32
+	start := make(chan struct{})
+	ids := make(chan string, count)
+	for i := 0; i < count; i++ {
+		go func() {
+			<-start
+			ids <- NextRunID(root)
+		}()
+	}
+	close(start)
+	seen := map[string]bool{}
+	for i := 0; i < count; i++ {
+		id := <-ids
+		if seen[id] {
+			t.Fatalf("Run id %q was reserved twice", id)
+		}
+		seen[id] = true
+		if info, err := os.Stat(filepath.Join(config.RunsDir(root), id)); err != nil || !info.IsDir() {
+			t.Fatalf("reserved folder %s: info=%v err=%v", id, info, err)
+		}
+	}
+}
+
+func TestNextRunIDAllocationError(t *testing.T) {
+	root := t.TempDir()
+	runsDir := config.RunsDir(root)
+	if err := os.MkdirAll(filepath.Dir(runsDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(runsDir, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		failure := recover()
+		if failure == nil || !strings.Contains(fmt.Sprint(failure), "reserve Run id:") {
+			t.Fatalf("panic = %v, want Run id allocation error", failure)
+		}
+	}()
+	NextRunID(root)
 }
 
 func TestNewTaskID(t *testing.T) {

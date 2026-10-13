@@ -23,7 +23,7 @@ import (
 )
 
 func (a *app) runCmd() *cobra.Command {
-	var lane, level string
+	var lane, level, floor, ceiling string
 	var wait bool
 	c := &cobra.Command{
 		Use:     "run <plan.md>",
@@ -40,7 +40,15 @@ func (a *app) runCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			s, err := run.Create(env, args[0], run.CreateOpts{Lane: lane, Level: lv})
+			fl, err := roster.ParseTier(floor)
+			if err != nil {
+				return err
+			}
+			ce, err := roster.ParseTier(ceiling)
+			if err != nil {
+				return err
+			}
+			s, err := run.Create(env, args[0], run.CreateOpts{Lane: lane, Level: lv, Floor: fl, Ceiling: ce})
 			if err != nil {
 				return err
 			}
@@ -57,6 +65,8 @@ func (a *app) runCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&lane, "lane", "", "request a Lane for every Task: family[:effort]")
 	c.Flags().StringVar(&level, "level", "", "Judgment level estimate for every Task")
+	c.Flags().StringVar(&floor, "floor", "", "minimum Tier for every Task")
+	c.Flags().StringVar(&ceiling, "ceiling", "", "maximum Tier for every Task")
 	c.Flags().BoolVar(&wait, "wait", false, "keep the supervisor in this process and print the report at the end")
 	return c
 }

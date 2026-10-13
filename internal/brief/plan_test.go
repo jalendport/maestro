@@ -1,7 +1,9 @@
 package brief
 
 import (
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -70,6 +72,41 @@ func TestParsePlan(t *testing.T) {
 func TestPlanRejectsUnknownBlocker(t *testing.T) {
 	if _, err := ParsePlanText("## A\n- blocked_by: [9]\n### Goal\ng\n### Done\nd\n"); err == nil {
 		t.Fatal("expected an error")
+	}
+}
+
+func TestPlanRejectsDependencyCycles(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		dependencies []string
+		want         string
+	}{
+		{name: "self by number", dependencies: []string{"1"}, want: `"A" -> "A"`},
+		{name: "self by title", dependencies: []string{"A"}, want: `"A" -> "A"`},
+		{name: "two tasks", dependencies: []string{"2", "A"}, want: `"A" -> "B" -> "A"`},
+		{name: "three tasks", dependencies: []string{"2", "3", "1"}, want: `"A" -> "B" -> "C" -> "A"`},
+		{name: "disconnected cycle", dependencies: []string{"", "3", "2"}, want: `"B" -> "C" -> "B"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var src strings.Builder
+			for i, dependency := range tt.dependencies {
+				fmt.Fprintf(&src, "## %c\n- blocked_by: [%s]\n### Goal\ng\n### Done\nd\n", 'A'+i, dependency)
+			}
+			_, err := ParsePlanText(src.String())
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want cycle %s", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlanAcceptsSharedDependencies(t *testing.T) {
+	var src strings.Builder
+	for i, dependencies := range []string{"2, 3", "4", "4", ""} {
+		fmt.Fprintf(&src, "## %c\n- blocked_by: [%s]\n### Goal\ng\n### Done\nd\n", 'A'+i, dependencies)
+	}
+	if _, err := ParsePlanText(src.String()); err != nil {
+		t.Fatal(err)
 	}
 }
 

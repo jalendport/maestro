@@ -90,7 +90,50 @@ func ParsePlanText(src string) (*Plan, error) {
 			t.BlockedBy[i] = ref
 		}
 	}
+	if err := validateDependencies(p.Tasks); err != nil {
+		return nil, err
+	}
 	return p, nil
+}
+
+func validateDependencies(tasks []*Brief) error {
+	byTitle := make(map[string]*Brief, len(tasks))
+	for _, task := range tasks {
+		byTitle[task.Title] = task
+	}
+	visited := map[string]bool{}
+	active := map[string]int{}
+	var path []string
+	var visit func(string) error
+	visit = func(title string) error {
+		if start, ok := active[title]; ok {
+			cycle := append(append([]string{}, path[start:]...), title)
+			for i, name := range cycle {
+				cycle[i] = strconv.Quote(name)
+			}
+			return fmt.Errorf("blocked_by cycle: %s", strings.Join(cycle, " -> "))
+		}
+		if visited[title] {
+			return nil
+		}
+		active[title] = len(path)
+		path = append(path, title)
+		for _, dependency := range byTitle[title].BlockedBy {
+			if err := visit(dependency); err != nil {
+				return err
+			}
+		}
+		path = path[:len(path)-1]
+		delete(active, title)
+		visited[title] = true
+		return nil
+	}
+	for _, task := range tasks {
+		if err := visit(task.Title); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func parseTaskSection(title, section string, defaults Fields) (*Brief, error) {

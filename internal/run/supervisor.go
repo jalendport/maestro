@@ -22,13 +22,16 @@ import (
 
 // CreateOpts are the run verb's flags.
 type CreateOpts struct {
-	Lane  string
-	Level roster.Level
+	Lane    string
+	Level   roster.Level
+	Floor   roster.Tier
+	Ceiling roster.Tier
 }
 
 // Create parses the Plan file, lays out the Run folder with one Brief file
 // per Task, routes every Task provisionally, and decides whether the
-// breakdown needs approval. It does not start anything.
+// breakdown needs approval. It starts a detached Council for a held Plan,
+// but does not start any Task.
 func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 	if idx, live := LiveRunFor(env.Root); live {
 		return nil, fmt.Errorf("Run %s is live; use maestro add", idx.Run)
@@ -45,7 +48,7 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 	if err := os.MkdirAll(filepath.Join(folder, "control"), 0o755); err != nil {
 		return nil, err
 	}
-	s := &State{Run: runID, Project: env.Root, Plan: plan.Path, Title: plan.Title, State: StateHeld, StartedAt: time.Now(), Folder: folder, Lane: o.Lane}
+	s := &State{Run: runID, Project: env.Root, Plan: plan.Path, Title: plan.Title, State: StateHeld, StartedAt: time.Now(), Folder: folder, Lane: o.Lane, Level: o.Level, Floor: o.Floor, Ceiling: o.Ceiling}
 	rt := env.NewRouter()
 	var approval []string
 	for i, b := range plan.Tasks {
@@ -63,8 +66,7 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 			ts.BlockedBy = []string{}
 		}
 		req := router.Request{Brief: b, Access: ts.Access, Lane: firstNonEmpty(b.Lane, o.Lane), Level: o.Level, Project: env.Project, InSolo: dispatch.InSolo()}
-		req.Floor, _ = roster.ParseTier(b.Floor)
-		req.Ceiling, _ = roster.ParseTier(b.Ceiling)
+		req.Floor, req.Ceiling = routeBounds(s, b)
 		route, err := rt.Route(req)
 		switch e := err.(type) {
 		case nil:
@@ -109,7 +111,10 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 		} else {
 			s.Councils = append(s.Councils, c.Slug)
 			_ = s.Save()
-			go func() { _, _ = council.Start(env, c.Path) }()
+			if err := council.Detach(c.Path); err != nil {
+				ui.Warnf("plan council: %v", err)
+				return s, nil
+			}
 			ui.Eventf("council", "plan council %s started (%d seats); maestro wait %s", c.Slug, len(c.Seats), c.Slug)
 		}
 	}
@@ -167,6 +172,7 @@ func (sup *Supervisor) loop() error {
 	s.State = StateLive
 	s.Pid = os.Getpid()
 	s.PauseReason = ""
+	s.EndedAt = time.Time{}
 	if err := WriteIndex(s); err != nil {
 		return err
 	}
@@ -186,6 +192,7 @@ func (sup *Supervisor) loop() error {
 	defer ticker.Stop()
 	for {
 		sup.consumeControl()
+		sup.updateDependencies()
 		if !sup.paused && !sup.cancelled {
 			sup.schedule()
 		}
@@ -197,7 +204,7 @@ func (sup *Supervisor) loop() error {
 				return sup.end(StatePaused)
 			}
 			if !sup.anyStartable() {
-				return sup.end(StateFinished)
+				return sup.end(sup.completionState())
 			}
 		}
 		select {
@@ -258,35 +265,91 @@ func (sup *Supervisor) schedule() {
 	_ = s.Save()
 }
 
-func (sup *Supervisor) blockedReason(t *TaskState) string {
+// dependencyReason follows the graph, including waiting Tasks, to find a
+// terminal blocker. The boolean distinguishes a blocker from work still live.
+func (sup *Supervisor) dependencyReason(t *TaskState, visiting map[*TaskState]bool) (string, bool) {
+	if visiting[t] {
+		return fmt.Sprintf("dependency cycle at task %d", t.Number), true
+	}
+	visiting[t] = true
+	defer delete(visiting, t)
+	waiting := ""
 	for _, ref := range t.BlockedBy {
 		b, ok := sup.State.Task(ref)
 		if !ok {
+			return fmt.Sprintf("missing dependency %q", ref), true
+		}
+		if b.State == TaskDone {
 			continue
 		}
-		switch b.State {
-		case TaskDone, TaskSkipped:
-		case TaskFailed, TaskBlocked, TaskCancelled:
-			return fmt.Sprintf("blocked by %d (%s)", b.Number, b.State)
-		default:
-			return fmt.Sprintf("blocked by %d", b.Number)
+		if b.DependencyBlocked || b.State == TaskWaiting || b.State == TaskRunning {
+			if why, terminal := sup.dependencyReason(b, visiting); terminal {
+				return why, true
+			}
+		} else {
+			switch b.State {
+			case TaskFailed, TaskBlocked, TaskSkipped, TaskCancelled:
+				return fmt.Sprintf("blocked by %d (%s)", b.Number, b.State), true
+			}
+		}
+		if waiting == "" {
+			waiting = fmt.Sprintf("blocked by %d", b.Number)
 		}
 	}
-	return ""
+	return waiting, false
 }
 
-// anyStartable reports whether a waiting Task can still start once slots free.
-func (sup *Supervisor) anyStartable() bool {
+func (sup *Supervisor) blockedReason(t *TaskState) string {
+	why, _ := sup.dependencyReason(t, map[*TaskState]bool{})
+	return why
+}
+
+// updateDependencies also releases dependency blocks after an upstream resume.
+func (sup *Supervisor) updateDependencies() {
 	for _, t := range sup.State.Tasks {
-		if t.State != TaskWaiting {
+		if t.State != TaskWaiting && !t.DependencyBlocked {
 			continue
 		}
-		why := sup.blockedReason(t)
-		if why == "" || !strings.Contains(why, "(") {
+		why, terminal := sup.dependencyReason(t, map[*TaskState]bool{})
+		if terminal {
+			t.State, t.Error, t.Waiting = TaskBlocked, why, ""
+			t.DependencyBlocked = true
+		} else if t.DependencyBlocked {
+			t.State, t.Error, t.Waiting = TaskWaiting, "", why
+			t.DependencyBlocked = false
+		}
+	}
+}
+
+// anyStartable reports whether every dependency of a waiting Task is done.
+func (sup *Supervisor) anyStartable() bool {
+	for _, t := range sup.State.Tasks {
+		if t.State == TaskWaiting && sup.blockedReason(t) == "" {
 			return true
 		}
 	}
 	return false
+}
+
+func (sup *Supervisor) completionState() string {
+	for _, t := range sup.State.Tasks {
+		if t.State != TaskDone && t.State != TaskSkipped {
+			return StatePaused
+		}
+	}
+	return StateFinished
+}
+
+// Run flags override the per-Task Brief, as they do for a Dispatch.
+func routeBounds(s *State, b *brief.Brief) (roster.Tier, roster.Tier) {
+	floor, ceiling := s.Floor, s.Ceiling
+	if floor == "" {
+		floor, _ = roster.ParseTier(b.Floor)
+	}
+	if ceiling == "" {
+		ceiling, _ = roster.ParseTier(b.Ceiling)
+	}
+	return floor, ceiling
 }
 
 func (sup *Supervisor) accountFor(t *TaskState) string {
@@ -340,9 +403,8 @@ func (sup *Supervisor) start(t *TaskState) {
 		t.Error = err.Error()
 		return
 	}
-	req := router.Request{Lane: firstNonEmpty3(t.ResumeLane, b.Lane, sup.State.Lane), Excluded: t.Excluded}
-	req.Floor, _ = roster.ParseTier(b.Floor)
-	req.Ceiling, _ = roster.ParseTier(b.Ceiling)
+	req := router.Request{Lane: firstNonEmpty3(t.ResumeLane, b.Lane, sup.State.Lane), Level: sup.State.Level, Excluded: t.Excluded}
+	req.Floor, req.Ceiling = routeBounds(sup.State, b)
 	if t.Escalations > 0 && t.Route != nil && req.Lane == "" {
 		// Escalation: the new pick must be a higher Tier.
 		if next := nextTier(t.Route.Tier); next != "" && (req.Floor == "" || next.Rank() > req.Floor.Rank()) {
@@ -642,6 +704,15 @@ func (sup *Supervisor) applyResume(path string) {
 		t.State = TaskSkipped
 		t.Waiting = ""
 	case r.Brief != "":
+		corrected, err := brief.Parse(r.Brief)
+		if err != nil {
+			ui.Warnf("resume: %v", err)
+			return
+		}
+		// Dispatch re-reads the full Brief, including touch, checks, and wall limit.
+		// Refresh the fields that the scheduler uses before it can claim a slot.
+		t.Access = corrected.EffectiveAccess()
+		t.Category = corrected.Category
 		t.Cancel = false
 		t.BriefPath = r.Brief
 		t.State = TaskWaiting
@@ -654,6 +725,8 @@ func (sup *Supervisor) applyResume(path string) {
 		t.Waiting = "resumed on " + r.Lane
 		t.Excluded = nil
 	}
+	t.DependencyBlocked = false
+	sup.updateDependencies()
 	sup.escalationsInARow = 0
 	sup.errorTexts = map[string]int{}
 	sup.paused = false
@@ -667,33 +740,61 @@ func (sup *Supervisor) end(state string) error {
 	s.State = state
 	s.EndedAt = time.Now()
 	s.Pid = 0
-	for _, t := range s.Tasks {
-		if t.State == TaskWaiting && t.Waiting != "" && !strings.Contains(t.Waiting, "(") && state == StateFinished {
-			t.Waiting = "never started: " + t.Waiting
+	sup.updateDependencies()
+	if state == StatePaused {
+		var needs []string
+		for _, t := range sortedTasks(s) {
+			if t.State == TaskFailed || t.State == TaskBlocked || t.State == TaskCancelled || t.State == TaskWaiting {
+				needs = append(needs, fmt.Sprintf("task %d (%s)", t.Number, t.State))
+			}
+		}
+		if len(needs) > 0 {
+			if s.PauseReason != "" {
+				s.PauseReason += "; "
+			}
+			s.PauseReason += "needs an answer: " + strings.Join(needs, ", ")
 		}
 	}
-	_ = s.Save()
+	var review *council.Council
 	if state == StateFinished {
-		sup.endOfRunCouncil()
+		review = sup.endOfRunCouncil()
 	}
 	report := Report(s)
-	_ = os.WriteFile(filepath.Join(s.Folder, FileReport), []byte(report), 0o644)
+	if err := os.WriteFile(filepath.Join(s.Folder, FileReport), []byte(report), 0o644); err != nil {
+		return err
+	}
 	if err := ledger.Append(ledgerRow(s)); err != nil {
 		ui.Warnf("ledger: %v", err)
 	}
 	done, blocked, failed, _, _, _ := s.Counts()
 	summary := fmt.Sprintf("Run %s %s: %d done, %d blocked, %d failed", s.Run, state, done, blocked, failed)
+	if review != nil {
+		summary += "; council " + review.Slug + " (maestro wait " + review.Slug + ")"
+	}
 	ui.Eventf(state, "%s  → %s", summary, filepath.Join(s.Folder, FileReport))
 	notify(summary)
 	if sup.Env.Solo != nil {
-		sup.Env.Solo.Wake("run end", s.Run, s.Title, "")
+		title := s.Title
+		if review != nil {
+			title += "; council " + review.Slug
+		}
+		sup.Env.Solo.Wake("run end", s.Run, title, "")
+	}
+	if err := s.Save(); err != nil {
+		return err
+	}
+	RemoveIndex(s.Project, s.Run)
+	if review != nil {
+		if err := council.Detach(review.Path); err != nil {
+			ui.Warnf("end-of-run council: %v", err)
+		}
 	}
 	return nil
 }
 
-// endOfRunCouncil runs when the Run had a Heavy or Frontier Task, when the
+// endOfRunCouncil prepares a Council when the Run had a Heavy or Frontier Task, when the
 // gate scored a high risk, or always when the project asks for it.
-func (sup *Supervisor) endOfRunCouncil() {
+func (sup *Supervisor) endOfRunCouncil() *council.Council {
 	s := sup.State
 	var top roster.Tier
 	trigger := false
@@ -729,8 +830,17 @@ func (sup *Supervisor) endOfRunCouncil() {
 	if sup.Env.Project != nil && sup.Env.Project.Councils == "always" {
 		trigger = true
 	}
-	if !trigger || top == "" || len(changed) == 0 {
-		return
+	s.CouncilSkip = ""
+	switch {
+	case len(changed) == 0:
+		s.CouncilSkip = "no changed files"
+	case top == "":
+		s.CouncilSkip = "no completed Route"
+	case !trigger:
+		s.CouncilSkip = "no heavy task, risk under high"
+	}
+	if s.CouncilSkip != "" {
+		return nil
 	}
 	c, err := council.Create(sup.Env, council.Opts{
 		Question: fmt.Sprintf("Review the changes of run %s (%s) as one diff: is the work correct, complete, and safe to keep? The files changed are listed under Files; read them in full.", s.Run, s.Title),
@@ -738,14 +848,12 @@ func (sup *Supervisor) endOfRunCouncil() {
 	})
 	if err != nil {
 		ui.Warnf("end-of-run council: %v", err)
-		return
+		s.CouncilSkip = "could not create: " + err.Error()
+		return nil
 	}
 	s.Councils = append(s.Councils, c.Slug)
-	_ = s.Save()
 	ui.Eventf("council", "end-of-run council %s  %s  %d seats", c.Slug, c.Tier, len(c.Seats))
-	if _, err := council.Start(sup.Env, c.Path); err != nil {
-		ui.Warnf("end-of-run council: %v", err)
-	}
+	return c
 }
 
 func ledgerRow(s *State) map[string]any {

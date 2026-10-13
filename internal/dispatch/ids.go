@@ -16,9 +16,18 @@ import (
 var runIDRe = regexp.MustCompile(`^r-(\d{4,})$`)
 
 // NextRunID allocates the next r-NNNN in the project's runs folder.
+// It reserves the folder before returning. Since the signature has no error
+// return, an allocation error panics rather than returning an unreserved id.
 func NextRunID(root string) string {
+	runsDir := config.RunsDir(root)
+	if err := os.MkdirAll(runsDir, 0o755); err != nil {
+		panic(fmt.Errorf("reserve Run id: %w", err))
+	}
 	max := 0
-	entries, _ := os.ReadDir(config.RunsDir(root))
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		panic(fmt.Errorf("reserve Run id: %w", err))
+	}
 	for _, e := range entries {
 		if m := runIDRe.FindStringSubmatch(e.Name()); m != nil {
 			if n, _ := strconv.Atoi(m[1]); n > max {
@@ -26,7 +35,17 @@ func NextRunID(root string) string {
 			}
 		}
 	}
-	return fmt.Sprintf("r-%04d", max+1)
+	for {
+		max++
+		id := fmt.Sprintf("r-%04d", max)
+		if err := os.Mkdir(filepath.Join(runsDir, id), 0o755); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			panic(fmt.Errorf("reserve Run id: %w", err))
+		}
+		return id
+	}
 }
 
 // NewTaskID returns a 4-hex id that is free in the Run folder.
