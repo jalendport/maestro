@@ -118,6 +118,22 @@ func TestParseReport(t *testing.T) {
 	}
 }
 
+func TestRenderEditorToolsRule(t *testing.T) {
+	b, err := ParseText(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := "- Edit files with your editor tools (Write, Edit), not with shell scripts or heredocs; run the checks exactly as listed, without pipes.\n"
+	for _, access := range []string{AccessEdit, AccessRead} {
+		t.Run(access, func(t *testing.T) {
+			out := Render(b, RenderOpts{Access: access})
+			if got := strings.Contains(out, rule); got != (access == AccessEdit) {
+				t.Fatalf("editor-tools rule present = %v for Access %s", got, access)
+			}
+		})
+	}
+}
+
 func TestNamedTodoSurvivesBriefWrite(t *testing.T) {
 	b, err := ParseText("---\ntitle: Named todo\ntodo: 123\n---\n## Goal\nWork\n## Done\nDone\n")
 	if err != nil || b.Todo != 123 {

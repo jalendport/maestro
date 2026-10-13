@@ -76,6 +76,9 @@ func Render(b *Brief, o RenderOpts) string {
 	if o.Access == AccessRead {
 		w.WriteString("- This is a read task: write nothing in the repository except your report.\n")
 	}
+	if o.Access == AccessEdit {
+		w.WriteString("- Edit files with your editor tools (Write, Edit), not with shell scripts or heredocs; run the checks exactly as listed, without pipes.\n")
+	}
 	w.WriteString("- Report every blocked or denied command in `## Blocked`.\n")
 	w.WriteString("- When the Done cannot be met, stop and report `STATUS: blocked` or `STATUS: partial`.\n\n")
 	if o.Council {

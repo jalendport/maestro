@@ -218,7 +218,7 @@ council_view = 0.80
 council_write = 0.30
 ask = 0.50
 timeout_s = 1.5
-satisfies = 0.90
+satisfies = 0.65
 
 [budget]
 stale_after = "30m"

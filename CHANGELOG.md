@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added the `todo` brief field to attach a task to an existing Solo todo
 
 ### Changed
+- Changed the default gate `satisfies` threshold from `0.90` to `0.65`
+- Changed the supervisor to block a Task and pause the Run when two consecutive attempts fail with the same error text
 - Councils now live under `.agents/maestro/councils/`.
 - Changed the rules table to route without a warning when there is no Jev key
 - Changed `reserve` to apply to any account

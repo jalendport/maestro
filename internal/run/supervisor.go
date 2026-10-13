@@ -410,6 +410,7 @@ func (sup *Supervisor) handle(r result) {
 		return
 	}
 	rec := r.rec
+	repeated := repeatedError(t, rec)
 	t.Attempt = rec.Attempt
 	t.Outcome = rec.Outcome.Outcome
 	t.Status = rec.Outcome.Status
@@ -424,9 +425,58 @@ func (sup *Supervisor) handle(r result) {
 	case dispatch.OutcomeCancelled:
 		t.State = TaskCancelled
 	default:
-		sup.escalate(t, rec, rec.Outcome.ErrorText)
+		if repeated != "" {
+			t.State = TaskBlocked
+			t.Waiting = ""
+			t.Error = "same error twice: " + repeated
+			sup.pause(t.Error)
+		} else {
+			sup.escalate(t, rec, rec.Outcome.ErrorText)
+		}
 	}
 	_ = sup.State.Save()
+}
+
+func repeatedError(t *TaskState, rec *dispatch.Record) string {
+	if !failedOutcome(rec.Outcome.Outcome) || rec.Attempt < 2 {
+		return ""
+	}
+	previous := ""
+	if t.Attempt == rec.Attempt-1 && failedOutcome(t.Outcome) {
+		previous = t.Error
+	}
+	// Dispatch can retry on the same Lane before the supervisor gets a result.
+	if t.Folder != "" {
+		folder := filepath.Join(t.Folder, dispatch.FileAttempts, fmt.Sprint(rec.Attempt-1))
+		if last, err := dispatch.LoadRecord(folder); err == nil && last.Attempt == rec.Attempt-1 {
+			previous = ""
+			if failedOutcome(last.Outcome.Outcome) {
+				previous = last.Outcome.ErrorText
+			}
+		}
+	}
+	text := failureText(rec.Outcome.ErrorText)
+	if text != "" && text == failureText(previous) {
+		return text
+	}
+	return ""
+}
+
+func failedOutcome(outcome string) bool {
+	switch outcome {
+	case dispatch.OutcomeFailed, dispatch.OutcomeEscalated, dispatch.OutcomeTimedOut:
+		return true
+	}
+	return false
+}
+
+func failureText(text string) string {
+	for _, class := range []string{dispatch.FailLane, dispatch.FailTransient, dispatch.FailLimit, dispatch.FailStall, dispatch.FailBad} {
+		if rest, ok := strings.CutPrefix(text, class+":"); ok {
+			return strings.TrimPrefix(rest, " ")
+		}
+	}
+	return text
 }
 
 // escalate removes the failed family and re-Routes one Tier up, until the

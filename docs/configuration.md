@@ -222,7 +222,7 @@ Maestro compares these numbers with the scores that Jev returns. Only the table 
 | `council_write` | float | `0.30` | Sets the score of "needs to write" under which Maestro suggests a Council. |
 | `ask` | float | `0.50` | Sets the confidence at which an "ask the Orchestrator" pick stops the Route. |
 | `timeout_s` | float | `1.5` | Sets the number of seconds that Maestro waits for Jev before it uses the rules table. |
-| `satisfies` | float | `0.90` | Sets the score at or above which the gate closes a Task as satisfying its Brief. A `pass` verdict under this score ends the Task `unverified` rather than failed, so correct work is kept and the Orchestrator reads the diff; tune the score from `maestro router stats` once the ledger has rows. |
+| `satisfies` | float | `0.65` | Sets the score at or above which the gate closes a Task as satisfying its Brief. A `pass` verdict under this score ends the Task `unverified` rather than failed, so correct work is kept and the Orchestrator reads the diff; tune the score from `maestro router stats` once the ledger has rows. |
 
 ### [budget]
 
