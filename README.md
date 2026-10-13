@@ -61,6 +61,8 @@ Probe the hook. A sub-agent that can write code must get a `deny`:
 echo '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose"}}' | maestro hook
 ```
 
+The probe denies only where the hook is in scope: with the default `[hook] scope = "projects"` that is inside a project that has `.agents/maestro.toml`, and `scope = "all"` in `~/.maestro/config.toml` makes it global.
+
 ### Connect Codex
 
 ```sh
@@ -81,6 +83,8 @@ Probe the hook. A sub-agent that can write code must get a `deny`:
 ```sh
 echo '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose"}}' | maestro hook
 ```
+
+The probe denies only where the hook is in scope: with the default `[hook] scope = "projects"` that is inside a project that has `.agents/maestro.toml`, and `scope = "all"` in `~/.maestro/config.toml` makes it global.
 
 ### Connect Grok
 
@@ -103,6 +107,8 @@ Probe the hook. A sub-agent that can write code must get a `deny`:
 echo '{"toolName":"spawn_subagent","toolInput":{"agent":"general-purpose"}}' | maestro hook
 ```
 
+The probe denies only where the hook is in scope: with the default `[hook] scope = "projects"` that is inside a project that has `.agents/maestro.toml`, and `scope = "all"` in `~/.maestro/config.toml` makes it global.
+
 ### Connect Antigravity
 
 ```sh
@@ -124,7 +130,23 @@ Probe the hook. A sub-agent that can write code must get a `deny`:
 echo '{"toolCall":{"name":"invoke_subagent","args":{"agent":"general-purpose"}}}' | maestro hook
 ```
 
+The probe denies only where the hook is in scope: with the default `[hook] scope = "projects"` that is inside a project that has `.agents/maestro.toml`, and `scope = "all"` in `~/.maestro/config.toml` makes it global.
+
 ## Usage
+
+You install once and plan with your agent. The agent hands finished plans to Maestro on its own. You answer only when Maestro needs you.
+
+1. Install Maestro and connect the harnesses once. See [Installation](#installation).
+2. Plan with your agent as you do now: a grilling session, a spec, a plan file. The Maestro skill tells the agent what a finished plan looks like.
+3. When the plan is finished, the agent writes the plan file and runs `maestro run` itself. Nobody asks you to type anything.
+4. Inside Solo, each task is a todo and each result is a comment, and a finished run wakes the agent. Outside Solo, the agent reports from `maestro wait`.
+5. Maestro needs you when a verb exits with code 2: a held breakdown, a paused run, a blocked task, or a single-opinion council. The agent reads the report and either answers or asks you one question.
+
+For example, you end a grilling session with a plan for a new probe feature. The agent writes `.agents/plans/probe-feature.md` and starts the run. Some minutes later it tells you that the three tasks are done and the checks pass. If a lane needs an answer, the agent asks you one question and passes your answer on.
+
+### Verbs
+
+These are the commands the agent runs. A person can run them by hand too.
 
 Write a brief file (`maestro help brief` prints the format), then dispatch it:
 

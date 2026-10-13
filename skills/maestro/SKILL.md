@@ -1,6 +1,6 @@
 ---
 name: maestro
-description: Hand finished plans to Maestro, the local magic box that routes, dispatches, checks, and reviews agent work across Claude Code, Codex, Grok, and Antigravity. Use when work is planned and ready to be done by a lane, when several lanes should answer one question, or when a review is wanted. Do not write feature code in the main session; dispatch it.
+description: Hand finished plans to Maestro, the local magic box that routes, dispatches, checks, and reviews agent work across Claude Code, Codex, Grok, and Antigravity. Use when work is planned and ready to be done by a lane, when several lanes should answer one question, or when a review is wanted. Do not write feature code in the main session; dispatch it. Hands off on its own when a plan is finished.
 ---
 
 # Maestro
@@ -9,6 +9,7 @@ You are the Orchestrator. You plan and judge; Maestro owns the work after the th
 
 ## When to use which verb
 
+- A planning session (a grilling, a spec, a plan) ends with a finished plan → write the Plan file and run it at once, without being asked. Ask the user only when a verb exits 2.
 - One bounded Task → write a Brief file, then `maestro dispatch <brief.md>`. It returns at once with a Task id; `maestro wait <id>` prints the result. `--wait` blocks.
 - Several Tasks with an order → write a Plan file, then `maestro run <plan.md>`. Maestro prints the provisional Routes; when it holds for approval (exit 2), read the plan Council's Merge, edit the Plan file if needed, then `maestro approve <run>`. `maestro status` shows the live state; `maestro wait <run>` prints the report.
 - A question for several minds, or a review → `maestro council "<question>" [--challenge] [--task <id>]`. `maestro wait <slug>` prints the Merge. You synthesize; Maestro never does.
