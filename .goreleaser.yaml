@@ -35,3 +35,9 @@ homebrew_casks:
     description: Routes, dispatches, checks, and reviews agent work across Claude Code, Codex, Grok, and Antigravity
     binaries:
       - maestro
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/maestro"]
+          end
