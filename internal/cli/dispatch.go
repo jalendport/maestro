@@ -182,8 +182,12 @@ func (a *app) waitCmd() *cobra.Command {
 				return fmt.Errorf("no task or council %q under %s", args[0], env.Root)
 			}
 			started := time.Now()
+			seen := map[string]bool{}
 			for {
 				rec, err := dispatch.LoadRecord(folder)
+				if err == nil && !a.json {
+					printRelayEvents(rec, seen)
+				}
 				if err == nil && rec.State == "ended" {
 					return exit(dispatch.Print(rec, a.json))
 				}
@@ -194,6 +198,20 @@ func (a *app) waitCmd() *cobra.Command {
 				time.Sleep(2 * time.Second)
 			}
 		},
+	}
+}
+
+func printRelayEvents(rec *dispatch.Record, seen map[string]bool) {
+	for _, event := range rec.Events {
+		if event.Kind != "relay" && event.Kind != "relay-answer" {
+			continue
+		}
+		key := fmt.Sprintf("%s/%d/%s/%s", rec.Task, rec.Attempt, event.Kind, event.At.Format(time.RFC3339Nano))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		fmt.Fprint(os.Stdout, dispatch.RelayEvents(&dispatch.Record{Task: rec.Task, Events: []dispatch.Event{event}}))
 	}
 }
 

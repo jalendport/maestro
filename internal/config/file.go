@@ -146,6 +146,7 @@ type Project struct {
 	Forbid         []string `toml:"forbid"`
 	PatternSetting string   `toml:"pattern_setting"`
 	Checks         []string `toml:"checks"`
+	Allow          []string `toml:"allow"`
 	Router         string   `toml:"router"`
 	Redact         []string `toml:"redact"`
 	Councils       string   `toml:"councils"`

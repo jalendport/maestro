@@ -149,6 +149,9 @@ func Status(s *State) string {
 			lane += " (provisional)"
 		}
 		fmt.Fprintf(&w, "  %-2d %-32s %-9s %-26s %s\n", t.Number, cutTitle(t.Title, 32), stateWord(t), lane, tail)
+		if rec, err := dispatch.LoadRecord(filepath.Join(s.Folder, t.ID)); err == nil {
+			w.WriteString(dispatch.RelayEvents(rec))
+		}
 	}
 	return w.String()
 }

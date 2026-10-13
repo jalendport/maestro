@@ -3,7 +3,9 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -85,6 +87,7 @@ func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 			mode = "auto"
 		}
 		tools := []string{"Bash(git diff *)", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git blame *)", "Bash(git status)", "Bash(git diff)", "Bash(ls *)", "Bash(cat *)", "WebFetch", "WebSearch"}
+		tools = append(tools, l.AllowRules...)
 		for _, cmd := range l.AllowedCommands {
 			tools = append(tools, "Bash("+cmd+")", "Bash("+cmd+" *)")
 		}
@@ -102,6 +105,25 @@ func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 	default:
 		return nil, fmt.Errorf("claude has no %q shape", l.Access)
 	}
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	taskID := l.TaskID
+	if taskID == "" {
+		taskID = filepath.Base(l.RunFolder)
+	}
+	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
+	settings, err := json.Marshal(map[string]any{
+		"env": map[string]string{"MAESTRO_TASK_FOLDER": l.RunFolder},
+		"hooks": map[string]any{"PermissionRequest": []any{map[string]any{
+			"hooks": []any{map[string]any{"type": "command", "command": quote(self) + " relay " + quote(taskID), "timeout": 660}},
+		}}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	flags = append(flags, "--settings", string(settings))
 	args = append(args, flags...)
 	cmd := exec.Command(c.bin, args...)
 	cmd.Dir = l.Root

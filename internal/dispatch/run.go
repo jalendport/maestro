@@ -308,6 +308,9 @@ attempts:
 // clearAnswers drops answer markers left by an earlier attempt or a late
 // `maestro answer`, so a prompt never gets an answer nobody gave it.
 func clearAnswers(folder string) {
+	for _, name := range []string{"relay.json", "relay-answer.json"} {
+		_ = os.Remove(filepath.Join(folder, name))
+	}
 	for _, ans := range []string{"allow", "deny"} {
 		_ = os.Remove(filepath.Join(folder, "answer-"+ans))
 	}
@@ -328,7 +331,7 @@ func retryWait(class string) (time.Duration, bool) {
 func archiveAttempt(folder string, n int) {
 	dst := filepath.Join(folder, FileAttempts, strconv.Itoa(n))
 	_ = os.MkdirAll(dst, 0o755)
-	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, FileBaseline, "tab.log", "answer-allow", "answer-deny"} {
+	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, FileBaseline, "tab.log", "answer-allow", "answer-deny", "relay.json", "relay-answer.json"} {
 		_ = os.Rename(filepath.Join(folder, f), filepath.Join(dst, f))
 	}
 }
@@ -392,9 +395,14 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	}
 	allChecks := append(append([]string{}, projectChecks...), briefChecks...)
 
+	var allowRules []string
+	if t.Access == brief.AccessEdit && env.Project != nil {
+		allowRules = env.Project.Allow
+	}
+	useTab := env.Solo != nil && h.Name() != "agy" // Antigravity cannot deny interactive prompts, so it must use one-shot.
 	launch := harness.Launch{
 		Model: t.Route.Model, Effort: t.Route.Effort, Access: t.Access, Root: t.Project, Dirs: t.Dirs,
-		AllowedCommands: allChecks, AllowCommit: t.Commit, RunFolder: t.Folder, ReportPath: reportPath,
+		TaskID: t.Task, AllowRules: allowRules, AllowedCommands: allChecks, AllowCommit: t.Commit, RunFolder: t.Folder, ReportPath: reportPath,
 		Pointer: brief.Pointer(briefRel), ClaudeAuto: t.ClaudeAuto, InSolo: t.InSolo, WallLimit: wallOf(t.WallLimit),
 		Env: harness.Env(env.Roster.StripEnv(t.Route.Harness), map[string]string{
 			"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
@@ -405,12 +413,13 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 			"MAESTRO_LANE":                     "1",
 			"MAESTRO_RUN":                      t.Run,
 			"MAESTRO_TASK":                     t.Task,
+			"MAESTRO_TASK_FOLDER":              t.Folder,
 		}),
 	}
 	var command *harness.Command
 	var err error
 	renderBrief := b
-	if env.Solo != nil {
+	if useTab {
 		launch.Pointer = brief.Pointer(filepath.Join(t.Folder, FileBrief))
 		reportRel = reportPath
 		if h.Name() == "codex" && t.Access == brief.AccessRead {
@@ -442,7 +451,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	if err := os.WriteFile(filepath.Join(t.Folder, FileBrief), []byte(rendered), 0o644); err != nil {
 		return fail(FailLane, err.Error())
 	}
-	if env.Solo != nil {
+	if useTab {
 		return runTab(env, t, h, command, launch, rec, reportPath, allChecks, b, snap)
 	}
 
@@ -512,10 +521,12 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	ticker := time.NewTicker(time.Second)
 	lastTick := time.Now()
 	cancelled := false
+	relays := &relayTracker{}
 loop:
 	for {
 		select {
 		case waitErr = <-waitDone:
+			relays.poll(env, t, rec, h.Name(), time.Now())
 			break loop
 		case <-t.Cancel:
 			cancelled = true
@@ -534,13 +545,20 @@ loop:
 				rec.Events = append(rec.Events, Event{At: now, Kind: "wake", Text: fmt.Sprintf("clock jumped %s", jump.Round(time.Second))})
 			}
 			lastTick = now
+			wasOpen := relays.open()
+			relays.poll(env, t, rec, h.Name(), now)
+			if wasOpen || relays.open() {
+				mu.Lock()
+				lastOutput = now
+				mu.Unlock()
+			}
 			mu.Lock()
 			idleFor := now.Sub(lastOutput)
 			mu.Unlock()
 			switch {
-			case wall > 0 && now.Sub(rec.StartedAt) > wall:
+			case wall > 0 && now.Sub(rec.StartedAt)-relays.elapsed(now) > wall:
 				timer = "wall"
-			case idle > 0 && idleFor > idle:
+			case !relays.open() && idle > 0 && idleFor > idle:
 				timer = "idle"
 			}
 			if timer != "" {

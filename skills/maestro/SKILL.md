@@ -32,7 +32,7 @@ A Task's Report is `result.md` in its Run folder (`.agents/maestro/runs/<run>/<t
 
 ## When a Run pauses or a Task is blocked
 
-Read `report.md`, then answer once: `maestro resume <run> --task <n> --lane <family[:effort]>`, `--brief <corrected file>`, or `--skip`. For a relayed permission prompt: `maestro answer <task> allow|deny`. Ask the user for anything that touches their human gates: push, publish, release, deletes outside the workspace.
+Read `report.md`, then answer once: `maestro resume <run> --task <n> --lane <family[:effort]>`, `--brief <corrected file>`, or `--skip`. In Solo, a Relay wakes the Orchestrator with the permission request. Outside Solo, `maestro wait` and `maestro status` print the `relay` event. In both cases, answer with `maestro answer <task> allow|deny`. Ask the user for anything that touches their human gates: push, publish, release, deletes outside the workspace.
 
 ## Facts
 

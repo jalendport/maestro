@@ -88,6 +88,7 @@ func (a *app) build() *cobra.Command {
 	root.AddCommand(a.runSupervisorCmd())
 	root.AddCommand(a.councilCmd())
 	root.AddCommand(a.answerCmd())
+	root.AddCommand(a.relayCmd())
 	root.AddCommand(a.hookCmd())
 	root.AddCommand(a.adapterCmd())
 	root.AddCommand(a.tellCmd())

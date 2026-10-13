@@ -39,6 +39,8 @@ type Launch struct {
 	Access          string
 	Root            string
 	Dirs            []string
+	AllowRules      []string // project tool rules, edit only
+	TaskID          string
 	AllowedCommands []string // verification commands, allowed per edit Dispatch
 	AllowCommit     bool
 	RunFolder       string

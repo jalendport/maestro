@@ -19,6 +19,7 @@ access: edit                 # read | edit; category default when absent (code c
 dirs: [../shared-fixtures]   # extra writable directories
 touch: [internal/probe/**]   # scope guard; a diff outside it is a Bad result
 checks: ["go test ./internal/probe/..."]   # added to the project checks in .agents/maestro.toml
+# Project .agents/maestro.toml: allow = ["Bash(go run *)"] adds tool rules to edit Lanes only.
 commit: false                # true lets the Lane commit as its own guidance says; never push
 lane: codex-sol:high         # request a Lane; also floor: / ceiling:
 wall_limit: 45m              # raise the Tier's Wall limit for this Task

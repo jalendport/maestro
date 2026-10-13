@@ -8,8 +8,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
@@ -61,6 +63,59 @@ func TestRunOnceTakesFreshBaseline(t *testing.T) {
 			t.Fatalf("attempt %d did not replace the old baseline: %+v", i+1, snap)
 		}
 		old = snap
+	}
+}
+
+func TestRunOncePausesLimitsAndRecordsRelay(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	root, folder := t.TempDir(), t.TempDir()
+	bin := filepath.Join(t.TempDir(), "lane")
+	script := "#!/bin/sh\ncat >/dev/null\nsleep 5\nprintf '## Answer\\nanswer\\nSTATUS: done\\n' > \"$MAESTRO_TASK_FOLDER/result.md\"\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := &Env{Root: root, Roster: &roster.Roster{}, Project: &config.Project{Allow: []string{"Bash(go run *)"}}, Reg: harness.New(map[string]string{"claude": bin})}
+	task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessRead, Route: &router.Route{Harness: "claude"}, WallLimit: "3s", IdleLimit: "3s"}
+	done := make(chan error, 1)
+	go func() {
+		until := time.Now().Add(2 * time.Second)
+		for {
+			if _, err := os.Stat(filepath.Join(folder, FileRecord)); err == nil {
+				break
+			}
+			if time.Now().After(until) {
+				done <- fmt.Errorf("Lane did not start")
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		request := RelayRequest{ToolName: "Bash", ToolInput: []byte(`{"command":"pwd"}`), AskedAt: time.Now().UTC()}
+		if err := writeRelayJSON(folder, "relay.json", request); err != nil {
+			done <- err
+			return
+		}
+		time.Sleep(4 * time.Second)
+		if err := writeRelayJSON(folder, "relay-answer.json", relayAnswer{request, "deny", time.Now().UTC()}); err != nil {
+			done <- err
+			return
+		}
+		done <- os.Remove(filepath.Join(folder, "relay.json"))
+	}()
+	rec := runOnce(env, task, &brief.Brief{}, 1, nil)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if rec.Outcome.Timer != "" || rec.Outcome.Outcome != OutcomeAnswered {
+		t.Fatalf("outcome: %+v", rec.Outcome)
+	}
+	var kinds []string
+	for _, event := range rec.Events {
+		if strings.HasPrefix(event.Kind, "relay") {
+			kinds = append(kinds, event.Kind)
+		}
+	}
+	if !reflect.DeepEqual(kinds, []string{"relay", "relay-answer"}) || len(rec.Permission.Relays) != 1 {
+		t.Fatalf("Relay events: %v, records: %s", kinds, rec.Permission.Relays)
 	}
 }
 

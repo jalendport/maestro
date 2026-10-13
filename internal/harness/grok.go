@@ -81,9 +81,17 @@ func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	case "read":
 		flags = append(flags, "--permission-mode", "dontAsk", "--deny", "Write", "--deny", "Edit")
 	case "edit":
-		flags = append(flags, "--permission-mode", "acceptEdits")
+		flags = append(flags, "--permission-mode", "dontAsk")
 		for _, cmd := range l.AllowedCommands {
 			flags = append(flags, "--allow", "Bash("+cmd+" *)", "--allow", "Bash("+cmd+")")
+		}
+		if l.AllowCommit {
+			for _, verb := range []string{"add", "commit"} {
+				flags = append(flags, "--allow", "Bash(git "+verb+" *)")
+			}
+		}
+		for _, rule := range l.AllowRules {
+			flags = append(flags, "--allow", rule)
 		}
 	default:
 		return nil, fmt.Errorf("grok has no %q shape", l.Access)

@@ -522,10 +522,18 @@ func (a *app) printRunReport(folder string) error {
 // waitRun blocks until a Run ends or pauses, then prints its report.
 func (a *app) waitRun(folder string) error {
 	started := time.Now()
+	seen := map[string]bool{}
 	for {
 		s, err := run.Load(folder)
 		if err != nil {
 			return err
+		}
+		if !a.json {
+			for _, task := range s.Tasks {
+				if rec, err := dispatch.LoadRecord(filepath.Join(s.Folder, task.ID)); err == nil {
+					printRelayEvents(rec, seen)
+				}
+			}
 		}
 		switch s.State {
 		case run.StateFinished, run.StatePaused, run.StateCancelled:

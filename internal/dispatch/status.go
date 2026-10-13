@@ -63,5 +63,18 @@ func Status(rec *Record) string {
 	if rec.SoloProcess > 0 {
 		tab = "tab yes"
 	}
-	return fmt.Sprintf("  task %s  %s  %s  attempt %d  %s  %s  %s\n", rec.Task, rec.TaskInfo.Title, lane, rec.Attempt, fmtDur(elapsed), tab, state)
+	return fmt.Sprintf("  task %s  %s  %s  attempt %d  %s  %s  %s\n", rec.Task, rec.TaskInfo.Title, lane, rec.Attempt, fmtDur(elapsed), tab, state) + RelayEvents(rec)
+}
+
+func RelayEvents(rec *Record) string {
+	var text string
+	for _, event := range rec.Events {
+		if event.Kind == "relay" || event.Kind == "relay-answer" {
+			text += fmt.Sprintf("%s  task %s  %s\n", event.Kind, rec.Task, event.Text)
+			if event.Kind == "relay" {
+				text += fmt.Sprintf("         maestro answer %s allow|deny\n", rec.Task)
+			}
+		}
+	}
+	return text
 }

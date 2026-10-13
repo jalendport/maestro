@@ -117,26 +117,6 @@ func (l *SoloLink) Wake(text string) {
 	}
 }
 
-// startupPrompts are dialogs a TUI shows before it takes a prompt, with the
-// keys that accept them. Claude's folder-trust dialog highlights "No, exit",
-// so the answer is one Down arrow and Enter.
-var startupPrompts = map[string][]struct {
-	Marker string
-	Keys   []byte
-}{
-	"claude": {{Marker: "Yes, I trust this folder", Keys: []byte("\x1b[B\r")}},
-}
-
-// promptMarkers is the per-Harness table of texts a TUI prints at a
-// permission prompt. The texts are the
-// best reading of each TUI today; a miss means no Relay, never a false one.
-var promptMarkers = map[string][]string{
-	"claude": {"Do you want to proceed?", "Do you want to make this edit", "Do you want to create", "Yes, and don't ask again", "Allow once", "(y/n)"},
-	"grok":   {"Allow", "Do you want to", "(y/n)", "approve"},
-	"agy":    {"Allow", "approve", "(y/n)"},
-	"codex":  {"Allow command?", "Approve", "(y/n)"},
-}
-
 // TabLane runs a Lane as an interactive Solo tab: spawn the preset with the
 // Lane flags and Pointer, poll for result.md, and relay prompts. It returns the Outcome the parser would have.
 func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harness.Command, rec *Record, idle, wall time.Duration) (*harness.Outcome, string, error) {
@@ -158,13 +138,7 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 	start := time.Now()
 	lastOutput := time.Now()
 	lastTail := ""
-	relayOpen := false
-	var relayAt time.Time
-	var relayTotal time.Duration
-	answeredTail := ""
-	var markerSince time.Time
-	markerTail := ""
-	startupAnswered := false
+	relays := &relayTracker{}
 	nudged := false
 	var nudgedAt time.Time
 	reportPath := filepath.Join(t.Folder, FileReport)
@@ -182,6 +156,11 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 		rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "stop", Text: reason})
 	}
 	for {
+		wasOpen := relays.open()
+		relays.poll(env, t, rec, h.Name(), time.Now())
+		if wasOpen || relays.open() {
+			lastOutput = time.Now()
+		}
 		if reportStable(reportPath) {
 			// The file is written and the Lane is quiet: judge it.
 			if st, err := l.Client.Status(pid); err != nil || !st.Running() || st.IdleSeconds >= 5 {
@@ -204,18 +183,6 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 			break
 		}
 		tail, _ := l.Client.Output(pid, 40)
-		if !startupAnswered {
-			for _, sp := range startupPrompts[h.Name()] {
-				if strings.Contains(tail, sp.Marker) {
-					if err := l.Client.SendKeys(pid, sp.Keys); err != nil {
-						return nil, "", err
-					}
-					startupAnswered = true
-					rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "startup", Text: "answered: " + sp.Marker})
-					break
-				}
-			}
-		}
 		if tail != lastTail {
 			lastTail = tail
 			lastOutput = time.Now()
@@ -225,47 +192,8 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 		if err == nil && st.IdleSeconds > 0 && time.Duration(st.IdleSeconds*float64(time.Second)) < idleFor {
 			idleFor = time.Duration(st.IdleSeconds * float64(time.Second))
 		}
-		q := lastLines(tail, 8)
-		now := time.Now()
-		marked := hasMarker(h.Name(), q)
-		if !marked {
-			markerTail = ""
-			markerSince = time.Time{}
-		} else if q != markerTail {
-			markerTail = q
-			markerSince = now
-		}
-		// Relay after the prompt tail stays unchanged for 10 s. Solo idle is
-		// not used because status lines can repaint while a prompt waits.
-		if !relayOpen && promptReady(marked, q, markerTail, markerSince, now, answeredTail) {
-			relayOpen = true
-			relayAt = time.Now()
-			rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "relay", Text: q})
-			_ = rec.Save()
-			ui.Eventf("relay", "task %s  %s asks:\n%s", t.Task, h.Name(), q)
-			l.Wake(fmt.Sprintf("Maestro task %s (%s, %s) waits on a permission prompt. Answer with: maestro answer %s allow|deny. Prompt:\n%s", t.Task, h.Name(), t.Title, t.Task, q))
-		}
-		if relayOpen {
-			if ans := readAnswer(t.Folder); ans != "" {
-				key := []byte("\r")
-				if ans == "deny" {
-					key = []byte("\x1b")
-				}
-				_ = l.Client.SendKeys(pid, key)
-				rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "relay-answer", Text: ans})
-				relayOpen = false
-				relayTotal += time.Since(relayAt)
-				answeredTail = q
-				lastOutput = time.Now()
-			} else if time.Since(relayAt) > 10*time.Minute {
-				_ = l.Client.SendKeys(pid, []byte("\x1b"))
-				rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "relay-answer", Text: "denied: no answer"})
-				relayOpen = false
-				relayTotal += time.Since(relayAt)
-				answeredTail = q
-				lastOutput = time.Now()
-			}
-			time.Sleep(3 * time.Second)
+		if relays.open() {
+			time.Sleep(time.Second)
 			continue
 		}
 		if idle > 0 && idleFor > idle {
@@ -283,12 +211,13 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 			}
 		}
 		// The Wall limit does not count time spent in a Relay.
-		if wall > 0 && time.Since(start)-relayTotal > wall {
+		if wall > 0 && time.Since(start)-relays.elapsed(time.Now()) > wall {
 			stop("wall limit")
 			return nil, "wall", nil
 		}
 		time.Sleep(5 * time.Second)
 	}
+	relays.poll(env, t, rec, h.Name(), time.Now())
 	select {
 	case <-t.Cancel:
 		stop("cancelled")
@@ -344,27 +273,6 @@ func (l *SoloLink) saveTabLog(pid int, folder string) {
 	if err := os.WriteFile(filepath.Join(folder, "tab.log"), []byte(raw), 0o644); err != nil {
 		ui.Warnf("tab log: %v", err)
 	}
-}
-
-func hasMarker(harnessName, tail string) bool {
-	for _, m := range promptMarkers[harnessName] {
-		if strings.Contains(tail, m) {
-			return true
-		}
-	}
-	return false
-}
-
-func promptReady(hasMarker bool, q, markerTail string, markerSince, now time.Time, answeredTail string) bool {
-	return hasMarker && q == markerTail && now.Sub(markerSince) >= 10*time.Second && q != answeredTail
-}
-
-func lastLines(s string, n int) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
 }
 
 // readAnswer consumes an answer marker written by maestro answer.
