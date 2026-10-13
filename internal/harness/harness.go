@@ -1,5 +1,5 @@
 // Package harness holds one adapter per Harness: how to find it, read its
-// catalog, build the one-shot command for a read or edit Dispatch, and parse
+// catalog, build the one-shot and tab commands for a read or edit Dispatch, and parse
 // its headless stream. A new Harness is a code change here, never config.
 package harness
 
@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// Enforcement values, measured per Harness version (permission-contract.md section 3).
+// Enforcement values, measured per Harness version.
 const (
 	Enforced   = "enforced"
 	BestEffort = "best-effort"
@@ -74,9 +74,10 @@ type Denial struct {
 
 // Window is one Budget window harvested from a stream.
 type Window struct {
-	Kind     string    `json:"kind"`
-	Used     float64   `json:"used"`
-	ResetsAt time.Time `json:"resets_at"`
+	Duration time.Duration `json:"duration,omitempty"`
+	Kind     string        `json:"kind"`
+	Used     float64       `json:"used"`
+	ResetsAt time.Time     `json:"resets_at"`
 }
 
 // Signal classifies an error the stream reported.
@@ -116,6 +117,7 @@ type Harness interface {
 	// Enforcement for an Access value; NoShape when the Harness has no such shape.
 	Enforcement(access string) string
 	Build(l Launch) (*Command, error)
+	BuildTab(l Launch) (*Command, error)
 	NewParser() Parser
 }
 
@@ -155,7 +157,7 @@ func resolve(name, override string) string {
 }
 
 // Env builds a Lane's environment: the parent's minus the strip list, plus
-// the fixed Maestro variables (permission-contract.md section 8).
+// the fixed Maestro variables.
 func Env(strip []string, set map[string]string) []string {
 	drop := map[string]bool{}
 	for _, k := range strip {

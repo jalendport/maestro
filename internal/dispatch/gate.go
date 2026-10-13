@@ -13,7 +13,7 @@ import (
 	"github.com/jalendport/maestro/internal/jev"
 )
 
-// Gate is the Jev verification gate's answer (jev-router.md section 8).
+// Gate is the Jev verification gate's answer.
 type Gate struct {
 	Satisfies         float64 `json:"satisfies"`
 	Verdict           string  `json:"verdict"`
@@ -31,7 +31,7 @@ const maxDiffBytes = 60 * 1024
 
 // runGate asks Jev whether the diff satisfies the Brief. It runs only after
 // the deterministic checks passed; it never closes a Task on its own.
-func runGate(env *Env, t *Task, rec *Record, goal, done string) *Gate {
+func runGate(env *Env, t *Task, rec *Record, goal, done string, snap attemptBaseline) *Gate {
 	if env.Roster.Router.Backend == "rules" || (env.Project != nil && env.Project.Router == "rules") {
 		return &Gate{Skipped: "router = rules"}
 	}
@@ -39,7 +39,10 @@ func runGate(env *Env, t *Task, rec *Record, goal, done string) *Gate {
 	if err != nil {
 		return &Gate{Skipped: err.Error()}
 	}
-	diff := collectDiff(t.Project, rec.Verification.StartCommit, rec.Verification.Changed)
+	diff, err := snap.diff(t.Project, rec.Verification.Changed)
+	if err != nil {
+		return &Gate{Skipped: err.Error()}
+	}
 	if strings.TrimSpace(diff) == "" {
 		return &Gate{Skipped: "empty diff"}
 	}
@@ -48,9 +51,7 @@ func runGate(env *Env, t *Task, rec *Record, goal, done string) *Gate {
 		"diff":  diff,
 	}
 	if env.Project != nil {
-		for _, r := range env.Project.Redact {
-			state["diff"] = strings.ReplaceAll(state["diff"].(string), r, "[redacted]")
-		}
+		client.Redact = env.Project.Redact
 	}
 	questions := map[string]jev.Question{
 		"satisfies": jev.Noul("Does the diff satisfy every item under Done in the brief?"),
@@ -126,5 +127,15 @@ func (g *Gate) raw() json.RawMessage {
 
 // DiffFor returns the diff of a finished Dispatch's changed paths.
 func DiffFor(root string, rec *Record) string {
+	if b, err := os.ReadFile(filepath.Join(rec.Path, FileBaseline)); err == nil {
+		var snap attemptBaseline
+		if json.Unmarshal(b, &snap) == nil && snap.Contents != nil {
+			diff, err := snap.diff(root, rec.Verification.Changed)
+			if err == nil {
+				return diff
+			}
+			return ""
+		}
+	}
 	return collectDiff(root, rec.Verification.StartCommit, rec.Verification.Changed)
 }

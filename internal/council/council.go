@@ -185,6 +185,9 @@ func Create(env *dispatch.Env, o Opts) (*Council, error) {
 	if slug == "" {
 		slug = Slugify(o.Question)
 	}
+	if err := config.EnsureIgnoredDir(config.CouncilsDir(env.Root)); err != nil {
+		return nil, err
+	}
 	folder := filepath.Join(config.CouncilsDir(env.Root), slug)
 	for i := 2; ; i++ {
 		if _, err := os.Stat(folder); os.IsNotExist(err) {
@@ -259,7 +262,7 @@ func jevLevel(env *dispatch.Env, question string) roster.Level {
 
 // pickSeats: one per vendor at the Tier, subscription vendors first by plan
 // price, agy only to fill or on --seats 4; author families may sit; relax
-// in order until two Seats exist (council.md sections 2 to 4).
+// in order until two Seats exist.
 func pickSeats(env *dispatch.Env, c *Council, o Opts) ([]*Seat, []string, error) {
 	rt := env.NewRouter()
 	authors := map[string]bool{}
@@ -381,7 +384,7 @@ func pickSeats(env *dispatch.Env, c *Council, o Opts) ([]*Seat, []string, error)
 		add(f, "", false)
 		vendorSeated[v] = true
 	}
-	// Pass 2: author families (council.md section 3: they may sit).
+	// Pass 2: author families.
 	for _, v := range vendors {
 		if len(seats) >= o.Seats {
 			break

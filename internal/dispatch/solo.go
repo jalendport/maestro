@@ -58,7 +58,7 @@ func (l *SoloLink) TodoFor(t *Task, b *brief.Brief) int {
 		return t.Todo
 	}
 	body := fmt.Sprintf("Maestro task `%s` of run `%s`. Brief: `%s`.\n\n## Goal\n%s\n\n## Done\n%s\n", t.Task, t.Run, relOrAbs(t.Project, t.BriefPath), strings.TrimSpace(b.Goal), strings.TrimSpace(b.Done))
-	id, err := l.Client.CreateTodo(l.ProjectID, t.Title, body, []string{"maestro", "ready-for-agent"})
+	id, err := l.Client.CreateTodo(l.ProjectID, t.Title, body, []string{"maestro"})
 	if err != nil {
 		ui.Warnf("solo todo: %v", err)
 		return 0
@@ -128,7 +128,7 @@ var startupPrompts = map[string][]struct {
 }
 
 // promptMarkers is the per-Harness table of texts a TUI prints at a
-// permission prompt (failure-handling.md section 7). The texts are the
+// permission prompt. The texts are the
 // best reading of each TUI today; a miss means no Relay, never a false one.
 var promptMarkers = map[string][]string{
 	"claude": {"Do you want to proceed?", "Do you want to make this edit", "Do you want to create", "Yes, and don't ask again", "Allow once", "(y/n)"},
@@ -138,34 +138,23 @@ var promptMarkers = map[string][]string{
 }
 
 // TabLane runs a Lane as an interactive Solo tab: spawn the preset with the
-// Lane flags, type the Pointer, poll for result.md, relay prompts, and close
-// the tab per close_tabs. It returns the Outcome the parser would have.
-func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harness.Command, pointer string, rec *Record, idle, wall time.Duration) (*harness.Outcome, string, error) {
-	toolID := env.Roster.Harness[h.Name()].SoloTool
-	if toolID == 0 {
-		toolID = defaultSoloTool(env, h.Name())
-	}
+// Lane flags and Pointer, poll for result.md, and relay prompts. It returns the Outcome the parser would have.
+func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harness.Command, rec *Record, idle, wall time.Duration) (*harness.Outcome, string, error) {
+	toolID := l.toolID(env, h.Name())
 	if toolID == 0 {
 		return nil, "", fmt.Errorf("no Solo agent tool for %s (set [harness.%s] solo_tool)", h.Name(), h.Name())
 	}
-	args := tabArgs(h.Name(), command, t)
+	args := tabArgs(command)
 	name := fmt.Sprintf("%s · %s", slug(t.Title), t.Route.FamilyID)
+	launched := time.Now()
 	pid, err := l.Client.Spawn(l.ProjectID, toolID, name, args)
 	if err != nil {
 		return nil, "", err
 	}
 	rec.SoloProcess = pid
-	rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "tab", Text: fmt.Sprintf("solo process %d", pid)})
+	rec.Events = append(rec.Events, Event{At: launched, Kind: "tab", Text: fmt.Sprintf("solo process %d", pid)})
 	_ = rec.Save()
-	// Wait for the TUI to take input: alive and idle, with any startup dialog answered.
-	if err := l.awaitReady(pid, h.Name(), rec); err != nil {
-		_ = l.Client.CloseProcess(pid)
-		return nil, "", err
-	}
-	if err := l.Client.SendInput(pid, pointer+"\n"); err != nil {
-		_ = l.Client.CloseProcess(pid)
-		return nil, "", err
-	}
+	defer l.saveTabLog(pid, t.Folder)
 	start := time.Now()
 	lastOutput := time.Now()
 	lastTail := ""
@@ -173,18 +162,23 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 	var relayAt time.Time
 	var relayTotal time.Duration
 	answeredTail := ""
+	var markerSince time.Time
+	markerTail := ""
+	startupAnswered := false
 	nudged := false
 	var nudgedAt time.Time
 	reportPath := filepath.Join(t.Folder, FileReport)
 	stop := func(reason string) {
-		// Stop the Lane (Ctrl-C twice), then close the tab when it still runs.
+		l.saveTabLog(pid, t.Folder)
+		if st, err := l.Client.Status(pid); err == nil && !st.Running() {
+			rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "stop", Text: reason})
+			return
+		}
+		// Stop the Lane; CloseTab applies close_tabs after the Report is judged.
 		_ = l.Client.SendKeys(pid, []byte{3})
 		time.Sleep(time.Second)
 		_ = l.Client.SendKeys(pid, []byte{3})
 		time.Sleep(3 * time.Second)
-		if st, err := l.Client.Status(pid); err == nil && st.Running() {
-			_ = l.Client.CloseProcess(pid)
-		}
 		rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "stop", Text: reason})
 	}
 	for {
@@ -204,11 +198,24 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 		if err == nil && st.Status != "" && !st.Running() {
 			// The tab ended without a Report.
 			if st.Uptime < 30 {
+				stop("early exit")
 				return &harness.Outcome{ErrorText: "early exit"}, "", nil
 			}
 			break
 		}
 		tail, _ := l.Client.Output(pid, 40)
+		if !startupAnswered {
+			for _, sp := range startupPrompts[h.Name()] {
+				if strings.Contains(tail, sp.Marker) {
+					if err := l.Client.SendKeys(pid, sp.Keys); err != nil {
+						return nil, "", err
+					}
+					startupAnswered = true
+					rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "startup", Text: "answered: " + sp.Marker})
+					break
+				}
+			}
+		}
 		if tail != lastTail {
 			lastTail = tail
 			lastOutput = time.Now()
@@ -218,10 +225,19 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 		if err == nil && st.IdleSeconds > 0 && time.Duration(st.IdleSeconds*float64(time.Second)) < idleFor {
 			idleFor = time.Duration(st.IdleSeconds * float64(time.Second))
 		}
-		// A prompt: a marker in the last lines AND 30 s idle, both required, and
-		// never the same tail twice (an answered prompt stays on screen).
 		q := lastLines(tail, 8)
-		if !relayOpen && idleFor > 30*time.Second && hasMarker(h.Name(), q) && q != answeredTail {
+		now := time.Now()
+		marked := hasMarker(h.Name(), q)
+		if !marked {
+			markerTail = ""
+			markerSince = time.Time{}
+		} else if q != markerTail {
+			markerTail = q
+			markerSince = now
+		}
+		// Relay after the prompt tail stays unchanged for 10 s. Solo idle is
+		// not used because status lines can repaint while a prompt waits.
+		if !relayOpen && promptReady(marked, q, markerTail, markerSince, now, answeredTail) {
 			relayOpen = true
 			relayAt = time.Now()
 			rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "relay", Text: q})
@@ -273,9 +289,16 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 		}
 		time.Sleep(5 * time.Second)
 	}
+	select {
+	case <-t.Cancel:
+		stop("cancelled")
+		return nil, "cancelled", nil
+	default:
+	}
+	stop("report ready or tab ended")
 	out := &harness.Outcome{}
-	if raw, err := l.Client.Output(pid, 200); err == nil {
-		out.Text = raw
+	if raw, err := os.ReadFile(filepath.Join(t.Folder, "tab.log")); err == nil {
+		out.Text = string(raw)
 	}
 	return out, "", nil
 }
@@ -290,47 +313,37 @@ func (l *SoloLink) CloseTab(env *Env, rec *Record) {
 		return
 	case "always":
 	default:
-		if rec.Outcome.Outcome != OutcomeVerified && rec.Outcome.Outcome != OutcomeAnswered {
+		if rec.Outcome.Outcome != OutcomeVerified && rec.Outcome.Outcome != OutcomeAnswered && rec.Outcome.Outcome != OutcomeUnverified {
 			return
 		}
 	}
 	_ = l.Client.CloseProcess(rec.SoloProcess)
 }
 
-// tabArgs turns the one-shot command's flags into extra_args for the preset:
-// the Lane flags, then the model, effort, and permission flags. The prompt
-// is typed afterwards, never passed as a positional.
-func tabArgs(harnessName string, command *harness.Command, t *Task) []string {
-	var args []string
-	switch harnessName {
-	case "claude":
-		args = append(args, "--model", t.Route.Model)
-		if t.Route.Effort != "" {
-			args = append(args, "--effort", t.Route.Effort)
-		}
-		args = append(args, command.Flags...)
-	case "grok":
-		args = append(args, "--model", t.Route.Model, "--no-subagents")
-		if t.Route.Effort != "" {
-			args = append(args, "--reasoning-effort", t.Route.Effort)
-		}
-		args = append(args, command.Flags...)
-	case "agy":
-		model := t.Route.Model
-		if t.Route.Effort != "" {
-			model += "-" + t.Route.Effort
-		}
-		args = append(args, "--model", model)
-		args = append(args, command.Flags...)
-	}
-	return args
+// tabArgs uses the Harness's interactive shape as Solo preset arguments.
+func tabArgs(command *harness.Command) []string {
+	return append([]string(nil), command.Cmd.Args[1:]...)
 }
 
-func defaultSoloTool(env *Env, harnessName string) int {
-	if rec, ok := env.Disc.Harness[harnessName]; ok && rec.SoloTool != 0 {
-		return rec.SoloTool
+func (l *SoloLink) toolID(env *Env, harnessName string) int {
+	if id := env.Roster.Harness[harnessName].SoloTool; id != 0 {
+		return id
+	}
+	if env.Disc != nil {
+		return env.Disc.Harness[harnessName].SoloTool
 	}
 	return 0
+}
+
+func (l *SoloLink) saveTabLog(pid int, folder string) {
+	raw, err := l.Client.Output(pid, 200)
+	if err != nil {
+		ui.Warnf("tab output: %v", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(folder, "tab.log"), []byte(raw), 0o644); err != nil {
+		ui.Warnf("tab log: %v", err)
+	}
 }
 
 func hasMarker(harnessName, tail string) bool {
@@ -340,6 +353,10 @@ func hasMarker(harnessName, tail string) bool {
 		}
 	}
 	return false
+}
+
+func promptReady(hasMarker bool, q, markerTail string, markerSince, now time.Time, answeredTail string) bool {
+	return hasMarker && q == markerTail && now.Sub(markerSince) >= 10*time.Second && q != answeredTail
 }
 
 func lastLines(s string, n int) string {
@@ -380,42 +397,6 @@ func slug(s string) string {
 		out = out[:24]
 	}
 	return out
-}
-
-// awaitReady waits up to 60 s for the tab to be alive and quiet, answering a
-// known startup dialog on the way.
-func (l *SoloLink) awaitReady(pid int, harnessName string, rec *Record) error {
-	deadline := time.Now().Add(60 * time.Second)
-	answered := false
-	for time.Now().Before(deadline) {
-		time.Sleep(2 * time.Second)
-		st, err := l.Client.Status(pid)
-		if err != nil {
-			continue
-		}
-		if st.Status != "" && !st.Running() {
-			return fmt.Errorf("the tab exited during startup")
-		}
-		tail, _ := l.Client.Output(pid, 30)
-		if !answered {
-			for _, sp := range startupPrompts[harnessName] {
-				if strings.Contains(tail, sp.Marker) {
-					_ = l.Client.SendKeys(pid, sp.Keys)
-					rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "startup", Text: "answered: " + sp.Marker})
-					answered = true
-					time.Sleep(2 * time.Second)
-					break
-				}
-			}
-			if answered {
-				continue
-			}
-		}
-		if st.Uptime > 3 && st.IdleSeconds >= 2 {
-			return nil
-		}
-	}
-	return fmt.Errorf("the tab did not become ready in 60 s")
 }
 
 // reportStable reports a non-empty result.md whose size has not changed for 3 s.

@@ -25,10 +25,11 @@ func (a *app) dispatchCmd() *cobra.Command {
 	var lane, floor, ceiling, level string
 	var wait bool
 	c := &cobra.Command{
-		Use:   "dispatch <brief.md>",
-		Short: "Route and dispatch one Task",
-		Long:  "Route one Brief file to a Lane and start it. Returns at once with the Task id; --wait blocks and prints the result.",
-		Args:  cobra.ExactArgs(1),
+		Use:     "dispatch <brief.md>",
+		Short:   "Route and dispatch one Task",
+		Long:    "Route one Brief file to a Lane and start it. Returns at once with the Task id; --wait blocks and prints the result.",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: refreshSkill,
 		RunE: func(_ *cobra.Command, args []string) error {
 			b, err := brief.Parse(args[0])
 			if err != nil {

@@ -37,6 +37,9 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := config.EnsureIgnoredDir(config.RunsDir(env.Root)); err != nil {
+		return nil, err
+	}
 	runID := dispatch.NextRunID(env.Root)
 	folder := filepath.Join(config.RunsDir(env.Root), runID)
 	if err := os.MkdirAll(filepath.Join(folder, "control"), 0o755); err != nil {
@@ -94,7 +97,7 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 		return nil, err
 	}
 	if len(approval) > 0 {
-		// Plan Council (council.md section 11): Heavy, over the Plan file, so the
+		// Plan Council: Heavy, over the Plan file, so the
 		// Orchestrator approves the breakdown with the Merge in hand.
 		rel, _ := filepath.Rel(env.Root, plan.Path)
 		c, err := council.Create(env, council.Opts{
@@ -132,6 +135,7 @@ type Supervisor struct {
 	escalationsInARow int
 	errorTexts        map[string]int
 	paused            bool
+	cancelled         bool
 }
 
 type result struct {
@@ -147,7 +151,9 @@ func Start(env *dispatch.Env, folder string) error {
 		return err
 	}
 	if s.State == StateHeld {
-		return fmt.Errorf("Run %s is held for approval; run maestro approve %s", s.Run, s.Run)
+		if _, err := os.Stat(filepath.Join(folder, "control", "cancel")); err != nil {
+			return fmt.Errorf("Run %s is held for approval; run maestro approve %s", s.Run, s.Run)
+		}
 	}
 	if s.State == StateFinished || s.State == StateCancelled {
 		return fmt.Errorf("Run %s is %s", s.Run, s.State)
@@ -164,7 +170,7 @@ func (sup *Supervisor) loop() error {
 	if err := WriteIndex(s); err != nil {
 		return err
 	}
-	defer RemoveIndex(s.Run)
+	defer RemoveIndex(s.Project, s.Run)
 	stopAwake := keepAwake(sup.Env.Roster.KeepAwake())
 	s.Awake = stopAwake != nil
 	defer func() {
@@ -180,10 +186,13 @@ func (sup *Supervisor) loop() error {
 	defer ticker.Stop()
 	for {
 		sup.consumeControl()
-		if !sup.paused {
+		if !sup.paused && !sup.cancelled {
 			sup.schedule()
 		}
 		if len(sup.running) == 0 {
+			if sup.cancelled {
+				return sup.end(StateCancelled)
+			}
 			if sup.paused {
 				return sup.end(StatePaused)
 			}
@@ -200,7 +209,7 @@ func (sup *Supervisor) loop() error {
 	}
 }
 
-// schedule starts every Task that is ready and has a slot (concurrency.md section 3).
+// schedule starts every Task that is ready and has a slot.
 func (sup *Supervisor) schedule() {
 	s := sup.State
 	caps := sup.Env.Roster.Concurrency
@@ -213,6 +222,10 @@ func (sup *Supervisor) schedule() {
 	// Ready read Tasks first, then edit Tasks, each in plan order.
 	for _, access := range []string{brief.AccessRead, brief.AccessEdit} {
 		for _, t := range s.Tasks {
+			sup.consumeControl()
+			if sup.cancelled || sup.paused {
+				return
+			}
 			if t.State != TaskWaiting || t.Access != access {
 				continue
 			}
@@ -291,7 +304,7 @@ func (sup *Supervisor) accountRunning(acct string) int {
 		}
 	}
 	for _, idx := range LiveRuns() {
-		if idx.Run == sup.State.Run {
+		if idx.Project == sup.State.Project && idx.Run == sup.State.Run {
 			continue
 		}
 		if other, err := Load(idx.Folder); err == nil {
@@ -308,7 +321,7 @@ func (sup *Supervisor) accountRunning(acct string) int {
 func (sup *Supervisor) machineRunning() int {
 	n := len(sup.running)
 	for _, idx := range LiveRuns() {
-		if idx.Run == sup.State.Run {
+		if idx.Project == sup.State.Project && idx.Run == sup.State.Run {
 			continue
 		}
 		if other, err := Load(idx.Folder); err == nil {
@@ -331,12 +344,16 @@ func (sup *Supervisor) start(t *TaskState) {
 	req.Floor, _ = roster.ParseTier(b.Floor)
 	req.Ceiling, _ = roster.ParseTier(b.Ceiling)
 	if t.Escalations > 0 && t.Route != nil && req.Lane == "" {
-		// Escalation: the new pick must be a higher Tier (routing-policy.md section 5).
+		// Escalation: the new pick must be a higher Tier.
 		if next := nextTier(t.Route.Tier); next != "" && (req.Floor == "" || next.Rank() > req.Floor.Rank()) {
 			req.Floor = next
 		}
 	}
 	task, err := dispatch.Prepare(sup.Env, b, req, sup.State.Run, t.ID)
+	sup.consumeControl()
+	if sup.cancelled || t.State != TaskWaiting {
+		return
+	}
 	if err != nil {
 		sup.escalate(t, nil, err.Error())
 		return
@@ -378,6 +395,15 @@ func (sup *Supervisor) handle(r result) {
 	t := r.task
 	delete(sup.running, t.ID)
 	t.EndedAt = time.Now()
+	if t.Cancel {
+		t.State = TaskCancelled
+		t.Outcome = dispatch.OutcomeCancelled
+		if r.rec != nil {
+			t.Attempt = r.rec.Attempt
+		}
+		_ = sup.State.Save()
+		return
+	}
 	if r.err != nil {
 		sup.escalate(t, nil, r.err.Error())
 		_ = sup.State.Save()
@@ -466,6 +492,18 @@ func (sup *Supervisor) touch() {
 // consumeControl applies marker files written by add, cancel, and resume.
 func (sup *Supervisor) consumeControl() {
 	ctl := filepath.Join(sup.State.Folder, "control")
+	if path := filepath.Join(ctl, "cancel"); fileExists(path) {
+		sup.cancelled = true
+		sup.State.PauseReason = ""
+		for _, t := range sup.State.Tasks {
+			sup.cancelTask(t)
+		}
+		_ = sup.State.Save()
+		_ = os.Remove(path)
+	}
+	if sup.cancelled {
+		return
+	}
 	entries, _ := os.ReadDir(ctl)
 	for _, e := range entries {
 		path := filepath.Join(ctl, e.Name())
@@ -476,12 +514,7 @@ func (sup *Supervisor) consumeControl() {
 		case strings.HasPrefix(name, "cancel-"):
 			ref := strings.TrimPrefix(name, "cancel-")
 			if t, ok := sup.State.Task(ref); ok {
-				if ch, running := sup.running[t.ID]; running {
-					close(ch)
-					delete(sup.running, t.ID)
-				} else if t.State == TaskWaiting {
-					t.State = TaskCancelled
-				}
+				sup.cancelTask(t)
 			}
 		case strings.HasPrefix(name, "resume-"):
 			sup.applyResume(path)
@@ -489,6 +522,27 @@ func (sup *Supervisor) consumeControl() {
 			continue
 		}
 		_ = os.Remove(path)
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func (sup *Supervisor) cancelTask(t *TaskState) {
+	if ch, running := sup.running[t.ID]; running {
+		select {
+		case <-ch:
+		default:
+			close(ch)
+		}
+		t.Cancel = true
+	} else if t.State == TaskWaiting {
+		t.State = TaskCancelled
+		t.Outcome = dispatch.OutcomeCancelled
+		t.Waiting = ""
+		t.EndedAt = time.Now()
 	}
 }
 
@@ -538,11 +592,13 @@ func (sup *Supervisor) applyResume(path string) {
 		t.State = TaskSkipped
 		t.Waiting = ""
 	case r.Brief != "":
+		t.Cancel = false
 		t.BriefPath = r.Brief
 		t.State = TaskWaiting
 		t.Waiting = "resumed with a corrected brief"
 		t.Excluded = nil
 	case r.Lane != "":
+		t.Cancel = false
 		t.ResumeLane = r.Lane
 		t.State = TaskWaiting
 		t.Waiting = "resumed on " + r.Lane
@@ -555,7 +611,7 @@ func (sup *Supervisor) applyResume(path string) {
 	ui.Eventf("resume", "task %d  %s", t.Number, t.Waiting)
 }
 
-// end writes the final state, the report, the ledger row, and tells Jalen.
+// end writes the final state, the report, the ledger row, and tells the user.
 func (sup *Supervisor) end(state string) error {
 	s := sup.State
 	s.State = state

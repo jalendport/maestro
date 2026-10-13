@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
-// Grok is the Grok CLI adapter. Its read shape is best-effort on macOS
-// (permission-contract.md section 3), so it takes no automatic read work;
+// Grok is the Grok CLI adapter. Its read shape is best-effort on macOS,
+// so it takes no automatic read work;
 // the shape still exists for an explicit --lane request.
 type Grok struct{ bin string }
 
@@ -52,16 +52,27 @@ func (g *Grok) Enforcement(access string) string {
 
 // Build: the Pointer goes through --prompt-file (Grok reads no stdin prompt).
 func (g *Grok) Build(l Launch) (*Command, error) {
+	return g.build(l, false)
+}
+
+func (g *Grok) BuildTab(l Launch) (*Command, error) {
+	return g.build(l, true)
+}
+
+func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	if g.bin == "" {
 		return nil, fmt.Errorf("grok is not installed")
 	}
 	promptFile := filepath.Join(l.RunFolder, "pointer.txt")
-	if l.RunFolder != "" && l.Pointer != "" {
+	if !tab && l.RunFolder != "" && l.Pointer != "" {
 		if err := os.WriteFile(promptFile, []byte(l.Pointer+"\n"), 0o644); err != nil {
 			return nil, err
 		}
 	}
 	args := []string{"--prompt-file", promptFile, "--output-format", "json", "--no-subagents", "--model", l.Model}
+	if tab {
+		args = []string{l.Pointer, "--model", l.Model, "--no-subagents", "--cwd", l.Root}
+	}
 	if l.Effort != "" {
 		args = append(args, "--reasoning-effort", l.Effort)
 	}

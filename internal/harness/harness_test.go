@@ -63,3 +63,35 @@ func TestAgyParserFixture(t *testing.T) {
 		t.Fatalf("%+v", o)
 	}
 }
+
+func TestClaudeReadShapeIsolatesSettingsAndSoloTools(t *testing.T) {
+	c := &Claude{bin: "/bin/claude"}
+	command, err := c.Build(Launch{Access: "read", Root: "/project", RunFolder: "/project/report", InSolo: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	required := map[string]bool{"mcp__solo__whoami": false, "mcp__solo__get_process_status": false, "mcp__solo__get_process_output": false, "mcp__solo__todo_comment_create": false}
+	isolated := false
+	for i, arg := range command.Cmd.Args {
+		if arg == "--setting-sources" && i+1 < len(command.Cmd.Args) && command.Cmd.Args[i+1] == "" {
+			isolated = true
+		}
+		if strings.HasPrefix(arg, "mcp__solo__") {
+			if _, ok := required[arg]; !ok {
+				t.Fatalf("unexpected Solo tool: %s", arg)
+			}
+			required[arg] = true
+		}
+	}
+	if !isolated || c.Enforcement("read") != Enforced {
+		t.Fatal("read shape not isolated")
+	}
+	for name, found := range required {
+		if !found {
+			t.Fatalf("missing %s", name)
+		}
+	}
+	if (&Agy{}).Enforcement("read") != BestEffort {
+		t.Fatal("agy read shape claims enforcement")
+	}
+}

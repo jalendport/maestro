@@ -14,7 +14,7 @@ import (
 	"github.com/jalendport/maestro/internal/verify"
 )
 
-// Failure classes (failure-handling.md section 1).
+// Failure classes.
 const (
 	FailLane      = "lane error"
 	FailTransient = "transient error"

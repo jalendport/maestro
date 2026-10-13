@@ -23,10 +23,11 @@ func (a *app) councilCmd() *cobra.Command {
 	var level, slug, task string
 	var challenge, wait bool
 	c := &cobra.Command{
-		Use:   "council <question>",
-		Short: "Ask several Lanes the same question in parallel",
-		Long:  "Pick one read Seat per vendor at the question's Tier, run them in parallel (one or more Rounds), and return a mechanical Merge with Jev's marks on every finding. Returns at once; --wait blocks.",
-		Args:  cobra.MaximumNArgs(1),
+		Use:     "council <question>",
+		Short:   "Ask several Lanes the same question in parallel",
+		Long:    "Pick one read Seat per vendor at the question's Tier, run them in parallel (one or more Rounds), and return a mechanical Merge with Jev's marks on every finding. Returns at once; --wait blocks.",
+		Args:    cobra.MaximumNArgs(1),
+		PreRunE: refreshSkill,
 		RunE: func(_ *cobra.Command, args []string) error {
 			env, err := a.env(false)
 			if err != nil {

@@ -5,8 +5,10 @@
 package run
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -153,7 +155,7 @@ func (s *State) Counts() (done, blocked, failed, running, waiting, skipped int) 
 	return
 }
 
-// Index is ~/.maestro/runs/<run-id>.json: how other Runs see this one.
+// Index is ~/.maestro/runs/<project-key>-<run-id>.json: how other Runs see this one.
 type Index struct {
 	Run       string    `json:"run"`
 	Project   string    `json:"project"`
@@ -162,7 +164,14 @@ type Index struct {
 	StartedAt time.Time `json:"started_at"`
 }
 
-func indexPath(run string) string { return filepath.Join(config.RunsIndexDir(), run+".json") }
+func indexPath(project, run string) string {
+	root, err := filepath.Abs(project)
+	if err != nil {
+		root = filepath.Clean(project)
+	}
+	key := sha256.Sum256([]byte(root))
+	return filepath.Join(config.RunsIndexDir(), fmt.Sprintf("%x-%s.json", key, run))
+}
 
 // WriteIndex registers a live Run.
 func WriteIndex(s *State) error {
@@ -170,11 +179,11 @@ func WriteIndex(s *State) error {
 		return err
 	}
 	b, _ := json.Marshal(Index{Run: s.Run, Project: s.Project, Folder: s.Folder, Pid: os.Getpid(), StartedAt: s.StartedAt})
-	return os.WriteFile(indexPath(s.Run), b, 0o644)
+	return os.WriteFile(indexPath(s.Project, s.Run), b, 0o644)
 }
 
 // RemoveIndex unregisters a Run.
-func RemoveIndex(run string) { _ = os.Remove(indexPath(run)) }
+func RemoveIndex(project, run string) { _ = os.Remove(indexPath(project, run)) }
 
 // LiveRuns lists Runs whose supervisor is alive; dead entries are removed.
 func LiveRuns() []Index {

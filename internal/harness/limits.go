@@ -3,7 +3,7 @@ package harness
 import "strings"
 
 // classifyText maps vendor error text to a Signal class. Unknown text is a
-// Transient error (failure-handling.md section 1); the caller records it.
+// Transient error; the caller records it.
 func classifyText(harness, text string) Signal { return ClassifyText(harness, text) }
 
 // ClassifyText is classifyText for other packages.

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// PrintMerge writes the Merge (CLI prototype section 6).
+// PrintMerge writes the Merge.
 func PrintMerge(c *Council, asJSON bool) {
 	if asJSON {
 		b, _ := json.MarshalIndent(c, "", "  ")

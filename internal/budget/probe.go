@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/harness"
 )
 
@@ -134,7 +135,7 @@ func ReadCodex(bin string) (*CodexLimits, error) {
 				if w == nil {
 					continue
 				}
-				cl.Windows = append(cl.Windows, harness.Window{Kind: kindOfMinutes(w.WindowMins), Used: w.UsedPercent / 100, ResetsAt: time.Unix(w.ResetsAt, 0)})
+				cl.Windows = append(cl.Windows, harness.Window{Kind: kindOfMinutes(w.WindowMins), Duration: time.Duration(w.WindowMins) * time.Minute, Used: w.UsedPercent / 100, ResetsAt: time.Unix(w.ResetsAt, 0)})
 			}
 			return cl, nil
 		}
@@ -189,6 +190,55 @@ func kindOfMinutes(mins int) string {
 	return "window"
 }
 
+// FindCodexRollout finds the newest session started by a tab in this workspace.
+// Modification times are insufficient: an older live session can still write.
+func FindCodexRollout(started time.Time, root string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	matches, err := filepath.Glob(filepath.Join(config.CodexHome(home), "sessions", "*", "*", "*", "rollout-*.jsonl"))
+	if err != nil {
+		return "", err
+	}
+	var newest time.Time
+	var threadID string
+	for _, path := range matches {
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		sc := bufio.NewScanner(f)
+		sc.Buffer(make([]byte, 1<<20), 1<<24)
+		var meta struct {
+			Type    string `json:"type"`
+			Payload struct {
+				ID        string    `json:"id"`
+				Timestamp time.Time `json:"timestamp"`
+				Cwd       string    `json:"cwd"`
+			} `json:"payload"`
+		}
+		if sc.Scan() {
+			_ = json.Unmarshal(sc.Bytes(), &meta)
+		}
+		_ = f.Close()
+		if meta.Type != "session_meta" || meta.Payload.ID == "" || meta.Payload.Timestamp.Before(started) {
+			continue
+		}
+		if filepath.Clean(meta.Payload.Cwd) != filepath.Clean(root) {
+			continue
+		}
+		if meta.Payload.Timestamp.After(newest) {
+			newest = meta.Payload.Timestamp
+			threadID = meta.Payload.ID
+		}
+	}
+	if threadID == "" {
+		return "", fmt.Errorf("no Codex session started after %s in %s", started.Format(time.RFC3339Nano), root)
+	}
+	return threadID, nil
+}
+
 // HarvestCodexRollout reads the newest rate_limits snapshot of a Codex thread
 // from its rollout file under ~/.codex/sessions.
 func HarvestCodexRollout(threadID string) ([]harness.Window, error) {
@@ -196,7 +246,7 @@ func HarvestCodexRollout(threadID string) ([]harness.Window, error) {
 	if err != nil {
 		return nil, err
 	}
-	matches, _ := filepath.Glob(filepath.Join(home, ".codex", "sessions", "*", "*", "*", "rollout-*"+threadID+".jsonl"))
+	matches, _ := filepath.Glob(filepath.Join(config.CodexHome(home), "sessions", "*", "*", "*", "rollout-*"+threadID+".jsonl"))
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("no rollout file for thread %s", threadID)
 	}
@@ -236,7 +286,7 @@ func HarvestCodexRollout(threadID string) ([]harness.Window, error) {
 			ResetsAt    int64   `json:"resets_at"`
 		}{ev.Payload.RateLimits.Primary, ev.Payload.RateLimits.Secondary} {
 			if w != nil {
-				windows = append(windows, harness.Window{Kind: kindOfMinutes(w.WindowMins), Used: w.UsedPercent / 100, ResetsAt: time.Unix(w.ResetsAt, 0)})
+				windows = append(windows, harness.Window{Kind: kindOfMinutes(w.WindowMins), Duration: time.Duration(w.WindowMins) * time.Minute, Used: w.UsedPercent / 100, ResetsAt: time.Unix(w.ResetsAt, 0)})
 			}
 		}
 	}

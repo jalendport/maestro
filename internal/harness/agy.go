@@ -10,8 +10,8 @@ import (
 )
 
 // Agy is the Antigravity CLI adapter: read only (its edit needs the bypass
-// flag Maestro never passes). Print mode auto-denies every command not in its
-// own settings allowlist, which makes its read shape enforced.
+// flag Maestro never passes). Read restrictions depend on the user's
+// settings allowlist, which Maestro does not supply or check.
 type Agy struct{ bin string }
 
 func (a *Agy) Name() string { return "agy" }
@@ -48,12 +48,12 @@ func (a *Agy) Catalog() ([]Model, string, error) {
 	for _, id := range order {
 		models = append(models, *byID[id])
 	}
-	return models, "GCP", nil
+	return models, "", nil
 }
 
 func (a *Agy) Enforcement(access string) string {
 	if access == "read" {
-		return Enforced
+		return BestEffort
 	}
 	return NoShape
 }
@@ -61,6 +61,14 @@ func (a *Agy) Enforcement(access string) string {
 // Build: the Pointer is the positional prompt; agy's effort rides in the
 // model name (gemini-3.8-flash-high), so the effort is folded into the model.
 func (a *Agy) Build(l Launch) (*Command, error) {
+	return a.build(l, false)
+}
+
+func (a *Agy) BuildTab(l Launch) (*Command, error) {
+	return a.build(l, true)
+}
+
+func (a *Agy) build(l Launch, tab bool) (*Command, error) {
 	if a.bin == "" {
 		return nil, fmt.Errorf("agy is not installed")
 	}
@@ -77,10 +85,17 @@ func (a *Agy) Build(l Launch) (*Command, error) {
 	}
 	args := []string{"-p", l.Pointer, "--output-format", "json", "--model", model, "--print-timeout", timeout, "--disable-slash-commands"}
 	flags := []string{"--print-timeout", timeout}
+	if tab {
+		args = []string{"--prompt-interactive", l.Pointer, "--model", l.Model}
+		if l.Effort != "" {
+			args = append(args, "--effort", l.Effort)
+		}
+		flags = nil
+	}
 	cmd := exec.Command(a.bin, args...)
 	cmd.Dir = l.Root
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Flags: flags, PromptStdin: false, ReportByText: true}, nil
+	return &Command{Cmd: cmd, Flags: flags, PromptStdin: false, ReportByText: !tab}, nil
 }
 
 func (a *Agy) NewParser() Parser { return &agyParser{out: &Outcome{}} }

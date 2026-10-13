@@ -12,7 +12,7 @@ import (
 	"github.com/jalendport/maestro/internal/proc"
 )
 
-// Print writes the human result of one Dispatch (task-brief.md section 11)
+// Print writes the human result of one Dispatch
 // and returns the exit code: 0 verified, 1 failed, 2 needs the Orchestrator.
 func Print(rec *Record, asJSON bool) int {
 	if asJSON {

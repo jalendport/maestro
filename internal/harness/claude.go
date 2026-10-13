@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Claude is the Claude Code adapter (permission-contract.md section 7).
+// Claude is the Claude Code adapter.
 type Claude struct{ bin string }
 
 func (c *Claude) Name() string { return "claude" }
@@ -28,7 +28,7 @@ func (c *Claude) Catalog() ([]Model, string, error) {
 		{ID: "sonnet", Efforts: efforts, Context: 1000000},
 		{ID: "opus", Efforts: efforts, DefaultEffort: "medium", Context: 1000000},
 		{ID: "fable", Efforts: efforts, DefaultEffort: "high", Context: 1000000},
-	}, "Claude Max", nil
+	}, "", nil
 }
 
 func (c *Claude) Enforcement(access string) string {
@@ -51,10 +51,21 @@ var readTools = []string{
 }
 
 func (c *Claude) Build(l Launch) (*Command, error) {
+	return c.build(l, false)
+}
+
+func (c *Claude) BuildTab(l Launch) (*Command, error) {
+	return c.build(l, true)
+}
+
+func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 	if c.bin == "" {
 		return nil, fmt.Errorf("claude is not installed")
 	}
 	args := []string{"-p", "--model", l.Model, "--output-format", "stream-json", "--verbose", "--permission-prompts", "none"}
+	if tab {
+		args = []string{l.Pointer, "--model", l.Model}
+	}
 	if l.Effort != "" {
 		args = append(args, "--effort", l.Effort)
 	}
@@ -64,9 +75,9 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 		tools := append([]string{}, readTools...)
 		tools = append(tools, fmt.Sprintf("Write(//%s/**)", l.RunFolder), fmt.Sprintf("Edit(//%s/**)", l.RunFolder))
 		if l.InSolo {
-			tools = append(tools, "mcp__solo__*")
+			tools = append(tools, "mcp__solo__whoami", "mcp__solo__get_process_status", "mcp__solo__get_process_output", "mcp__solo__todo_comment_create")
 		}
-		flags = append(flags, "--permission-mode", "dontAsk", "--allowedTools")
+		flags = append(flags, "--setting-sources", "", "--permission-mode", "dontAsk", "--allowedTools")
 		flags = append(flags, tools...)
 	case "edit":
 		mode := "acceptEdits"
@@ -78,7 +89,7 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 			tools = append(tools, "Bash("+cmd+")", "Bash("+cmd+" *)")
 		}
 		if l.AllowCommit {
-			tools = append(tools, "Bash(COMMIT_SKILL=1 git *)", "Bash(git add *)", "Bash(git commit *)")
+			tools = append(tools, "Bash(git add *)", "Bash(git commit *)")
 		}
 		if l.InSolo {
 			tools = append(tools, "mcp__solo__*")
@@ -95,7 +106,7 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 	cmd := exec.Command(c.bin, args...)
 	cmd.Dir = l.Root
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Flags: flags, PromptStdin: true}, nil
+	return &Command{Cmd: cmd, Flags: flags, PromptStdin: !tab}, nil
 }
 
 func (c *Claude) NewParser() Parser { return &claudeParser{out: &Outcome{}} }

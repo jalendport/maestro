@@ -13,7 +13,7 @@ import (
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
 
 // Report renders report.md: a header, one line per Task, then the items
-// that need the Orchestrator. Under 40 lines (dispatch-ledger.md section 8).
+// that need the Orchestrator. Under 40 lines.
 func Report(s *State) string {
 	var w strings.Builder
 	done, blocked, failed, _, waiting, skipped := s.Counts()

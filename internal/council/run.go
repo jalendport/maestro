@@ -236,7 +236,7 @@ func liveSeats(c *Council, round int) int {
 }
 
 // merge collects the findings of the last Round per Seat and asks Jev to
-// mark each one; nothing is deleted (council.md section 8).
+// mark each one; nothing is deleted.
 func merge(env *dispatch.Env, c *Council) {
 	type item struct {
 		seat  string
@@ -287,6 +287,9 @@ func merge(env *dispatch.Env, c *Council) {
 			key := fmt.Sprintf("f%d", i)
 			state["findings"].(map[string]string)[key] = it.text
 			questions[key] = jev.Noul(fmt.Sprintf("Is finding %s a real, specific problem with evidence (a file and line), not a restatement, a style note, or a guess?", key))
+		}
+		if env.Project != nil {
+			client.Redact = env.Project.Redact
 		}
 		if resp, err := client.Ask(context.Background(), state, questions); err != nil {
 			c.FilterSkipped = err.Error()

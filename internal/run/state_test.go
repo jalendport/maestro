@@ -130,3 +130,43 @@ func TestLiveRuns(t *testing.T) {
 		t.Fatalf("LiveRunFor(%q) = (%+v, %t), want (%+v, true)", project, got, ok, live)
 	}
 }
+
+func TestRunIndexSeparatesProjectsWithSameRunID(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	projects := []string{t.TempDir(), t.TempDir()}
+	var states []*State
+	for _, project := range projects {
+		folder := filepath.Join(config.RunsDir(project), "r-0001")
+		if err := os.MkdirAll(folder, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		state := &State{Run: "r-0001", Project: project, Folder: folder, StartedAt: time.Now()}
+		if err := state.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteIndex(state); err != nil {
+			t.Fatal(err)
+		}
+		states = append(states, state)
+	}
+	if got := LiveRuns(); len(got) != 2 {
+		t.Fatalf("live Runs: %+v", got)
+	}
+	for _, state := range states {
+		idx, ok := LiveRunFor(state.Project)
+		if !ok || idx.Run != state.Run || idx.Folder != state.Folder {
+			t.Fatalf("index: %+v", idx)
+		}
+		newest, err := NewestRun(state.Project)
+		if err != nil || newest != state.Folder {
+			t.Fatalf("newest: %s %v", newest, err)
+		}
+	}
+	RemoveIndex(states[0].Project, states[0].Run)
+	if _, ok := LiveRunFor(states[0].Project); ok {
+		t.Fatal("removed Run remains")
+	}
+	if idx, ok := LiveRunFor(states[1].Project); !ok || idx.Folder != states[1].Folder {
+		t.Fatalf("other project's Run removed: %+v", idx)
+	}
+}

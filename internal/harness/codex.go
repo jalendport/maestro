@@ -45,7 +45,7 @@ func (c *Codex) Catalog() ([]Model, string, error) {
 		}
 		models = append(models, Model{ID: m.Slug, Efforts: efforts, DefaultEffort: m.Default, Context: m.ContextWindow})
 	}
-	return models, "ChatGPT", nil
+	return models, "", nil
 }
 
 func (c *Codex) Enforcement(access string) string {
@@ -59,10 +59,25 @@ func (c *Codex) Enforcement(access string) string {
 }
 
 func (c *Codex) Build(l Launch) (*Command, error) {
+	return c.build(l, false)
+}
+
+func (c *Codex) BuildTab(l Launch) (*Command, error) {
+	return c.build(l, true)
+}
+
+func (c *Codex) build(l Launch, tab bool) (*Command, error) {
 	if c.bin == "" {
 		return nil, fmt.Errorf("codex is not installed")
 	}
 	args := []string{"exec", "--json", "-m", l.Model, "--skip-git-repo-check", "-C", l.Root, "-c", "approval_policy=never"}
+	root := l.Root
+	if tab {
+		if l.Access == "read" {
+			root = l.RunFolder
+		}
+		args = []string{l.Pointer, "-m", l.Model, "-C", root, "-c", "approval_policy=never"}
+	}
 	if l.Effort != "" {
 		args = append(args, "-c", "model_reasoning_effort="+l.Effort)
 	}
@@ -74,6 +89,10 @@ func (c *Codex) Build(l Launch) (*Command, error) {
 		// the Lane's last message is the Report and Codex writes it for us.
 		flags = append(flags, "-s", "read-only", "-o", l.ReportPath)
 		reportByText = true
+		if tab {
+			flags = []string{"-s", "workspace-write"}
+			reportByText = false
+		}
 	case "edit":
 		// The sandbox protects .agents/ like .git/, so the Run folder is opened by name.
 		flags = append(flags, "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--add-dir", l.RunFolder)
@@ -84,11 +103,13 @@ func (c *Codex) Build(l Launch) (*Command, error) {
 		return nil, fmt.Errorf("codex has no %q shape", l.Access)
 	}
 	args = append(args, flags...)
-	args = append(args, "-")
+	if !tab {
+		args = append(args, "-")
+	}
 	cmd := exec.Command(c.bin, args...)
-	cmd.Dir = l.Root
+	cmd.Dir = root
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Flags: flags, PromptStdin: true, ReportByText: reportByText}, nil
+	return &Command{Cmd: cmd, Flags: flags, PromptStdin: !tab, ReportByText: reportByText}, nil
 }
 
 func (c *Codex) NewParser() Parser { return &codexParser{out: &Outcome{}} }

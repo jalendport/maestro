@@ -24,10 +24,11 @@ func (a *app) runCmd() *cobra.Command {
 	var lane, level string
 	var wait bool
 	c := &cobra.Command{
-		Use:   "run <plan.md>",
-		Short: "Run every Task of a Plan file (one live Run per project)",
-		Long:  "Parse a Plan file, print the provisional Routes, hold for approval when a trigger fires, else start the per-Run supervisor. --wait keeps the supervisor in this process.",
-		Args:  cobra.ExactArgs(1),
+		Use:     "run <plan.md>",
+		Short:   "Run every Task of a Plan file (one live Run per project)",
+		Long:    "Parse a Plan file, print the provisional Routes, hold for approval when a trigger fires, else start the per-Run supervisor. --wait keeps the supervisor in this process.",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: refreshSkill,
 		RunE: func(_ *cobra.Command, args []string) error {
 			env, err := a.env(false)
 			if err != nil {
@@ -289,8 +290,8 @@ func (a *app) addCmd() *cobra.Command {
 
 func (a *app) cancelCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "cancel <task>",
-		Short: "Cancel a Task of the live Run (a running Dispatch is stopped)",
+		Use:   "cancel <task|run>",
+		Short: "Cancel a Task or a Run (running Dispatches are stopped)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			env, err := a.env(false)
@@ -298,22 +299,38 @@ func (a *app) cancelCmd() *cobra.Command {
 				return err
 			}
 			idx, live := run.LiveRunFor(env.Root)
-			if !live {
-				return fmt.Errorf("no live run in %s", env.Root)
+			if live {
+				s, err := run.Load(idx.Folder)
+				if err != nil {
+					return err
+				}
+				if t, ok := s.Task(args[0]); ok {
+					if err := os.WriteFile(filepath.Join(idx.Folder, "control", "cancel-"+t.ID), nil, 0o644); err != nil {
+						return err
+					}
+					ui.Outf("task %s (%d) cancel requested on run %s", t.ID, t.Number, s.Run)
+					return nil
+				}
 			}
-			s, err := run.Load(idx.Folder)
+			folder, s, err := findRun(env.Root, args[0])
 			if err != nil {
+				return fmt.Errorf("no live task or run %q under %s", args[0], env.Root)
+			}
+			if s.State == run.StateFinished || s.State == run.StateCancelled {
+				ui.Outf("run %s already finished (%s)", s.Run, s.State)
+				return nil
+			}
+			if err := os.MkdirAll(filepath.Join(folder, "control"), 0o755); err != nil {
 				return err
 			}
-			t, ok := s.Task(args[0])
-			if !ok {
-				return fmt.Errorf("run %s has no task %q", s.Run, args[0])
-			}
-			if err := os.WriteFile(filepath.Join(idx.Folder, "control", "cancel-"+t.ID), nil, 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(folder, "control", "cancel"), nil, 0o644); err != nil {
 				return err
 			}
-			ui.Outf("task %s (%d) cancel requested on run %s", t.ID, t.Number, s.Run)
-			return nil
+			ui.Outf("run %s cancel requested", s.Run)
+			if live && idx.Run == s.Run {
+				return nil
+			}
+			return run.Start(env, folder)
 		},
 	}
 }
