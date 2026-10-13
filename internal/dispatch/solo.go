@@ -92,7 +92,7 @@ func (l *SoloLink) ReportComment(t *Task, rec *Record) {
 		ui.Warnf("solo comment: %v", err)
 		return
 	}
-	if rec.Outcome.Outcome == OutcomeVerified || rec.Outcome.Outcome == OutcomeAnswered {
+	if rec.Outcome.Outcome == OutcomeVerified || rec.Outcome.Outcome == OutcomeAnswered || rec.Outcome.Outcome == OutcomeUnverified {
 		_ = l.Client.CompleteTodo(l.ProjectID, t.Todo)
 	}
 }

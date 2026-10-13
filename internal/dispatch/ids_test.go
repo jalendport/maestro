@@ -90,6 +90,7 @@ func TestFindTask(t *testing.T) {
 		ok   bool
 	}{
 		{name: "task id", id: "4f73", want: taskDir, ok: true},
+		{name: "run and task id", id: "r-0007/4f73", want: taskDir, ok: true},
 		{name: "run id", id: "r-0007", want: runDir, ok: true},
 		{name: "unknown id", id: "ffff"},
 	} {

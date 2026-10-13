@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/council"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
@@ -335,34 +337,106 @@ func (a *app) cancelCmd() *cobra.Command {
 	}
 }
 
+// projectStatus is the JSON shape for all status queries.
+type projectStatus struct {
+	Runs       []*run.State       `json:"runs"`
+	Dispatches []*dispatch.Record `json:"dispatches"`
+	Councils   []*council.Council `json:"councils"`
+}
+
 func (a *app) statusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status [run]",
-		Short: "Show the live state of a Run",
+		Use:   "status [run|task|council]",
+		Short: "Show Runs, Dispatches, and Councils in the project",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cwd, _ := os.Getwd()
-			root := config.FindProjectRoot(cwd)
-			var folder string
-			var s *run.State
-			var err error
-			if len(args) == 1 {
-				folder, s, err = findRun(root, args[0])
-			} else {
-				folder, err = run.NewestRun(root)
-				if err == nil {
-					s, err = run.Load(folder)
-				}
-			}
+			cwd, err := os.Getwd()
 			if err != nil {
 				return err
 			}
+			root := config.FindProjectRoot(cwd)
+			status := projectStatus{Runs: []*run.State{}, Dispatches: []*dispatch.Record{}, Councils: []*council.Council{}}
+			if len(args) == 1 {
+				id := args[0]
+				if _, s, err := findRun(root, id); err == nil {
+					status.Runs = append(status.Runs, s)
+				} else if folder, ok := dispatch.FindTask(root, id); ok {
+					rec, err := dispatch.LoadRecord(folder)
+					if err != nil {
+						return err
+					}
+					status.Dispatches = append(status.Dispatches, rec)
+				} else if folder, ok := council.Find(root, id); ok {
+					c, err := council.Load(folder)
+					if err != nil {
+						return err
+					}
+					status.Councils = append(status.Councils, c)
+				} else {
+					return fmt.Errorf("no run, task, or council %q under %s", id, root)
+				}
+			} else {
+				seen := map[string]bool{}
+				folder, err := run.NewestRun(root)
+				if err != nil && err != run.ErrNoRun {
+					return err
+				}
+				if err == nil {
+					s, err := run.Load(folder)
+					if err != nil {
+						return err
+					}
+					status.Runs = append(status.Runs, s)
+					seen[folder] = true
+				}
+				live := run.LiveRuns()
+				sort.SliceStable(live, func(i, j int) bool { return live[i].StartedAt.After(live[j].StartedAt) })
+				for _, idx := range live {
+					if idx.Project != root || seen[idx.Folder] {
+						continue
+					}
+					s, err := run.Load(idx.Folder)
+					if err != nil {
+						return err
+					}
+					status.Runs = append(status.Runs, s)
+					seen[idx.Folder] = true
+				}
+				status.Dispatches = dispatch.List(root)
+				status.Councils = council.List(root)
+			}
 			if a.json {
-				b, _ := json.MarshalIndent(s, "", "  ")
+				b, err := json.MarshalIndent(status, "", "  ")
+				if err != nil {
+					return err
+				}
 				fmt.Fprintln(os.Stdout, string(b))
 				return nil
 			}
-			fmt.Fprint(os.Stdout, run.Status(s))
+			if len(status.Runs)+len(status.Dispatches)+len(status.Councils) == 0 {
+				return run.ErrNoRun
+			}
+			for _, s := range status.Runs {
+				fmt.Fprint(os.Stdout, run.Status(s))
+			}
+			if len(status.Dispatches) > 0 {
+				fmt.Fprintln(os.Stdout, "dispatches")
+				for _, rec := range status.Dispatches {
+					fmt.Fprint(os.Stdout, dispatch.Status(rec))
+					if len(args) == 1 {
+						fmt.Fprintf(os.Stdout, "folder   %s\n", rec.Path)
+					}
+				}
+			}
+			if len(status.Councils) > 0 {
+				fmt.Fprintln(os.Stdout, "councils")
+				for _, c := range status.Councils {
+					fmt.Fprint(os.Stdout, council.Status(c))
+					if len(args) == 1 {
+						fmt.Fprintf(os.Stdout, "folder   %s\n", c.Path)
+					}
+				}
+			}
 			return nil
 		},
 	}

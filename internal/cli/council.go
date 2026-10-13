@@ -183,7 +183,7 @@ func (a *app) waitCouncil(folder string) error {
 			}
 			return nil
 		}
-		if time.Since(started) > 5*time.Second && c.Pid > 0 && syscall.Kill(c.Pid, 0) != nil {
+		if time.Since(started) > 5*time.Second && !council.SupervisorAlive(c) {
 			return &proc.ExitError{Code: proc.CodeFailed, Message: fmt.Sprintf("council %s: its supervisor is gone; see %s", c.Slug, filepath.Join(folder, "supervisor.log"))}
 		}
 		time.Sleep(2 * time.Second)

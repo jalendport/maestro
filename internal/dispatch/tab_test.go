@@ -48,6 +48,8 @@ func TestSoloTabHelper(t *testing.T) {
 			}
 			text := `{}`
 			switch req.Params.Name {
+			case "todo_create":
+				text = `{"todo_id":7}`
 			case "spawn_agent":
 				if err := os.WriteFile(os.Getenv("MAESTRO_TEST_REPORT"), []byte("## Answer\nPASS\n\n## Findings\n- none\n\n## Concerns\n- none\n\nPOSITION: confirmed\n"), 0o644); err != nil {
 					panic(err)

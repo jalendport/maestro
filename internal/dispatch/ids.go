@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/jalendport/maestro/internal/config"
 )
@@ -42,6 +43,16 @@ func NewTaskID(runDir string) string {
 
 // FindTask locates a Task folder by id (or run/task) in the project.
 func FindTask(root, id string) (string, bool) {
+	if run, task, ok := strings.Cut(id, "/"); ok {
+		if !runIDRe.MatchString(run) || task == "" || task == "." || task == ".." || strings.Contains(task, "/") {
+			return "", false
+		}
+		p := filepath.Join(config.RunsDir(root), run, task)
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			return p, true
+		}
+		return "", false
+	}
 	runs, _ := os.ReadDir(config.RunsDir(root))
 	// Newest Run first so a reused id resolves to the latest.
 	for i := len(runs) - 1; i >= 0; i-- {

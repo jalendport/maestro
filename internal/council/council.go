@@ -88,6 +88,7 @@ type Council struct {
 	Trigger       string       `json:"trigger"`
 	Run           string       `json:"run,omitempty"`
 	Task          string       `json:"task,omitempty"`
+	Todo          int          `json:"todo,omitempty"`
 	Tier          roster.Tier  `json:"tier"`
 	Level         roster.Level `json:"level"`
 	RoundsAsked   int          `json:"rounds_asked"`
@@ -229,7 +230,11 @@ func Create(env *dispatch.Env, o Opts) (*Council, error) {
 	if len(seats) == 1 {
 		c.SingleOpinion = true
 	}
-	return c, c.Save()
+	if err := c.Save(); err != nil {
+		return nil, err
+	}
+	todoFor(env, c)
+	return c, nil
 }
 
 func levelForTier(t roster.Tier) roster.Level {

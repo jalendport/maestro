@@ -23,6 +23,10 @@ func Start(env *dispatch.Env, folder string) (*Council, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.State == "finished" {
+		return c, nil
+	}
+	todoFor(env, c)
 	// Rehydrate families.
 	for _, s := range c.Seats {
 		f, ok := env.Roster.Family(s.Family)
@@ -37,6 +41,7 @@ func Start(env *dispatch.Env, folder string) (*Council, error) {
 	ui.Eventf("council", "%s  %s  %d seats  %d rounds  → %s", c.Slug, titleCase(string(c.Tier)), len(c.Seats), c.RoundsAsked, relOrAbs(env.Root, c.Path))
 	for round := 1; round <= c.RoundsAsked; round++ {
 		c.RoundsRun = round
+		_ = c.Save()
 		runRound(env, c, round)
 		_ = c.Save()
 		if round < c.RoundsAsked && allConfirmed(c, round) {
@@ -55,6 +60,7 @@ func Start(env *dispatch.Env, folder string) (*Council, error) {
 	if err := c.Save(); err != nil {
 		return nil, err
 	}
+	mergeComment(env, c)
 	if err := ledger.Append(c); err != nil {
 		ui.Warnf("ledger: %v", err)
 	}

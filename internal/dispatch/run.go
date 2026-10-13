@@ -227,6 +227,10 @@ func PrepareIn(env *Env, b *brief.Brief, req router.Request, runID, taskID, runD
 		Route: route, Folder: folder, ClaudeAuto: env.Project != nil && env.Project.ClaudeAuto, InSolo: InSolo(),
 		MaxAttempt: 2, Council: req.Seat != "",
 	}
+	// A new Route for the same Task keeps the existing Solo todo.
+	if previous, err := LoadTask(folder); err == nil {
+		t.Todo = previous.Todo
+	}
 	if err := t.Save(); err != nil {
 		return nil, err
 	}
