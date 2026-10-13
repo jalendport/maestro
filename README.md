@@ -18,7 +18,9 @@ Maestro is a local command-line tool that owns agent work after the thinking is 
 
 ## Installation
 
-Install with [Homebrew](https://brew.sh), by the full tap path:
+Prerequisites: [git](https://git-scm.com), at least one of the four harness CLIs ([Claude Code](https://code.claude.com/docs/en/quickstart), [Codex](https://developers.openai.com/codex/cli), [Grok](https://docs.x.ai/build/overview), or [Antigravity](https://antigravity.google/docs/getting-started?tab=cli)), and optionally [Solo](https://soloterm.com).
+
+Install with [Homebrew](https://brew.sh) (macOS), by the full tap path:
 
 ```sh
 brew install jalendport/tap/maestro
@@ -189,6 +191,8 @@ Exit codes: `0` ok, `1` failed, `2` needs the orchestrator (a held breakdown, a 
 
 Maestro works with no configuration: the roster, the rules table, the prices, and the thresholds are compiled in. Two optional files refine it.
 
+Without a Jev key the rules table routes every task, and edit tasks end `unverified`; the orchestrator reads the diff.
+
 Every key, its type, and its default are in [docs/configuration.md](docs/configuration.md).
 
 `~/.maestro/config.toml` holds your accounts, harness overrides, and deltas on families and chains. Maestro never rewrites it.
@@ -217,13 +221,15 @@ backend = "jev"               # or rules
 ```toml
 checks   = ["go build ./...", "go vet ./...", "go test ./..."]   # run after every edit
 forbid   = ["grok"]                                              # families this project never uses
-dirs     = ["~/Library/Caches/go-build"]                         # extra writable directories for edits
+dirs     = ["~/.cache/go-build"]                                 # extra writable directories for edits: your Go build cache, `go env GOCACHE`
 router   = "rules"                                               # keep this project's text off the network
 redact   = ["ACME"]                                              # strings replaced before any Jev call
 councils = "always"                                              # an end-of-run council on every run
 ```
 
-Generated state lives in `~/.maestro/`: `ledger.jsonl` (append only), `budget.json`, `cache/discovery.json`, and the live-run index. Per-project run folders live under `.agents/maestro/runs/` and council folders under `.agents/councils/`; `maestro clean` removes old ones and never touches the ledger.
+Generated state lives in `~/.maestro/`: `ledger.jsonl` (append only), `budget.json`, `cache/discovery.json`, and the live-run index. Per-project run folders live under `.agents/maestro/runs/` and council folders under `.agents/councils/`; `maestro clean` removes old ones and never touches the ledger. Maestro writes a `.gitignore` into each run and council folder it creates, so nothing under them reaches git.
+
+Keep-awake and the end-of-run notice are macOS only; on Linux they do nothing.
 
 ## Support
 
