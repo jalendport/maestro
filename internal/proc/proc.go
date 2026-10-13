@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Exit codes the CLI prototype fixed: 0 ok, 1 failed, 2 needs the Orchestrator.
+// Exit codes: 0 ok, 1 failed, 2 needs the Orchestrator.
 const (
 	CodeOK           = 0
 	CodeFailed       = 1

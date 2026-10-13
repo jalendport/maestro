@@ -56,3 +56,23 @@ func TestExpandHome(t *testing.T) {
 		})
 	}
 }
+
+func TestEnsureIgnoredDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nested", "artifacts")
+	if err := EnsureIgnoredDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".gitignore")
+	if got, err := os.ReadFile(path); err != nil || string(got) != "*\n" {
+		t.Fatalf("ignore rules = %q, error = %v", got, err)
+	}
+	if err := os.WriteFile(path, []byte("custom\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureIgnoredDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "custom\n" {
+		t.Fatalf("existing ignore rules = %q, error = %v", got, err)
+	}
+}

@@ -55,11 +55,7 @@ func (a *app) rosterCmd() *cobra.Command {
 			fmt.Fprintln(os.Stdout)
 			for _, name := range env.Reg.Names() {
 				h, _ := env.Reg.Get(name)
-				id := env.Disc.Harness[name].SoloTool
-				known := "not found in Solo"
-				if id != 0 {
-					known = fmt.Sprintf("agent tool id %d", id)
-				}
+				known := soloPresetNote(env, name)
 				toolType := map[string]string{"claude": "claude", "codex": "codex", "agy": "antigravity", "grok": "generic"}[name]
 				fmt.Fprintf(os.Stdout, "  %-6s  Name: %s   Command: %s   Tool type: %s   Default arguments: (none)   — %s\n", name, strings.ToUpper(name[:1])+name[1:], h.Bin(), toolType, known)
 			}
@@ -179,7 +175,7 @@ func printRoster(env *dispatch.Env, asJSON bool) error {
 }
 
 // reportDiscovery prints what the catalogs showed: unmapped models and
-// family models missing from the catalog (roster.md section 8).
+// family models missing from the catalog.
 func reportDiscovery(env *dispatch.Env) {
 	mapped := map[string]bool{}
 	for _, f := range env.Roster.Families {
@@ -224,3 +220,21 @@ func ago(t time.Time) string {
 }
 
 var _ = discovery.MaxAge
+
+func soloPresetNote(env *dispatch.Env, name string) string {
+	if id := env.Roster.Harness[name].SoloTool; id != 0 {
+		return fmt.Sprintf("agent tool id %d (user file)", id)
+	}
+	rec := env.Disc.Harness[name]
+	if len(rec.SoloPresets) > 1 {
+		var choices []string
+		for _, preset := range rec.SoloPresets {
+			choices = append(choices, fmt.Sprintf("%s (%d)", preset.Name, preset.ID))
+		}
+		return fmt.Sprintf("several presets: %s; set [harness.%s] solo_tool = <preset id> in %s", strings.Join(choices, ", "), name, config.UserFile())
+	}
+	if rec.SoloTool != 0 {
+		return fmt.Sprintf("agent tool id %d", rec.SoloTool)
+	}
+	return "not found in Solo"
+}

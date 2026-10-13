@@ -2,6 +2,7 @@ package verify
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,12 +47,16 @@ func LoadSnapshot(path string) (Snapshot, error) {
 }
 
 // Take records the baseline for root.
-func Take(root string) Snapshot {
+func Take(root string) (Snapshot, error) {
+	paths, err := statusPaths(root)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	s := Snapshot{Commit: Head(root), Taken: time.Now(), Dirty: map[string]time.Time{}}
-	for _, p := range statusPaths(root) {
+	for _, p := range paths {
 		s.Dirty[p] = mtime(filepath.Join(root, p))
 	}
-	return s
+	return s, nil
 }
 
 // Changed lists repo-relative paths that the Lane touched: paths dirty now
@@ -60,7 +65,8 @@ func Take(root string) Snapshot {
 func (s Snapshot) Changed(root string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, p := range statusPaths(root) {
+	paths, _ := statusPaths(root)
+	for _, p := range paths {
 		at, was := s.Dirty[p]
 		if was && !mtime(filepath.Join(root, p)).After(at) {
 			continue
@@ -75,10 +81,10 @@ func (s Snapshot) Changed(root string) []string {
 }
 
 // statusPaths is every path git reports as modified, staged, or untracked.
-func statusPaths(root string) []string {
+func statusPaths(root string) ([]string, error) {
 	b, err := exec.Command("git", "-C", root, "status", "--porcelain", "--untracked-files=all").Output()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("snapshot needs git and a repository at %s: %w", root, err)
 	}
 	var out []string
 	for _, l := range strings.Split(string(b), "\n") {
@@ -91,7 +97,7 @@ func statusPaths(root string) []string {
 		}
 		out = append(out, strings.Trim(p, `"`))
 	}
-	return out
+	return out, nil
 }
 
 func mtime(p string) time.Time {

@@ -12,7 +12,7 @@ import (
 )
 
 // Plan is one parsed Plan file: Run-wide defaults plus one Task per
-// "## <title>" section (task-brief.md section 13).
+// "## <title>" section.
 type Plan struct {
 	Title    string
 	Defaults Fields

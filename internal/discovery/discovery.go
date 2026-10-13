@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
@@ -20,6 +23,7 @@ type Record struct {
 	LoginHint    string          `json:"login_hint,omitempty"`
 	Models       []harness.Model `json:"models"`
 	SoloTool     int             `json:"solo_tool,omitempty"`
+	SoloPresets  []SoloPreset    `json:"solo_presets,omitempty"`
 	DiscoveredAt time.Time       `json:"discovered_at"`
 	Error        string          `json:"error,omitempty"`
 }
@@ -59,6 +63,12 @@ func (c *Cache) Stale() bool {
 
 // Refresh runs every adapter's version and catalog commands and writes the cache.
 func Refresh(reg *harness.Registry) (*Cache, error) {
+	c := Scan(reg)
+	return c, c.Save()
+}
+
+// Scan reads the current Harness facts without writing the cache.
+func Scan(reg *harness.Registry) *Cache {
 	c := &Cache{Harness: map[string]Record{}, RefreshedAt: time.Now()}
 	for _, name := range reg.Names() {
 		h, _ := reg.Get(name)
@@ -81,7 +91,7 @@ func Refresh(reg *harness.Registry) (*Cache, error) {
 		rec.LoginHint = hint
 		c.Harness[name] = rec
 	}
-	return c, c.Save()
+	return c
 }
 
 // Save writes the cache file.
@@ -118,4 +128,54 @@ func (c *Cache) Resolve(harnessName string, models []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+type SoloPreset struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type SoloAgentTool struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	ToolType string `json:"tool_type"`
+	Enabled  bool   `json:"enabled"`
+}
+
+func (c *Cache) RecordSoloTools(tools []SoloAgentTool) bool {
+	byHarness := map[string][]SoloPreset{}
+	for _, tool := range tools {
+		if !tool.Enabled {
+			continue
+		}
+		name := tool.ToolType
+		switch name {
+		case "antigravity":
+			name = "agy"
+		case "generic":
+			if strings.Contains(strings.ToLower(tool.Name), "grok") {
+				name = "grok"
+			}
+		}
+		if name != "claude" && name != "codex" && name != "grok" && name != "agy" {
+			continue
+		}
+		byHarness[name] = append(byHarness[name], SoloPreset{ID: tool.ID, Name: tool.Name})
+	}
+	changed := false
+	for _, name := range []string{"claude", "codex", "grok", "agy"} {
+		presets := byHarness[name]
+		sort.Slice(presets, func(i, j int) bool { return presets[i].ID < presets[j].ID })
+		id := 0
+		if len(presets) == 1 {
+			id = presets[0].ID
+		}
+		rec := c.Harness[name]
+		if rec.SoloTool != id || !slices.Equal(rec.SoloPresets, presets) {
+			rec.SoloTool, rec.SoloPresets = id, presets
+			c.Harness[name] = rec
+			changed = true
+		}
+	}
+	return changed
 }

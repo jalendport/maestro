@@ -160,6 +160,7 @@ type Roster struct {
 	Rules       map[Tier]config.Chains
 	Prices      map[string]config.Price
 	Aliases     map[string]string
+	Hook        config.Hook
 	Router      config.Router
 	Budget      config.Budget
 	Failure     config.Failure
@@ -194,16 +195,30 @@ func Merge(d, u *config.File) *Roster {
 		Rules:       map[Tier]config.Chains{},
 		Prices:      map[string]config.Price{},
 		Aliases:     map[string]string{},
+		Hook:        d.Hook,
 		Router:      d.Router,
 		Budget:      d.Budget,
 		Failure:     d.Failure,
 		Concurrency: d.Concurrency,
 	}
-	for k, v := range d.Accounts {
-		r.Accounts[k] = v
+	userAccounts := map[string]config.Account{}
+	replaced := map[string]bool{}
+	for id, delta := range u.Accounts {
+		base, exists := d.Accounts[id]
+		if !exists {
+			base = config.Account{Billing: "subscription", BlockAt: 0.90}
+		}
+		account := withAccountDefaults(delta, base)
+		userAccounts[id] = account
+		replaced[account.Harness] = true
 	}
-	for k, v := range u.Accounts {
-		r.Accounts[k] = withAccountDefaults(v, d.Accounts[k])
+	for id, account := range d.Accounts {
+		if !replaced[account.Harness] {
+			r.Accounts[id] = account
+		}
+	}
+	for id, account := range userAccounts {
+		r.Accounts[id] = account
 	}
 	for k, v := range d.Harness {
 		r.Harness[k] = v
@@ -261,7 +276,17 @@ func Merge(d, u *config.File) *Roster {
 	for k, v := range u.Aliases {
 		r.Aliases[k] = v
 	}
+	if u.Hook.Scope != "" {
+		r.Hook.Scope = u.Hook.Scope
+	}
 	mergeRouter(&r.Router, u.Router)
+	if id := r.Router.Orchestrator; id != "" {
+		if f := r.Families[id]; f != nil {
+			f.RequestOnly = true
+		} else {
+			r.Warnings = append(r.Warnings, fmt.Sprintf("orchestrator family %q is not in the Roster", id))
+		}
+	}
 	mergeBudget(&r.Budget, u.Budget)
 	mergeFailure(&r.Failure, u.Failure)
 	mergeConcurrency(&r.Concurrency, u.Concurrency)
@@ -271,19 +296,65 @@ func Merge(d, u *config.File) *Roster {
 }
 
 func withAccountDefaults(a, base config.Account) config.Account {
-	if a.Billing == "" {
-		a.Billing = "subscription"
+	if a.Has("harness") {
+		base.Harness = a.Harness
 	}
-	if a.BlockAt == 0 {
-		a.BlockAt = 0.90
+	if a.Has("billing") {
+		base.Billing = a.Billing
 	}
-	if a.Harness == "" {
-		a.Harness = base.Harness
+	if a.Has("plan_price") {
+		base.PlanPrice = a.PlanPrice
 	}
-	if a.BudgetSource == "" {
-		a.BudgetSource = base.BudgetSource
+	if a.Has("block_at") {
+		base.BlockAt = a.BlockAt
 	}
-	return a
+	if a.Has("reserve") {
+		base.Reserve = a.Reserve
+	}
+	if a.Has("paid_overflow") {
+		base.PaidOverflow = a.PaidOverflow
+	}
+	if a.Has("budget_source") {
+		base.BudgetSource = a.BudgetSource
+	}
+	if a.Has("base_url") {
+		base.BaseURL = a.BaseURL
+	}
+	if a.Has("budget") && a.Cap != nil {
+		cap := config.Cap{}
+		if base.Cap != nil {
+			cap = *base.Cap
+		}
+		if a.Has("budget.usd") {
+			cap.USD = a.Cap.USD
+		}
+		if a.Has("budget.period") {
+			cap.Period = a.Cap.Period
+		}
+		base.Cap = &cap
+	}
+	return base
+}
+
+// ValidateAccounts rejects logins that cannot be selected at launch.
+func (r *Roster) ValidateAccounts() error {
+	byHarness := map[string][]string{}
+	for id, account := range r.Accounts {
+		byHarness[account.Harness] = append(byHarness[account.Harness], id)
+	}
+	names := make([]string, 0, len(byHarness))
+	for name := range byHarness {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		ids := byHarness[name]
+		if len(ids) > 1 {
+			sort.Strings(ids)
+			return fmt.Errorf("harness %s has multiple accounts (%s); use one account until account-specific launch settings exist", name, strings.Join(ids, ", "))
+		}
+	}
+	return nil
 }
 
 func toFamily(id string, base config.Family, delta *config.Family) *Family {
@@ -336,6 +407,9 @@ func cloneChains(c config.Chains) config.Chains {
 }
 
 func mergeRouter(dst *config.Router, u config.Router) {
+	if u.Orchestrator != "" {
+		dst.Orchestrator = u.Orchestrator
+	}
 	if u.Backend != "" {
 		dst.Backend = u.Backend
 	}
@@ -409,7 +483,7 @@ func mergeConcurrency(dst *config.Concurrency, u config.Concurrency) {
 	}
 }
 
-// bindAccounts fills a family's empty account with its Harness's single
+// bindAccounts binds every family to its Harness's single
 // Account, or warns when the Harness has several.
 func (r *Roster) bindAccounts() {
 	byHarness := map[string][]string{}
@@ -417,12 +491,6 @@ func (r *Roster) bindAccounts() {
 		byHarness[a.Harness] = append(byHarness[a.Harness], id)
 	}
 	for _, f := range r.Families {
-		if f.Account != "" {
-			if _, ok := r.Accounts[f.Account]; !ok {
-				r.Warnings = append(r.Warnings, fmt.Sprintf("family %s names account %q, which does not exist", f.ID, f.Account))
-			}
-			continue
-		}
 		ids := byHarness[f.Harness]
 		switch len(ids) {
 		case 1:

@@ -1,7 +1,7 @@
 // Package budget keeps one Budget record per Account: its usage windows,
 // where each reading came from, and whether the Account is blocked. The
 // Router removes blocked Accounts (hard rule 3); nothing here estimates in
-// flight or projects burn (budget-model.md).
+// flight or projects burn.
 package budget
 
 import (
@@ -28,11 +28,12 @@ const (
 
 // Window is one stored reading for one usage window.
 type Window struct {
-	Kind     string    `json:"kind"` // session | weekly | balance
-	Used     float64   `json:"used"` // 0..1
-	ResetsAt time.Time `json:"resets_at"`
-	ReadAt   time.Time `json:"read_at"`
-	Source   string    `json:"source"`
+	Duration time.Duration `json:"duration,omitempty"`
+	Kind     string        `json:"kind"` // session | weekly | balance
+	Used     float64       `json:"used"` // 0..1
+	ResetsAt time.Time     `json:"resets_at"`
+	ReadAt   time.Time     `json:"read_at"`
+	Source   string        `json:"source"`
 }
 
 // Account is one Account's record.
@@ -141,7 +142,7 @@ func (f *File) Record(id string, windows []harness.Window, source string) {
 	a := f.account(id)
 	now := time.Now()
 	for _, w := range windows {
-		a.Windows = replace(a.Windows, Window{Kind: w.Kind, Used: w.Used, ResetsAt: w.ResetsAt, ReadAt: now, Source: source})
+		a.Windows = replace(a.Windows, Window{Kind: w.Kind, Duration: w.Duration, Used: w.Used, ResetsAt: w.ResetsAt, ReadAt: now, Source: source})
 	}
 	sort.Slice(a.Windows, func(i, j int) bool { return a.Windows[i].Kind < a.Windows[j].Kind })
 }
@@ -188,7 +189,7 @@ func replace(ws []Window, w Window) []Window {
 type Rules struct {
 	BlockAt         float64
 	WarnAt          float64
-	Reserve         float64 // share of the weekly window kept for the Orchestrator (Claude)
+	Reserve         float64 // share of the weekly window kept for the Orchestrator
 	StaleAfter      time.Duration
 	AssumedHeadroom float64
 }
@@ -258,15 +259,35 @@ func (f *File) Evaluate(id string, r Rules, now time.Time) View {
 	return v
 }
 
-func windowWord(w *Window) string {
+func (w Window) Length() time.Duration {
+	if w.Duration > 0 {
+		return w.Duration
+	}
 	switch w.Kind {
 	case "session":
-		return "5h window"
+		return 5 * time.Hour
 	case "weekly":
-		return "weekly window"
+		return 7 * 24 * time.Hour
 	}
-	return w.Kind + " window"
+	return 0
 }
+
+func WindowName(w Window) string {
+	length := w.Length()
+	switch {
+	case length <= 0:
+		return w.Kind
+	case length%(24*time.Hour) == 0:
+		return itoa(int(length/(24*time.Hour))) + "d"
+	case length%time.Hour == 0:
+		return itoa(int(length/time.Hour)) + "h"
+	case length%time.Minute == 0:
+		return itoa(int(length/time.Minute)) + "m"
+	}
+	return length.String()
+}
+
+func windowWord(w *Window) string { return WindowName(*w) + " window" }
 
 func pct(x float64) string { return json.Number(formatPct(x)).String() + "%" }
 

@@ -1,15 +1,20 @@
 // Package hook is the PreToolUse entry point the Adapters call: it reads the
 // Harness's payload shape, applies one rule, and writes the Harness's answer
 // shape. The rule: read-only sub-agent spawns pass; code-writing sub-agent
-// and Solo spawns are denied with "use maestro dispatch". Inside a Lane
-// (MAESTRO_LANE=1) the same rule applies.
+// and Solo spawns are denied with "use maestro dispatch". The rule applies
+// only in projects with .agents/maestro.toml, unless the user sets scope = "all".
+// Inside a Lane (MAESTRO_LANE=1) the same scope and rule apply.
 package hook
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/jalendport/maestro/internal/config"
 )
 
 // Decision is the harness-neutral result.
@@ -21,12 +26,13 @@ type Decision struct {
 // Call is the harness-neutral view of a tool call.
 type Call struct {
 	Harness string
+	CWD     string
 	Tool    string
 	Input   map[string]any
 }
 
 // readOnlySubagents are Claude agent types that only read.
-var readOnlySubagents = map[string]bool{"scout": true, "Explore": true, "explore": true, "Plan": true, "plan": true, "claude-code-guide": true}
+var readOnlySubagents = map[string]bool{"Explore": true, "explore": true, "Plan": true, "plan": true, "claude-code-guide": true}
 
 // Parse reads a payload. harness selects the shape; "" detects it from the keys.
 func Parse(harness string, payload []byte) (*Call, error) {
@@ -44,7 +50,8 @@ func Parse(harness string, payload []byte) (*Call, error) {
 			harness = "claude"
 		}
 	}
-	c := &Call{Harness: harness, Input: map[string]any{}}
+	cwd, _ := raw["cwd"].(string)
+	c := &Call{Harness: harness, CWD: cwd, Input: map[string]any{}}
 	switch harness {
 	case "claude", "codex":
 		c.Tool, _ = raw["tool_name"].(string)
@@ -69,8 +76,11 @@ func Parse(harness string, payload []byte) (*Call, error) {
 	return c, nil
 }
 
-// Decide applies the rule.
-func Decide(c *Call) Decision {
+// Decide applies the rule only in the configured scope.
+func Decide(c *Call, scope string) Decision {
+	if scope != "all" && !inProject(c.CWD) {
+		return Decision{Allow: true}
+	}
 	tool := c.Tool
 	switch {
 	case isSoloSpawn(tool):
@@ -86,7 +96,7 @@ func Decide(c *Call) Decision {
 		if readOnlySubagents[sub] {
 			return Decision{Allow: true}
 		}
-		return Decision{Allow: false, Reason: fmt.Sprintf("Sub-agent %q may write code; Maestro routes that work. Write a brief file and run `maestro dispatch <brief.md>`. Read-only legwork may stay on a read-only agent type (scout, Explore, Plan).", nonEmpty(sub, tool))}
+		return Decision{Allow: false, Reason: fmt.Sprintf("Sub-agent %q may write code; Maestro routes that work. Write a brief file and run `maestro dispatch <brief.md>`. Read-only legwork may stay on a read-only agent type (Explore, Plan).", nonEmpty(sub, tool))}
 	}
 	return Decision{Allow: true}
 }
@@ -141,4 +151,25 @@ func nonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// inProject walks past repository markers to find a project file.
+func inProject(cwd string) bool {
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	dir, err := filepath.Abs(cwd)
+	if err != nil {
+		return false
+	}
+	for {
+		if info, err := os.Stat(config.ProjectFile(dir)); err == nil && !info.IsDir() {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }

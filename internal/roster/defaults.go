@@ -3,42 +3,36 @@ package roster
 // Defaults is the Roster data compiled into the binary: families, level maps,
 // text, accounts, rules table, prices, Claude aliases, per-Harness minimum
 // versions, and the global blocks with their settled values. A release
-// updates it; the user file holds only deltas. Source: .agents/specs/roster.md,
-// budget-model.md, failure-handling.md, concurrency.md, jev-router.md.
+// updates it; the user file holds only deltas.
 const Defaults = `
 version = 1
 
-[accounts.claude-max]
+[accounts.claude]
 harness       = "claude"
 billing       = "subscription"
-plan_price    = 200
 block_at      = 0.90
-reserve       = 0.35
 paid_overflow = false
 budget_source = "harvest+probe"
 
-[accounts.chatgpt-pro]
+[accounts.codex]
 harness       = "codex"
 billing       = "subscription"
-plan_price    = 100
 block_at      = 0.90
 paid_overflow = false
 budget_source = "harvest+probe"
 
-[accounts.grok-supergrok]
+[accounts.grok]
 harness       = "grok"
 billing       = "subscription"
-plan_price    = 20
 block_at      = 0.90
 paid_overflow = false
 budget_source = "none"
 
-[accounts.agy-gcp]
+[accounts.agy]
 harness       = "agy"
 billing       = "metered"
 block_at      = 0.90
 budget_source = "computed"
-budget        = { usd = 20, period = "30d" }
 
 [harness.claude]
 min_version = "2.1.283"
@@ -87,10 +81,9 @@ not_for  = "mechanical follow-ons that a smaller lane can do"
 harness      = "claude"
 models       = ["fable"]
 levels       = { expert = "high" }
-request_only = true
 frontier     = true
-good_for     = "the Orchestrator's own model; only on an explicit request"
-not_for      = "automatic routing"
+good_for     = "expert judgment, design and review, specs"
+not_for      = "day-to-day work"
 
 [families.codex-luna]
 harness  = "codex"
@@ -213,6 +206,9 @@ output = 3.75
 input = 2.00
 cached_input = 0.20
 output = 12.00
+
+[hook]
+scope = "projects"
 
 [router]
 backend = "jev"

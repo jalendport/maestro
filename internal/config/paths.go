@@ -33,6 +33,26 @@ func ProjectFile(root string) string { return filepath.Join(root, ".agents", "ma
 func RunsDir(root string) string     { return filepath.Join(root, ".agents", "maestro", "runs") }
 func CouncilsDir(root string) string { return filepath.Join(root, ".agents", "councils") }
 
+// EnsureIgnoredDir creates an artifact folder and preserves any existing ignore rules.
+func EnsureIgnoredDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, ".gitignore"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if os.IsExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString("*\n")
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
+}
+
 // EnsureHome creates the global state directory tree.
 func EnsureHome() error {
 	for _, d := range []string{Home(), filepath.Join(Home(), "cache"), RunsIndexDir()} {
@@ -60,4 +80,18 @@ func FindProjectRoot(dir string) string {
 		}
 		d = parent
 	}
+}
+
+func ClaudeHome(home string) string {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return ExpandHome(dir)
+	}
+	return filepath.Join(home, ".claude")
+}
+
+func CodexHome(home string) string {
+	if dir := os.Getenv("CODEX_HOME"); dir != "" {
+		return ExpandHome(dir)
+	}
+	return filepath.Join(home, ".codex")
 }

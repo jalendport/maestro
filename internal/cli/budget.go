@@ -12,9 +12,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/budget"
-	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/dispatch"
-	"github.com/jalendport/maestro/internal/ledger"
 	"github.com/jalendport/maestro/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -167,13 +165,13 @@ func (a *app) printBudget(env *dispatch.Env) error {
 			plan = fmt.Sprintf("$%.0f", acct.PlanPrice)
 		}
 		if acct.Billing == "metered" {
-			spent := meteredSpend(id, acct.Cap)
-			cap := 20.0
-			period := "30d"
+			spent := budget.MeteredSpend(id, acct.Cap)
+			period, headroom := "—", "—"
 			if acct.Cap != nil {
-				cap, period = acct.Cap.USD, acct.Cap.Period
+				period = acct.Cap.Period
+				headroom = fmt.Sprintf("$%.2f of $%.0f", acct.Cap.USD-spent, acct.Cap.USD)
 			}
-			rows = append(rows, budgetRow{Account: id, Billing: "metered", Plan: "—", Window: period, Used: fmt.Sprintf("$%.2f", spent), Headroom: fmt.Sprintf("$%.2f of $%.0f", cap-spent, cap), Reserve: "—", Resets: "—", Read: "—", Source: "computed", State: meteredState(spent, cap, env.Roster.Budget.WarnAt, env.Roster.Budget.BlockAt), Pace: "—"})
+			rows = append(rows, budgetRow{Account: id, Billing: "metered", Plan: "—", Window: period, Used: fmt.Sprintf("$%.2f", spent), Headroom: headroom, Reserve: "—", Resets: "—", Read: "—", Source: "computed", State: v.State, Pace: "—"})
 			continue
 		}
 		rec := env.Budget.Snapshot(id)
@@ -182,7 +180,7 @@ func (a *app) printBudget(env *dispatch.Env) error {
 			continue
 		}
 		for i, w := range rec.Windows {
-			row := budgetRow{Window: windowName(w.Kind), Used: fmt.Sprintf("%.2f", w.Used), Headroom: fmt.Sprintf("%.2f", 1-w.Used), Reserve: "—", Source: w.Source}
+			row := budgetRow{Window: budget.WindowName(w), Used: fmt.Sprintf("%.2f", w.Used), Headroom: fmt.Sprintf("%.2f", 1-w.Used), Reserve: "—", Source: w.Source}
 			if i == 0 {
 				row.Account, row.Billing, row.Plan = id, acct.Billing, plan
 				row.State = v.State
@@ -193,7 +191,7 @@ func (a *app) printBudget(env *dispatch.Env) error {
 					row.State += fmt.Sprintf("  %d reset credits", rec.Credits)
 				}
 			}
-			if w.Kind == "weekly" && acct.Harness == "claude" && acct.Reserve > 0 {
+			if w.Kind == "weekly" && acct.Reserve > 0 {
 				row.Reserve = fmt.Sprintf("%.2f", acct.Reserve)
 				row.Headroom = fmt.Sprintf("%.2f", max(0, 1-w.Used-acct.Reserve))
 			}
@@ -218,27 +216,9 @@ func (a *app) printBudget(env *dispatch.Env) error {
 	return w.Flush()
 }
 
-func windowName(kind string) string {
-	switch kind {
-	case "session":
-		return "5h"
-	case "weekly":
-		return "7d"
-	}
-	return kind
-}
-
 // pace compares the share used with the share of the window elapsed (display only).
 func pace(w budget.Window, now time.Time) string {
-	var length time.Duration
-	switch w.Kind {
-	case "session":
-		length = 5 * time.Hour
-	case "weekly":
-		length = 7 * 24 * time.Hour
-	default:
-		return "—"
-	}
+	length := w.Length()
 	elapsed := length - w.ResetsAt.Sub(now)
 	if elapsed <= 0 || length <= 0 {
 		return "—"
@@ -262,46 +242,4 @@ func shortDur(d time.Duration) string {
 		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
 	}
 	return fmt.Sprintf("%dm", int(d.Minutes()))
-}
-
-func meteredState(spent, cap, warnAt, blockAt float64) string {
-	switch {
-	case cap > 0 && spent >= cap*blockAt:
-		return "blocked"
-	case cap > 0 && spent >= cap*warnAt:
-		return "warning"
-	}
-	return "ok"
-}
-
-// meteredSpend sums the priced cost of this Account's Dispatches in the period.
-func meteredSpend(account string, cap *config.Cap) float64 {
-	period := 30 * 24 * time.Hour
-	if cap != nil && cap.Period != "" {
-		if d, err := time.ParseDuration(strings.Replace(cap.Period, "d", "h", 1)); err == nil {
-			if strings.HasSuffix(cap.Period, "d") {
-				d *= 24
-			}
-			period = d
-		}
-	}
-	since := time.Now().Add(-period)
-	total := 0.0
-	_ = ledger.Each(func(raw json.RawMessage) error {
-		var row struct {
-			Kind  string    `json:"kind"`
-			Ended time.Time `json:"ended_at"`
-			Route struct {
-				Account string `json:"account"`
-			} `json:"route"`
-			Budget struct {
-				Cost *float64 `json:"cost_usd"`
-			} `json:"budget"`
-		}
-		if json.Unmarshal(raw, &row) == nil && row.Kind == "dispatch" && row.Route.Account == account && row.Ended.After(since) && row.Budget.Cost != nil {
-			total += *row.Budget.Cost
-		}
-		return nil
-	})
-	return total
 }

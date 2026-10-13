@@ -61,4 +61,11 @@ cp "$temporary_directory/maestro" "$install_directory/maestro"
 chmod 755 "$install_directory/maestro"
 
 echo "Installed maestro to ${install_directory}/maestro."
+if [ "$install_directory" = "${HOME}/.local/bin" ]; then
+	case ":${PATH}:" in
+		*":${install_directory}:"*) ;;
+		*) echo 'Add this line to your shell profile: export PATH="$HOME/.local/bin:$PATH"' ;;
+	esac
+fi
+
 echo "Next: maestro doctor, then maestro adapter for the per-harness install lines."

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
@@ -27,16 +26,15 @@ type JevRoute struct {
 	Error         string             `json:"error,omitempty"`
 }
 
-// Gate names from jev-router.md section 3; they are returned as
-// AskOrchestrator reasons or as a Council signal.
+// Gate names are returned as AskOrchestrator reasons or as a Council signal.
 const (
 	GateVague   = "clarify the brief"
 	GateCouncil = "council"
 	GateAsk     = "ask_orchestrator"
 )
 
-// CouncilSignal is returned when the Council gate fires; the caller decides
-// what to do with it (a Council in milestone 4, an ask until then).
+// CouncilSignal is returned when the Council gate fires so the caller
+// can start a Council or ask the Orchestrator.
 type CouncilSignal struct{ Reason string }
 
 func (c *CouncilSignal) Error() string { return c.Reason }
@@ -65,6 +63,9 @@ func (rt *Router) jevRoute(req Request, cands []*roster.Family, level roster.Lev
 	}
 	for _, f := range cands {
 		questions["fits_"+f.ID] = jev.Noul(fmt.Sprintf("Is %s a good fit for this task? It is good for: %s. It is not for: %s.", f.ID, f.GoodFor, f.NotFor))
+	}
+	if req.Project != nil {
+		client.Redact = req.Project.Redact
 	}
 	state := map[string]any{"task": routeState(req)}
 	resp, err := client.Ask(context.Background(), state, questions)
@@ -115,7 +116,7 @@ func (rt *Router) jevRoute(req Request, cands []*roster.Family, level roster.Lev
 	switch {
 	case conf >= th("dispatch"):
 		// Near-tie between equally fit subscription families of one Tier: the
-		// higher allocation weight wins (routing-policy.md section 4).
+		// higher allocation weight wins.
 		if second, p := secondOption(lane.Probabilities, pickID); second != "" && pick != nil && lane.Probabilities[pickID]-p <= 0.10 {
 			if sf := byID[second]; sf != nil && sf.TierFor(scoreLevel) == pick.TierFor(scoreLevel) &&
 				rt.Roster.Accounts[sf.Account].Billing != "metered" && rt.Roster.Accounts[pick.Account].Billing != "metered" &&
@@ -156,7 +157,7 @@ func (rt *Router) jevRoute(req Request, cands []*roster.Family, level roster.Lev
 }
 
 // routeState is the Brief as Jev sees it: title, goal, done, facts. Never
-// diffs, file lists, or numbers (jev-router.md section 2).
+// diffs, file lists, or numbers.
 func routeState(req Request) map[string]any {
 	s := map[string]any{"title": req.Brief.Title, "goal": req.Brief.Goal, "done": req.Brief.Done}
 	if req.Brief.Category != "" {
@@ -164,16 +165,6 @@ func routeState(req Request) map[string]any {
 	}
 	if len(req.Brief.Facts) > 0 {
 		s["facts"] = req.Brief.Facts
-	}
-	if req.Project != nil && len(req.Project.Redact) > 0 {
-		for k, v := range s {
-			if str, ok := v.(string); ok {
-				for _, r := range req.Project.Redact {
-					str = strings.ReplaceAll(str, r, "[redacted]")
-				}
-				s[k] = str
-			}
-		}
 	}
 	return s
 }

@@ -1,5 +1,5 @@
 // Package router makes Routes: it applies the hard rules in code, then asks
-// the backend (the rules table today, Jev next) to pick a family, and prints
+// Jev, with the rules table as fallback, to pick a family, and prints
 // one reason line per Route. Jev never sees the hard rules as words.
 package router
 
@@ -14,6 +14,7 @@ import (
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/discovery"
 	"github.com/jalendport/maestro/internal/harness"
+	"github.com/jalendport/maestro/internal/jev"
 	"github.com/jalendport/maestro/internal/roster"
 )
 
@@ -98,17 +99,18 @@ type BudgetNote struct {
 
 // View evaluates one Account's Budget with the roster's rules.
 func (rt *Router) View(account string) budget.View {
+	acct := rt.Roster.Accounts[account]
+	if acct.Billing == "metered" {
+		return budget.EvaluateMetered(account, acct.Cap, rt.Roster.Budget.WarnAt)
+	}
 	if rt.Budget == nil {
 		return budget.View{Headroom: rt.Roster.Budget.AssumedHeadroom, State: "unknown", Reason: "budget unknown"}
 	}
-	acct := rt.Roster.Accounts[account]
 	r := budget.Rules{BlockAt: rt.Roster.Budget.BlockAt, WarnAt: rt.Roster.Budget.WarnAt, StaleAfter: rt.Roster.Budget.StaleAfter.Duration, AssumedHeadroom: rt.Roster.Budget.AssumedHeadroom}
 	if acct.BlockAt > 0 {
 		r.BlockAt = acct.BlockAt
 	}
-	if acct.Harness == "claude" {
-		r.Reserve = acct.Reserve
-	}
+	r.Reserve = acct.Reserve
 	return rt.Budget.Evaluate(account, r, time.Now())
 }
 
@@ -124,13 +126,17 @@ func (rt *Router) Note(account string) *BudgetNote {
 	return n
 }
 
-// Weight is the allocation weight: plan price × headroom above the reserve.
+// Weight is plan price times Headroom, or Headroom alone without a plan price.
 func (rt *Router) Weight(f *roster.Family) float64 {
-	return rt.Roster.Accounts[f.Account].PlanPrice * rt.View(f.Account).Headroom
+	headroom := rt.View(f.Account).Headroom
+	if price := rt.Roster.Accounts[f.Account].PlanPrice; price > 0 {
+		return price * headroom
+	}
+	return headroom
 }
 
-// Route decides. The rules table decides today; the Jev backend lands in
-// milestone 2 and will use the same candidate list.
+// Route applies the hard rules, then asks Jev to pick a Family.
+// The rules table uses the same candidates when Jev is absent.
 func (rt *Router) Route(req Request) (*Route, error) {
 	category := req.Brief.Category
 	var defaults []string
@@ -160,6 +166,9 @@ func (rt *Router) Route(req Request) (*Route, error) {
 		f, ok := rt.Roster.Family(req.Seat)
 		if !ok {
 			return nil, fmt.Errorf("unknown family %q", req.Seat)
+		}
+		if v := rt.View(f.Account); v.State == "blocked" {
+			return nil, fmt.Errorf("family %s is blocked by budget: %s", f.ID, v.Reason)
 		}
 		useLevel := level
 		if !f.Serves(useLevel) {
@@ -195,6 +204,10 @@ func (rt *Router) Route(req Request) (*Route, error) {
 	}
 	rulesFamily, tie := rt.rulesPick(cands, level, category)
 	useRules := rt.Roster.Router.Backend == "rules" || (req.Project != nil && req.Project.Router == "rules")
+	if !useRules {
+		key, err := jev.Key()
+		useRules = err != nil || key == ""
+	}
 	if !useRules {
 		r, jr, err := rt.jevRoute(req, cands, level, category, defaults)
 		if err != nil {
@@ -270,9 +283,9 @@ func levelForTier(t roster.Tier) roster.Level {
 	}
 }
 
-// candidates applies hard rules 2, 4, 6, 7, 8 and the enabled flag.
-// Rule 3 (Budget block) joins in the budget milestone; rule 5 (reviewer
-// family) in the council milestone.
+// candidates removes disabled, request-only, forbidden, excluded, and
+// blocked Families, and those that fail preflight or read Enforcement.
+// Metered Families join only for read work when no subscription serves the level.
 func (rt *Router) candidates(req Request, level roster.Level) ([]*roster.Family, []Exclusion) {
 	var out []*roster.Family
 	var excluded []Exclusion
@@ -348,6 +361,9 @@ func (rt *Router) candidates(req Request, level roster.Level) ([]*roster.Family,
 // Preflight is hard rule 4: installed, version gate, model in the catalog,
 // and a launch shape for this Access. Empty means the family passes.
 func (rt *Router) Preflight(f *roster.Family, access string) string {
+	if err := rt.Roster.ValidateAccounts(); err != nil {
+		return err.Error()
+	}
 	h, ok := rt.Reg.Get(f.Harness)
 	if !ok {
 		return "unknown harness " + f.Harness
@@ -413,6 +429,9 @@ func (rt *Router) requested(req Request, level, estimate roster.Level, category 
 	}
 	if why := rt.Preflight(f, req.Access); why != "" {
 		return nil, fmt.Errorf("family %s fails pre-flight: %s", id, why)
+	}
+	if v := rt.View(f.Account); v.State == "blocked" {
+		return nil, fmt.Errorf("family %s is blocked by budget: %s", id, v.Reason)
 	}
 	var warnings []string
 	if f.RequestOnly {

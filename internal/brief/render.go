@@ -34,7 +34,7 @@ func Pointer(briefPath string) string {
 	return fmt.Sprintf("Read the file `%s` in full, then follow it. Write your report as the file says.", briefPath)
 }
 
-// Render produces brief.md in the fixed order of task-brief.md section 5.
+// Render produces brief.md: Goal, Done, Context, Files, Checks, Rules, Report.
 // The Lane never sees the Tier, the level, the reason, effort or cost words.
 func Render(b *Brief, o RenderOpts) string {
 	var w strings.Builder
@@ -120,7 +120,7 @@ func quoteAll(xs []string) []string {
 	return out
 }
 
-// CouncilShape is the Report section for a Council Seat (council.md section 7).
+// CouncilShape is the Report section for a Council Seat.
 func CouncilShape(reportPath string, byMessage bool) string {
 	var w strings.Builder
 	if byMessage {

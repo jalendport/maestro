@@ -22,6 +22,7 @@ type File struct {
 	Rules       map[string]Chains  `toml:"rules"`
 	Prices      map[string]Price   `toml:"prices"`
 	Router      Router             `toml:"router"`
+	Hook        Hook               `toml:"hook"`
 	Budget      Budget             `toml:"budget"`
 	Failure     Failure            `toml:"failure"`
 	Concurrency Concurrency        `toml:"concurrency"`
@@ -39,7 +40,12 @@ type Account struct {
 	BudgetSource string  `toml:"budget_source"`
 	Cap          *Cap    `toml:"budget"`
 	BaseURL      string  `toml:"base_url"`
+	defined      map[string]bool
 }
+
+// Has reports whether the user wrote an Account field. Programmatic Accounts
+// supply a complete stanza.
+func (a Account) Has(field string) bool { return a.defined == nil || a.defined[field] }
 
 // Cap is the spend cap of a metered Account.
 type Cap struct {
@@ -79,12 +85,18 @@ type Price struct {
 	Output      float64 `toml:"output"`
 }
 
+// Hook sets where the Adapter hook applies.
+type Hook struct {
+	Scope string `toml:"scope"` // projects | all
+}
+
 // Router is the `router` block.
 type Router struct {
-	Backend    string                        `toml:"backend"` // rules | jev
-	BaseURL    string                        `toml:"base_url"`
-	Model      string                        `toml:"model"`
-	Thresholds map[string]map[string]float64 `toml:"thresholds"`
+	Orchestrator string                        `toml:"orchestrator"`
+	Backend      string                        `toml:"backend"` // rules | jev
+	BaseURL      string                        `toml:"base_url"`
+	Model        string                        `toml:"model"`
+	Thresholds   map[string]map[string]float64 `toml:"thresholds"`
 }
 
 // Budget is the global `budget` block.
@@ -160,6 +172,16 @@ func ParseFile(src string) (*File, []string, error) {
 	md, err := toml.Decode(src, &f)
 	if err != nil {
 		return nil, nil, err
+	}
+	for id, account := range f.Accounts {
+		account.defined = map[string]bool{}
+		for _, field := range []string{"harness", "billing", "plan_price", "block_at", "reserve", "paid_overflow", "budget_source", "budget", "base_url"} {
+			account.defined[field] = md.IsDefined("accounts", id, field)
+		}
+		for _, field := range []string{"usd", "period"} {
+			account.defined["budget."+field] = md.IsDefined("accounts", id, "budget", field)
+		}
+		f.Accounts[id] = account
 	}
 	var unknown []string
 	for _, k := range md.Undecoded() {

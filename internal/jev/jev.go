@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/redact"
 )
 
 // DefaultURL and DefaultModel are the embedded defaults; the roster's router
@@ -35,6 +36,7 @@ type Client struct {
 	Key     string
 	Timeout time.Duration
 	HTTP    *http.Client
+	Redact  []string
 }
 
 // New builds a client from the router block and the key on this machine.
@@ -67,7 +69,10 @@ func Key() (string, error) {
 	for _, line := range strings.Split(string(b), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "TYPESAFE_API_KEY=") {
-			return strings.Trim(strings.TrimPrefix(line, "TYPESAFE_API_KEY="), `"'`), nil
+			key := strings.Trim(strings.TrimPrefix(line, "TYPESAFE_API_KEY="), `"'`)
+			if key != "" {
+				return key, nil
+			}
 		}
 	}
 	return "", ErrNoKey
@@ -139,7 +144,7 @@ func (e *HTTPError) Error() string {
 // Ask sends one request. It retries once on 429 or 529 and gives up at the
 // client's timeout, which the Router treats as "Jev absent".
 func (c *Client) Ask(ctx context.Context, state any, questions map[string]Question) (*Response, error) {
-	body, err := json.Marshal(map[string]any{"model": c.Model, "state": state, "questions": questions})
+	body, err := redact.JSON(map[string]any{"model": c.Model, "state": state, "questions": questions}, c.Redact)
 	if err != nil {
 		return nil, err
 	}

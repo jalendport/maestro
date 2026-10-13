@@ -12,14 +12,33 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jalendport/maestro/internal/config"
 )
 
 // Helper is the stdio MCP helper inside Solo.app.
 const Helper = "/Applications/Solo.app/Contents/MacOS/mcp"
+
+func helperPath() (string, error) {
+	if override := os.Getenv("MAESTRO_SOLO_MCP"); override != "" {
+		return config.ExpandHome(override), nil
+	}
+	paths := []string{Helper}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, "Applications", "Solo.app", "Contents", "MacOS", "mcp"))
+	}
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path, nil
+		}
+	}
+	return "", ErrAbsent
+}
 
 // ErrAbsent means Solo is not installed or this process is not inside Solo.
 var ErrAbsent = errors.New("solo is not available")
@@ -51,10 +70,11 @@ type rpcError struct {
 
 // Connect starts the helper and initializes the session.
 func Connect() (*Client, error) {
-	if _, err := os.Stat(Helper); err != nil {
-		return nil, ErrAbsent
+	helper, err := helperPath()
+	if err != nil {
+		return nil, err
 	}
-	cmd := exec.Command(Helper)
+	cmd := exec.Command(helper)
 	cmd.Env = os.Environ()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
