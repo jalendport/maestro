@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
@@ -48,13 +49,29 @@ type Account struct {
 // File is ~/.maestro/budget.json. Dispatches, Seats, and probes share one
 // File across goroutines, so every method takes the lock.
 type File struct {
-	Accounts  map[string]*Account `json:"accounts"`
-	UpdatedAt time.Time           `json:"updated_at"`
-	mu        sync.Mutex
+	Accounts   map[string]*Account `json:"accounts"`
+	UpdatedAt  time.Time           `json:"updated_at"`
+	mu         sync.Mutex
+	baseline   map[string]*Account
+	creditsSet map[string]bool
 }
 
 // Load reads the file; missing is empty.
 func Load() (*File, error) {
+	f, err := readFile()
+	var syntax *json.SyntaxError
+	var mismatch *json.UnmarshalTypeError
+	if errors.As(err, &syntax) || errors.As(err, &mismatch) {
+		// Keep an unreadable Budget usable as unknown; Save still refuses to replace it.
+		f, err = &File{Accounts: map[string]*Account{}}, nil
+	}
+	if err == nil {
+		f.baseline = copyAccounts(f.Accounts)
+	}
+	return f, err
+}
+
+func readFile() (*File, error) {
 	b, err := os.ReadFile(config.BudgetFile())
 	if errors.Is(err, os.ErrNotExist) {
 		return &File{Accounts: map[string]*Account{}}, nil
@@ -64,7 +81,7 @@ func Load() (*File, error) {
 	}
 	var f File
 	if err := json.Unmarshal(b, &f); err != nil {
-		return &File{Accounts: map[string]*Account{}}, nil
+		return nil, err
 	}
 	if f.Accounts == nil {
 		f.Accounts = map[string]*Account{}
@@ -72,23 +89,112 @@ func Load() (*File, error) {
 	return &f, nil
 }
 
-// Save writes the file atomically.
+// Save merges this process's changes under a process lock, then writes atomically.
 func (f *File) Save() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := config.EnsureHome(); err != nil {
 		return err
 	}
-	f.UpdatedAt = time.Now()
-	b, err := json.MarshalIndent(f, "", "  ")
+	lock, err := os.OpenFile(config.BudgetFile()+".lock", os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(filepath.Dir(config.BudgetFile()), ".budget.json.tmp")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return err
 	}
-	return os.Rename(tmp, config.BudgetFile())
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	merged, err := readFile()
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for id, local := range f.Accounts {
+		if local == nil {
+			continue
+		}
+		current := merged.account(id)
+		for _, w := range local.Windows {
+			newest := true
+			for _, stored := range current.Windows {
+				if stored.Kind == w.Kind && !w.ReadAt.After(stored.ReadAt) {
+					newest = false
+					break
+				}
+			}
+			if newest {
+				current.Windows = replace(current.Windows, w)
+			}
+		}
+		sort.Slice(current.Windows, func(i, j int) bool { return current.Windows[i].Kind < current.Windows[j].Kind })
+		base := f.baseline[id]
+		if f.creditsSet[id] || (base == nil && (local.Credits != 0 || local.Plan != "")) ||
+			(base != nil && (local.Credits != base.Credits || local.Plan != base.Plan)) {
+			current.Credits, current.Plan = local.Credits, local.Plan
+		}
+		if base == nil || !sameBlock(local, base) {
+			localFuture := local.BlockedUntil != nil && now.Before(*local.BlockedUntil)
+			currentFuture := current.BlockedUntil != nil && now.Before(*current.BlockedUntil)
+			if !currentFuture || (localFuture && local.BlockedUntil.After(*current.BlockedUntil)) ||
+				(!localFuture && base != nil && sameBlock(current, base)) {
+				current.BlockedUntil, current.BlockReason = local.BlockedUntil, local.BlockReason
+			}
+		}
+	}
+	merged.UpdatedAt = now
+	b, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(config.BudgetFile()), ".budget.json-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	if err := tmp.Chmod(0o644); err != nil {
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp.Name(), config.BudgetFile()); err != nil {
+		return err
+	}
+	f.Accounts, f.UpdatedAt = merged.Accounts, merged.UpdatedAt
+	f.baseline = copyAccounts(f.Accounts)
+	f.creditsSet = nil
+	return nil
+}
+
+func sameBlock(a, b *Account) bool {
+	if a.BlockReason != b.BlockReason {
+		return false
+	}
+	if a.BlockedUntil == nil || b.BlockedUntil == nil {
+		return a.BlockedUntil == nil && b.BlockedUntil == nil
+	}
+	return a.BlockedUntil.Equal(*b.BlockedUntil)
+}
+
+func copyAccounts(accounts map[string]*Account) map[string]*Account {
+	copies := make(map[string]*Account, len(accounts))
+	for id, a := range accounts {
+		if a != nil {
+			c := *a
+			c.Windows = append([]Window(nil), a.Windows...)
+			if a.BlockedUntil != nil {
+				until := *a.BlockedUntil
+				c.BlockedUntil = &until
+			}
+			copies[id] = &c
+		}
+	}
+	return copies
 }
 
 // Credits records the reset credits and plan of an Account.
@@ -98,6 +204,10 @@ func (f *File) SetCredits(id string, credits int, plan string) {
 	a := f.account(id)
 	a.Credits = credits
 	a.Plan = plan
+	if f.creditsSet == nil {
+		f.creditsSet = map[string]bool{}
+	}
+	f.creditsSet[id] = true
 }
 
 // Unblock clears a block.
@@ -210,15 +320,18 @@ func (f *File) Evaluate(id string, r Rules, now time.Time) View {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	a := f.Accounts[id]
-	if a == nil || len(a.Windows) == 0 {
+	if a == nil {
 		return View{Headroom: r.AssumedHeadroom, State: SourceUnknown, Reason: "budget unknown"}
 	}
 	if a.BlockedUntil != nil && now.Before(*a.BlockedUntil) {
 		return View{Headroom: 0, State: "blocked", Reason: "blocked until " + a.BlockedUntil.Local().Format("15:04") + ": " + a.BlockReason}
 	}
+	if len(a.Windows) == 0 {
+		return View{Headroom: r.AssumedHeadroom, State: SourceUnknown, Reason: "budget unknown"}
+	}
 	v := View{Headroom: 1, State: "ok"}
 	for i := range a.Windows {
-		w := &a.Windows[i]
+		w := a.Windows[i]
 		if !w.ResetsAt.IsZero() && now.After(w.ResetsAt) {
 			// The window reset since the reading: the reading no longer binds.
 			v.Stale = true
@@ -231,19 +344,19 @@ func (f *File) Evaluate(id string, r Rules, now time.Time) View {
 		block := r.BlockAt
 		if w.Kind == "weekly" && r.Reserve > 0 {
 			head = 1 - w.Used - r.Reserve
-			block = 1 - r.Reserve
+			block = min(block, 1-r.Reserve)
 		}
 		if head < v.Headroom {
 			v.Headroom = head
-			v.Tight = w
+			v.Tight = &w
 		}
 		switch {
 		case w.Used >= block:
 			v.State = "blocked"
-			v.Reason = windowWord(w) + " at " + pct(w.Used)
+			v.Reason = windowWord(&w) + " at " + pct(w.Used)
 		case w.Used >= r.WarnAt && v.State == "ok":
 			v.State = "warning"
-			v.Reason = windowWord(w) + " at " + pct(w.Used)
+			v.Reason = windowWord(&w) + " at " + pct(w.Used)
 		}
 	}
 	if v.Headroom < 0 {

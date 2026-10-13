@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -44,6 +45,53 @@ printf '%s\n' '{"id":2,"result":{"rateLimits":{"planType":"test","primary":{"use
 	snapshot := loaded.Snapshot("codex")
 	if snapshot == nil || len(snapshot.Windows) != 2 || snapshot.Windows[0].Duration != 2*time.Hour || WindowName(snapshot.Windows[0]) != "2h" {
 		t.Fatalf("stored windows: %+v", snapshot)
+	}
+}
+
+func TestCodexResetHonoursDeadline(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := consumeCodexReset(ctx, bin); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("deadline took %s", elapsed)
+	}
+}
+
+func TestCodexResetPublicDeadline(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := ConsumeCodexReset(bin); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed >= 15*time.Second {
+		t.Fatalf("reset took %s", elapsed)
+	}
+}
+
+func TestCodexScannerStopsSendingOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	lines := codexLines(ctx, strings.NewReader(strings.Repeat("{}\n", 1000)))
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		for range lines {
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("scanner did not stop")
 	}
 }
 

@@ -62,7 +62,9 @@ func ReadCodex(bin string) (*CodexLimits, error) {
 	if bin == "" {
 		return nil, fmt.Errorf("codex is not installed")
 	}
-	cmd := exec.Command(bin, "app-server")
+	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "app-server")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -75,28 +77,28 @@ func ReadCodex(bin string) (*CodexLimits, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	defer func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() }()
+	defer func() {
+		cancel()
+		_ = stdout.Close()
+		_ = stdin.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
 	go func() {
 		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"maestro","title":"Maestro","version":"dev"}}}`)
 		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
 		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":{}}`)
 	}()
-	deadline := time.After(15 * time.Second)
-	lines := make(chan []byte, 16)
-	go func() {
-		sc := bufio.NewScanner(stdout)
-		sc.Buffer(make([]byte, 1<<20), 1<<24)
-		for sc.Scan() {
-			lines <- append([]byte(nil), sc.Bytes()...)
-		}
-		close(lines)
-	}()
+	lines := codexLines(ctx, stdout)
 	for {
 		select {
-		case <-deadline:
-			return nil, fmt.Errorf("codex app-server: no answer in 15 s")
+		case <-ctx.Done():
+			return nil, fmt.Errorf("codex app-server: %w", ctx.Err())
 		case line, ok := <-lines:
 			if !ok {
+				if ctx.Err() != nil {
+					return nil, fmt.Errorf("codex app-server: %w", ctx.Err())
+				}
 				return nil, fmt.Errorf("codex app-server ended without an answer")
 			}
 			var msg struct {
@@ -151,8 +153,22 @@ func ReadCodex(bin string) (*CodexLimits, error) {
 
 // ConsumeCodexReset spends one Codex reset credit through the app-server.
 func ConsumeCodexReset(bin string) error {
-	cmd := exec.Command(bin, "app-server")
-	stdin, _ := cmd.StdinPipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Second)
+	defer cancel()
+	return consumeCodexReset(ctx, bin)
+}
+
+func consumeCodexReset(ctx context.Context, bin string) error {
+	if bin == "" {
+		return fmt.Errorf("codex is not installed")
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "app-server")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -161,22 +177,40 @@ func ConsumeCodexReset(bin string) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	defer func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() }()
+	defer func() {
+		cancel()
+		_ = out.Close()
+		_ = stdin.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
 	go func() {
 		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"maestro","title":"Maestro","version":"dev"}}}`)
 		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
 		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","id":2,"method":"account/rateLimitResetCredit/consume","params":{}}`)
 	}()
-	sc := bufio.NewScanner(out)
-	deadline := time.Now().Add(15 * time.Second)
-	for sc.Scan() && time.Now().Before(deadline) {
+	lines := codexLines(ctx, out)
+	for {
+		var line []byte
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("codex app-server: %w", ctx.Err())
+		case next, ok := <-lines:
+			if !ok {
+				if ctx.Err() != nil {
+					return fmt.Errorf("codex app-server: %w", ctx.Err())
+				}
+				return fmt.Errorf("codex app-server ended without an answer")
+			}
+			line = next
+		}
 		var msg struct {
 			ID    int `json:"id"`
 			Error *struct {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if json.Unmarshal(sc.Bytes(), &msg) != nil || msg.ID != 2 {
+		if json.Unmarshal(line, &msg) != nil || msg.ID != 2 {
 			continue
 		}
 		if msg.Error != nil {
@@ -184,7 +218,25 @@ func ConsumeCodexReset(bin string) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("codex app-server: no answer")
+}
+
+// codexLines stops sending when the caller cancels. The caller also closes
+// the pipe so a scanner waiting for a silent server can stop.
+func codexLines(ctx context.Context, out io.Reader) <-chan []byte {
+	lines := make(chan []byte, 16)
+	go func() {
+		defer close(lines)
+		sc := bufio.NewScanner(out)
+		sc.Buffer(make([]byte, 1<<20), 1<<24)
+		for sc.Scan() {
+			select {
+			case lines <- append([]byte(nil), sc.Bytes()...):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return lines
 }
 
 func kindOfMinutes(mins int) string {
