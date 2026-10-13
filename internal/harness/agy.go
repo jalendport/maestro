@@ -76,6 +76,7 @@ func (s AgySettings) Reason() string {
 	for _, target := range s.Commands {
 		switch target {
 		case "cat", "ls", "head", "tail", "grep", "rg", "find", "wc", "pwd", "echo", "which", "env", "date",
+			"diff", "tree", "sort", "uniq", "cut", "basename", "dirname", "file", "stat", "realpath",
 			"git log", "git diff", "git show", "git status", "git branch", "git blame":
 			continue
 		default:
