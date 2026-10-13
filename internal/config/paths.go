@@ -31,7 +31,7 @@ func RunsIndexDir() string  { return filepath.Join(Home(), "runs") }
 // Per-project locations relative to the project root.
 func ProjectFile(root string) string { return filepath.Join(root, ".agents", "maestro.toml") }
 func RunsDir(root string) string     { return filepath.Join(root, ".agents", "maestro", "runs") }
-func CouncilsDir(root string) string { return filepath.Join(root, ".agents", "councils") }
+func CouncilsDir(root string) string { return filepath.Join(root, ".agents", "maestro", "councils") }
 
 // EnsureIgnoredDir creates an artifact folder and preserves any existing ignore rules.
 func EnsureIgnoredDir(dir string) error {

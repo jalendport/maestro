@@ -74,7 +74,7 @@ func (a *app) councilCmd() *cobra.Command {
 	c.Flags().StringVar(&level, "level", "", "Judgment level of the question")
 	c.Flags().IntVar(&rounds, "rounds", 1, "rounds, 1 to 4; rounds after the first are challenge rounds")
 	c.Flags().BoolVar(&challenge, "challenge", false, "short for --rounds 2")
-	c.Flags().StringVar(&slug, "slug", "", "folder name under .agents/councils/")
+	c.Flags().StringVar(&slug, "slug", "", "folder name under .agents/maestro/councils/")
 	c.Flags().StringVar(&task, "task", "", "review one Task's result (its Brief and diff become the context)")
 	c.Flags().BoolVar(&wait, "wait", false, "block until the Council ends and print the Merge")
 	return c

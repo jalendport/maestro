@@ -29,7 +29,7 @@ You are the Orchestrator. You plan and judge; Maestro owns the work after the th
 
 ## Results
 
-A Task's Report is `result.md` in its Run folder (`.agents/maestro/runs/<run>/<task>/`). `maestro wait` prints the status line, the changed files, the checks, the blocked list, and the Report. Outcome `unverified` means the deterministic checks passed and the gate saw no fault but did not reach the close threshold: read the diff before you accept it. In Solo, every Task is a todo and its Report is a comment.
+A Task's Report is `result.md` in its Run folder (`.agents/maestro/runs/<run>/<task>/`). Council folders live under `.agents/maestro/councils/<slug>/`. `maestro wait` prints the status line, the changed files, the checks, the blocked list, and the Report. Outcome `unverified` means the deterministic checks passed and the gate saw no fault but did not reach the close threshold: read the diff before you accept it. In Solo, every Task is a todo and its Report is a comment.
 
 ## When a Run pauses or a Task is blocked
 

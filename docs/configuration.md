@@ -297,4 +297,4 @@ Maestro writes these paths itself. Do not edit them by hand. `maestro clean` rem
 | `~/.maestro/cache/discovery.json` | `maestro roster refresh` rewrites it, and any verb rewrites it when it is stale. |
 | `~/.maestro/runs/` | `maestro run` writes one index file for each live Run. |
 | `.agents/maestro/runs/` | `maestro dispatch` and `maestro run` write one Run folder for each Run. |
-| `.agents/councils/` | `maestro council` writes one folder for each Council. |
+| `.agents/maestro/councils/` | `maestro council` writes one folder for each Council. |

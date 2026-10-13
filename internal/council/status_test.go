@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/roster"
 )
@@ -28,7 +27,7 @@ func TestListCouncilsAndSeatState(t *testing.T) {
 		{"recent", "finished", 0, now.Add(-time.Minute), false},
 		{"old", "finished", 0, now.Add(-2 * time.Hour), false},
 	} {
-		folder := filepath.Join(config.CouncilsDir(root), tt.slug)
+		folder := filepath.Join(root, ".agents", "maestro", "councils", tt.slug)
 		if err := os.MkdirAll(folder, 0o755); err != nil {
 			t.Fatal(err)
 		}

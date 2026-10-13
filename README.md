@@ -227,7 +227,7 @@ redact   = ["ACME"]                                              # strings repla
 councils = "always"                                              # an end-of-run council on every run
 ```
 
-Generated state lives in `~/.maestro/`: `ledger.jsonl` (append only), `budget.json`, `cache/discovery.json`, and the live-run index. Per-project run folders live under `.agents/maestro/runs/` and council folders under `.agents/councils/`; `maestro clean` removes old ones and never touches the ledger. Maestro writes a `.gitignore` into each run and council folder it creates, so nothing under them reaches git.
+Generated state lives in `~/.maestro/`: `ledger.jsonl` (append only), `budget.json`, `cache/discovery.json`, and the live-run index. Per-project run folders live under `.agents/maestro/runs/` and council folders under `.agents/maestro/councils/`; `maestro clean` removes old ones and never touches the ledger. Maestro writes a `.gitignore` into each run and council folder it creates, so nothing under them reaches git.
 
 Keep-awake and the end-of-run notice are macOS only; on Linux they do nothing.
 

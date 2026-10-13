@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added the `todo` brief field to attach a task to an existing Solo todo
 
 ### Changed
+- Councils now live under `.agents/maestro/councils/`.
 - Changed the rules table to route without a warning when there is no Jev key
 - Changed `reserve` to apply to any account
 - Changed the embedded accounts to one neutral account per harness

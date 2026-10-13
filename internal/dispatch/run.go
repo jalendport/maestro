@@ -181,7 +181,7 @@ func Prepare(env *Env, b *brief.Brief, req router.Request, runID, taskID string)
 }
 
 // PrepareIn is Prepare with the Run directory given (Councils keep their
-// Seats under .agents/councils/<slug>/round-N/ instead of the runs folder).
+// Seats under .agents/maestro/councils/<slug>/round-N/ instead of the runs folder).
 func PrepareIn(env *Env, b *brief.Brief, req router.Request, runID, taskID, runDir string) (*Task, error) {
 	if err := env.Roster.ValidateAccounts(); err != nil {
 		return nil, err
