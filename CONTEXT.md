@@ -1,21 +1,21 @@
 # Maestro — ubiquitous language
 
-The glossary for the Maestro effort. Terms only; no implementation detail. Settled with Jalen in wayfinder grilling rounds on 2026-09-23, 2026-09-24, 2026-09-25, 2026-10-02, and 2026-10-09 (six rounds that day: roster, permission contract, failure handling, Council, Task Brief, ledger).
+The glossary for Maestro. Terms only; no implementation detail. Code, docs, and briefs use these words and no others for these things.
 
 ## Terms
 
-- **Maestro** — the tool this effort plans: a local, open-source-ready "magic box" that owns the work after the thinking is done. It turns a plan into Tasks, routes, dispatches, checks, and runs Councils.
-- **Orchestrator** — the smart model session Jalen talks to (Fable or Opus in Claude Code, in Solo or a plain terminal). It plans and hands work to Maestro. It is a role, not a program.
+- **Maestro** — a local tool that owns the work after the thinking is done. It turns a plan into Tasks, routes, dispatches, checks, and runs Councils.
+- **Orchestrator** — the model session the user talks to, in any Harness. It plans and hands work to Maestro. It is a role, not a program.
 - **Harness** — a CLI agent program that can run a model on a task: Claude Code, Codex, Grok, Antigravity.
 - **Lane** — one runnable combination of harness + model + effort, for example `codex gpt-5.6-sol high`. Maestro routes Tasks to Lanes.
 - **Roster** — the list of all Lanes with their facts: cost, speed, strengths, limits, billing kind.
-- **Billing kind** — whether a Lane draws on a subscription (Claude Max, ChatGPT, SuperGrok) or pays per token (agy via GCP, OpenRouter, DigitalOcean). Drives how often the Lane is used.
+- **Billing kind** — whether a Lane draws on a vendor subscription or pays per token through an API key. Drives how often the Lane is used.
 - **Budget** — what is left for a Lane's billing source: percent of a subscription window and its reset time, or money for a token-billed Lane.
 - **Task** — one unit of work with a brief and a definition of done.
 - **Route** — the decision "this Task goes to this Lane".
 - **Router** — the part of Maestro that makes Routes: Jev, with a rules fallback.
 - **Dispatch** — starting a Lane on a Task and collecting its result.
-- **Council** — several Lanes answering the same question in parallel, then synthesized. What counselors used to do.
+- **Council** — several Lanes answering the same question in parallel, then synthesized.
 - **Adapter** — the small per-Harness piece that connects an Orchestrator to Maestro: one shared skill file plus one hook file. Maestro itself works without any Adapter.
 - **Run** — one invocation of Maestro on a plan: its Tasks, their Routes and Dispatches, the checks, and the report back to the Orchestrator.
 - **Brief** — the text a Lane receives for one Task: the goal, the definition of done, the files, the checks, and the permission mode.
@@ -40,7 +40,7 @@ The glossary for the Maestro effort. Terms only; no implementation detail. Settl
 - **Level map** — a Family's map from Judgment level to effort. The Tier is derived from the levels a Family serves.
 - **Access** — the part of the Brief that says whether a Lane may change files. Two values: `read` and `edit`. There is no third value; Maestro never passes a bypass flag to a Lane.
 - **Enforcement** — a measured fact per Harness and Access value: `enforced` when a sandbox or a tool allowlist holds the Access with no help from the model, `best-effort` when only an instruction or a weak flag does. A `read` Task goes only to `enforced` Lanes.
-- **Relay** — Maestro passing a Lane's permission prompt to the Orchestrator and typing the answer back. The Orchestrator may ask Jalen. An unanswered Relay is denied after 10 minutes.
+- **Relay** — Maestro passing a Lane's permission prompt to the Orchestrator and typing the answer back. The Orchestrator may ask the user. An unanswered Relay is denied after 10 minutes.
 - **Failure class** — the name Maestro gives to one kind of Dispatch failure. Five values: Lane error, Transient error, Limit hit, Stall, Bad result. Every ledger row and failure message carries exactly one.
 - **Idle limit** — the longest time a Dispatch may run with no new output. One value for every Tier. An open Relay pauses it.
 - **Wall limit** — the longest total time a Dispatch may run. Grows with the Tier; a Brief may raise it for one Task.
@@ -61,8 +61,8 @@ The glossary for the Maestro effort. Terms only; no implementation detail. Settl
 
 ## Words to avoid
 
-- **Tool** for a Lane. Claude Code and MCP already use "tool" for functions such as Read, Bash, or `spawn_agent`. Research notes written before 2026-09-23 round 2 say "Tool" where they mean Lane.
-- **Planner** for the Orchestrator. Older research notes use "Planner"; read it as Orchestrator.
+- **Tool** for a Lane. Claude Code and MCP already use "tool" for functions such as Read, Bash, or `spawn_agent`.
+- **Planner** for the Orchestrator.
 - **Orchestrator** for Maestro itself. Maestro is the magic box; the Orchestrator is the session that directs it.
-- **Provider** for a Lane or a Harness (jamsession's word). Say Harness for the program and vendor for the company.
+- **Provider** for a Lane or a Harness. Say Harness for the program and vendor for the company.
 - **Permission mode** for Access. Claude and Grok use "permission mode" for their own flag; Maestro says Access for the Brief field.

@@ -1,9 +1,0 @@
-{
-  "name": "maestro",
-  "description": "Hand finished plans to Maestro: route, dispatch, check, and review agent work across Claude Code, Codex, Grok, and Antigravity. Needs the maestro binary on PATH (brew install jalendport/tap/maestro).",
-  "version": "1.0.0",
-  "author": { "name": "Jalen Davenport" },
-  "repository": "https://github.com/jalendport/maestro",
-  "license": "MIT",
-  "keywords": ["orchestration", "routing", "agents", "council"]
-}
