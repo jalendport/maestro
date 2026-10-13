@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+- Fixed `maestro doctor` reporting the Claude adapter missing right after a plugin install, before Claude Code had loaded the plugin once
+
 ## 1.0.0 - 2026-10-13
 
 ### Added

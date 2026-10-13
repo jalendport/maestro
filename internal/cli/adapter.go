@@ -155,7 +155,7 @@ func adapterState() string {
 		parts = append(parts, name+" missing")
 	}
 	claudeHook := filepath.Join(home, ".claude", "settings.json")
-	if entries, err := filepath.Glob(filepath.Join(home, ".claude", "plugins", "*", "maestro*")); err == nil && len(entries) > 0 {
+	if claudePluginInstalled(home) {
 		parts = append(parts, "claude ok (plugin)")
 	} else {
 		check("claude", claudeHook, "maestro hook")
@@ -164,4 +164,22 @@ func adapterState() string {
 	check("grok", filepath.Join(home, ".grok", "hooks", "maestro.json"), "maestro hook")
 	check("agy", filepath.Join(home, ".gemini", "config", "hooks.json"), "maestro hook")
 	return strings.Join(parts, ", ")
+}
+
+// claudePluginInstalled reports whether the maestro plugin is in Claude Code's
+// installed-plugins registry, or sits under ~/.claude/plugins in any layout.
+func claudePluginInstalled(home string) bool {
+	registry := filepath.Join(home, ".claude", "plugins", "installed_plugins.json")
+	if b, err := os.ReadFile(registry); err == nil && strings.Contains(string(b), `"maestro@`) {
+		return true
+	}
+	for _, pattern := range []string{
+		filepath.Join(home, ".claude", "plugins", "*", "maestro*"),
+		filepath.Join(home, ".claude", "plugins", "cache", "*", "maestro*"),
+	} {
+		if entries, err := filepath.Glob(pattern); err == nil && len(entries) > 0 {
+			return true
+		}
+	}
+	return false
 }
