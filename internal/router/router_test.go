@@ -79,21 +79,17 @@ func TestLightNeverEdits(t *testing.T) {
 	}
 }
 
-func TestReadExcludesGrok(t *testing.T) {
+func TestReadRoutesToGrok(t *testing.T) {
 	rt := testRouter(t)
 	b := mustBrief(t, "---\ntitle: x\ncategory: research\nlevel: some\n---\n## Goal\ng\n## Done\nd\n")
 	r, err := rt.Route(Request{Brief: b, Access: "read"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.FamilyID == "grok" {
+	if r.FamilyID != "grok" {
 		t.Fatalf("read went to %s", r.FamilyID)
 	}
-	for _, e := range r.Excluded {
-		if e.Family == "grok" && e.Rule != "read needs an enforced lane" && !strings.HasPrefix(e.Rule, "pre-flight") {
-			t.Fatalf("grok excluded for %q", e.Rule)
-		}
-	}
+
 }
 
 func TestRequestedLaneWarns(t *testing.T) {

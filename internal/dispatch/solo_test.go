@@ -31,7 +31,10 @@ func TestTabArgsPerHarnessAndAccess(t *testing.T) {
 		{name: "claude", access: "edit", want: append([]string{pointer, "--model", "model", "--effort", "high"}, editClaude...)},
 		{name: "codex", access: "read", want: []string{pointer, "-m", "model", "-C", folder, "-c", "approval_policy=never", "-c", "model_reasoning_effort=high", "-s", "workspace-write"}},
 		{name: "codex", access: "edit", want: []string{pointer, "-m", "model", "-C", root, "-c", "approval_policy=never", "-c", "model_reasoning_effort=high", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--add-dir", folder, "--add-dir", "/extra"}},
-		{name: "grok", access: "read", want: []string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--reasoning-effort", "high", "--permission-mode", "dontAsk", "--deny", "Write", "--deny", "Edit"}},
+		{name: "grok", access: "read", want: append(append([]string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--reasoning-effort", "high", "--permission-mode", "dontAsk", "--deny", "Write", "--deny", "Edit", "--deny", "Bash"}, allowEach(
+			"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "TodoWrite",
+			"Bash(git diff *)", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git blame *)",
+			"Bash(ls *)", "Bash(cat *)", "Bash(ls)", "Bash(git status)")...), "--allow", "Write(//"+folder+"/**)", "--allow", "Edit(//"+folder+"/**)")},
 		{name: "grok", access: "edit", want: []string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--reasoning-effort", "high", "--permission-mode", "dontAsk", "--allow", "Bash(go test ./... *)", "--allow", "Bash(go test ./...)"}},
 		{name: "agy", access: "read", want: []string{"--prompt-interactive", pointer, "--model", "model", "--effort", "high"}},
 		{name: "agy", access: "edit", wantError: true},
@@ -65,4 +68,13 @@ func TestTabArgsPerHarnessAndAccess(t *testing.T) {
 			}
 		})
 	}
+}
+
+// allowEach renders each rule as a Grok --allow pair.
+func allowEach(rules ...string) []string {
+	var out []string
+	for _, r := range rules {
+		out = append(out, "--allow", r)
+	}
+	return out
 }

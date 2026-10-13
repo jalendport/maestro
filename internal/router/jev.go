@@ -137,17 +137,24 @@ func (rt *Router) jevRoute(req Request, cands []*roster.Family, level roster.Lev
 		// 6. Below the floor: the rules table decides.
 		return nil, jr, nil
 	}
+	// Apply the computed level and all hard bounds again after Jev's choice.
+	useLevel := scoreLevel
+	if useLevel.Rank() < level.Rank() {
+		useLevel = level
+	}
+	useLevel = constrainedLevel(req, useLevel)
+	clamped := useLevel != scoreLevel
+	if pick == nil || !pick.Serves(useLevel) || !allowedTier(req, pick.TierFor(useLevel)) || roster.FanOut(pick.Levels[useLevel]) {
+		pick, _ = rt.rulesPick(cands, useLevel, category, req.Floor)
+		clamped = true
+	}
 	if pick == nil {
 		return nil, jr, nil
 	}
-	// A pick that serves no level near the score takes the nearest level it serves.
-	useLevel := scoreLevel
-	if !pick.Serves(useLevel) {
-		useLevel = nearestLevel(pick, scoreLevel)
-		if useLevel == "" {
-			return nil, jr, nil
-		}
+	if clamped {
+		defaults = append(defaults, "Jev pick clamped to allowed Tier "+string(pick.TierFor(useLevel)))
 	}
+
 	estimate, _ := roster.ParseLevel(req.Brief.Level)
 	r := rt.finish(pick, useLevel, estimate, category, req.Access, "jev", defaults, nil)
 	r.Confidence = conf

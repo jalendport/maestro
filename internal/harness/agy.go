@@ -10,8 +10,8 @@ import (
 )
 
 // Agy is the Antigravity CLI adapter: read only (its edit needs the bypass
-// flag Maestro never passes). Read restrictions depend on the user's
-// settings allowlist, which Maestro does not supply or check.
+// flag Maestro never passes). Print mode requests terminal restrictions,
+// but read remains best-effort until a live write probe proves enforcement.
 type Agy struct{ bin string }
 
 func (a *Agy) Name() string { return "agy" }
@@ -83,8 +83,8 @@ func (a *Agy) build(l Launch, tab bool) (*Command, error) {
 	if l.WallLimit > 0 {
 		timeout = l.WallLimit.String()
 	}
-	args := []string{"-p", l.Pointer, "--output-format", "json", "--model", model, "--print-timeout", timeout, "--disable-slash-commands"}
-	flags := []string{"--print-timeout", timeout}
+	args := []string{"-p", l.Pointer, "--output-format", "json", "--model", model, "--print-timeout", timeout, "--disable-slash-commands", "--sandbox"}
+	flags := []string{"--print-timeout", timeout, "--sandbox"}
 	if tab {
 		args = []string{"--prompt-interactive", l.Pointer, "--model", l.Model}
 		if l.Effort != "" {

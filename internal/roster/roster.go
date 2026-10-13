@@ -5,6 +5,7 @@ package roster
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -154,18 +155,19 @@ func (f *Family) HighestLevel() Level {
 
 // Roster is the effective merge.
 type Roster struct {
-	Accounts    map[string]config.Account
-	Harness     map[string]config.Harness
-	Families    map[string]*Family
-	Rules       map[Tier]config.Chains
-	Prices      map[string]config.Price
-	Aliases     map[string]string
-	Hook        config.Hook
-	Router      config.Router
-	Budget      config.Budget
-	Failure     config.Failure
-	Concurrency config.Concurrency
-	Warnings    []string
+	Accounts       map[string]config.Account
+	Harness        map[string]config.Harness
+	Families       map[string]*Family
+	Rules          map[Tier]config.Chains
+	Prices         map[string]config.Price
+	AliasOverrides map[string]string
+	Aliases        map[string]string
+	Hook           config.Hook
+	Router         config.Router
+	Budget         config.Budget
+	Failure        config.Failure
+	Concurrency    config.Concurrency
+	Warnings       []string
 }
 
 // Load builds the Roster from the embedded defaults and the user file.
@@ -189,17 +191,18 @@ func Load() (*Roster, error) {
 // never rewritten; the merge happens in memory on every start.
 func Merge(d, u *config.File) *Roster {
 	r := &Roster{
-		Accounts:    map[string]config.Account{},
-		Harness:     map[string]config.Harness{},
-		Families:    map[string]*Family{},
-		Rules:       map[Tier]config.Chains{},
-		Prices:      map[string]config.Price{},
-		Aliases:     map[string]string{},
-		Hook:        d.Hook,
-		Router:      d.Router,
-		Budget:      d.Budget,
-		Failure:     d.Failure,
-		Concurrency: d.Concurrency,
+		Accounts:       map[string]config.Account{},
+		Harness:        map[string]config.Harness{},
+		Families:       map[string]*Family{},
+		Rules:          map[Tier]config.Chains{},
+		Prices:         map[string]config.Price{},
+		AliasOverrides: map[string]string{},
+		Aliases:        map[string]string{},
+		Hook:           d.Hook,
+		Router:         d.Router,
+		Budget:         d.Budget,
+		Failure:        d.Failure,
+		Concurrency:    d.Concurrency,
 	}
 	userAccounts := map[string]config.Account{}
 	replaced := map[string]bool{}
@@ -274,6 +277,7 @@ func Merge(d, u *config.File) *Roster {
 		r.Aliases[k] = v
 	}
 	for k, v := range u.Aliases {
+		r.AliasOverrides[k] = v
 		r.Aliases[k] = v
 	}
 	if u.Hook.Scope != "" {
@@ -591,20 +595,40 @@ func (r *Roster) Threshold(key string) float64 {
 }
 
 // StripEnv returns the environment names a Harness's Dispatches drop.
-// Metered Accounts keep API credentials; other entries are always dropped.
+// Metered Accounts keep vendor API credentials. Maestro's Jev key and
+// other entries are always dropped.
 func (r *Roster) StripEnv(harness string) []string {
-	names := r.Harness[harness].StripEnv
+	names := append([]string{}, r.Harness[harness].StripEnv...)
+	if !slices.Contains(names, "TYPESAFE_API_KEY") {
+		names = append(names, "TYPESAFE_API_KEY")
+	}
 	for _, account := range r.Accounts {
 		if account.Harness != harness || account.Billing != "metered" {
 			continue
 		}
 		var out []string
 		for _, name := range names {
-			if !strings.Contains(name, "API_KEY") && !strings.Contains(name, "AUTH_TOKEN") {
+			if name == "TYPESAFE_API_KEY" || (!strings.Contains(name, "API_KEY") && !strings.Contains(name, "AUTH_TOKEN")) {
 				out = append(out, name)
 			}
 		}
 		return out
 	}
 	return names
+}
+
+// LaunchModels expands only user aliases. Embedded aliases are pricing facts.
+func (r *Roster) LaunchModels(f *Family) []string {
+	models := append([]string{}, f.Models...)
+	for i, model := range models {
+		if full, ok := r.AliasOverrides[model]; ok {
+			models[i] = full
+		}
+	}
+	return models
+}
+
+// FanOut reports efforts that require an explicit Lane and effort.
+func FanOut(effort string) bool {
+	return effort == "ultra" || effort == "max" || effort == "ultracode"
 }

@@ -48,7 +48,7 @@ A table named `[harness.<name>]` holds the settings for one Harness: `claude`, `
 |---|---|---|---|
 | `bin` | string | none | Sets the path of the Harness program; when it is empty, Maestro finds the program itself. |
 | `min_version` | string | see below | Sets the oldest Harness version that `maestro doctor` accepts. |
-| `strip_env` | array of strings | see below | Lists the environment variables that Maestro removes before it starts a Lane or a Probe on this Harness. Names that contain `API_KEY` or `AUTH_TOKEN` are removed only for subscription Accounts; other names are always removed. |
+| `strip_env` | array of strings | see below | Lists the environment variables that Maestro removes before it starts a Lane or a Probe on this Harness. Names that contain `API_KEY` or `AUTH_TOKEN` are removed only for subscription Accounts; other names are always removed. `TYPESAFE_API_KEY` is always removed for every Billing kind, even if it is absent from `strip_env`, because it is Maestro’s own credential. |
 | `solo_tool` | integer | none | Sets the Solo agent tool id that Maestro uses to open a tab for this Harness; `0` means use the discovered id. |
 
 Default entries:

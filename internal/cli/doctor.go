@@ -80,6 +80,11 @@ func (a *app) doctorCmd() *cobra.Command {
 			}
 			cfg.State = "ok"
 			rows = append(rows, cfg)
+			// User warnings were printed once by loadEnv. Project keys are kept
+			// by LoadProject so doctor can report them without decoding again.
+			for _, key := range env.Project.Unknown {
+				rows = append(rows, doctorRow{Name: "config", Detail: config.ProjectFile(env.Root), State: fmt.Sprintf("unknown key %q (ignored)", key)})
+			}
 			rt := env.NewRouter()
 			failing := 0
 			for _, f := range env.Roster.Families {

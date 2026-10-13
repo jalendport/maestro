@@ -161,7 +161,7 @@ func resolve(name, override string) string {
 // Env builds a Lane's environment: the parent's minus the strip list, plus
 // the fixed Maestro variables.
 func Env(strip []string, set map[string]string) []string {
-	drop := map[string]bool{}
+	drop := map[string]bool{"TYPESAFE_API_KEY": true}
 	for _, k := range strip {
 		drop[k] = true
 	}
@@ -180,6 +180,9 @@ func Env(strip []string, set map[string]string) []string {
 		out = append(out, kv)
 	}
 	for k, v := range set {
+		if k == "TYPESAFE_API_KEY" {
+			continue
+		}
 		out = append(out, k+"="+v)
 	}
 	return out

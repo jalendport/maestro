@@ -95,3 +95,66 @@ func TestClaudeReadShapeIsolatesSettingsAndSoloTools(t *testing.T) {
 		t.Fatal("agy read shape claims enforcement")
 	}
 }
+
+func TestGrokReadAllowsOnlyReadTools(t *testing.T) {
+	g := &Grok{bin: "/bin/grok"}
+	for i, build := range []func(Launch) (*Command, error){g.Build, g.BuildTab} {
+		command, err := build(Launch{Access: "read", Root: ".", RunFolder: "/project/run", AllowRules: []string{"Bash"}, AllowedCommands: []string{"touch file"}, AllowCommit: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		allow, deny := map[string]bool{}, map[string]bool{}
+		for i, arg := range command.Flags {
+			if arg == "--allow" {
+				allow[command.Flags[i+1]] = true
+			}
+			if arg == "--deny" {
+				deny[command.Flags[i+1]] = true
+			}
+		}
+		if len(allow) != len(readTools)+2 || !deny["Write"] || !deny["Edit"] || !deny["Bash"] || command.ReportByText != (i == 0) {
+			t.Fatal(command)
+		}
+		for _, rule := range readTools {
+			if !allow[rule] {
+				t.Fatal("missing", rule)
+			}
+		}
+		if !allow["Write(///project/run/**)"] || !allow["Edit(///project/run/**)"] {
+			t.Fatal("Report writes must stay in the Run folder", allow)
+		}
+		if g.Enforcement("read") != Enforced {
+			t.Fatal("read must be enforced")
+		}
+	}
+}
+
+func TestAgyPrintUsesSandbox(t *testing.T) {
+	command, err := (&Agy{bin: "/bin/agy"}).Build(Launch{Access: "read", Root: "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(command.Flags, " "), "--sandbox") || !strings.Contains(strings.Join(command.Cmd.Args, " "), "--sandbox") {
+		t.Fatal(command)
+	}
+}
+
+func TestEnvAlwaysStripsJevKey(t *testing.T) {
+	t.Setenv("TYPESAFE_API_KEY", "private-key")
+	t.Setenv("OPENAI_API_KEY", "vendor-key")
+	for _, set := range []map[string]string{nil, {"TYPESAFE_API_KEY": "replacement"}} {
+		env := Env(nil, set)
+		vendor := false
+		for _, entry := range env {
+			if strings.HasPrefix(entry, "TYPESAFE_API_KEY=") {
+				t.Fatal("Jev key reached Lane")
+			}
+			if entry == "OPENAI_API_KEY=vendor-key" {
+				vendor = true
+			}
+		}
+		if !vendor {
+			t.Fatal("vendor key removed from metered Lane")
+		}
+	}
+}

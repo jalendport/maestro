@@ -113,9 +113,11 @@ func rosterRows(env *dispatch.Env) []rosterRow {
 			row.Levels[string(l)] = e
 		}
 		row.Billing = env.Roster.Accounts[f.Account].Billing
-		resolved, ok := env.Disc.Resolve(f.Harness, f.Models)
+		resolved, ok := env.Disc.Resolve(f.Harness, env.Roster.LaunchModels(f))
 		if ok {
 			row.Resolved = resolved
+		} else if len(f.Models) == 0 {
+			row.Resolved = "no model"
 		} else {
 			row.Resolved = f.Models[0] + " (missing)"
 		}

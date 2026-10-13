@@ -159,9 +159,7 @@ func (rt *Router) Route(req Request) (*Route, error) {
 		level = roster.LevelSome
 		defaults = append(defaults, "edit raises light to daily")
 	}
-	if req.Floor != "" && roster.TierOf(level).Rank() < req.Floor.Rank() {
-		level = levelForTier(req.Floor)
-	}
+	level = constrainedLevel(req, level)
 
 	if req.Seat != "" {
 		f, ok := rt.Roster.Family(req.Seat)
@@ -175,6 +173,9 @@ func (rt *Router) Route(req Request) (*Route, error) {
 		if !f.Serves(useLevel) {
 			useLevel = nearestLevel(f, level)
 		}
+		if roster.FanOut(f.Levels[useLevel]) || roster.FanOut(req.SeatEffort) {
+			return nil, fmt.Errorf("fan-out effort requires an explicit Lane and effort")
+		}
 		r := rt.finish(f, useLevel, estimate, category, req.Access, "council", defaults, nil)
 		if req.SeatEffort != "" {
 			r.Effort = req.SeatEffort
@@ -187,23 +188,7 @@ func (rt *Router) Route(req Request) (*Route, error) {
 	}
 
 	cands, excluded := rt.candidates(req, level)
-	if req.Ceiling != "" || req.Floor != "" {
-		// Floors and ceilings only shrink the list before the Route.
-		var kept []*roster.Family
-		for _, f := range cands {
-			top := f.TierFor(f.HighestLevel())
-			switch {
-			case req.Ceiling != "" && f.TierFor(level).Rank() > req.Ceiling.Rank():
-				excluded = append(excluded, Exclusion{f.ID, "above ceiling"})
-			case req.Floor != "" && top.Rank() < req.Floor.Rank():
-				excluded = append(excluded, Exclusion{f.ID, "below floor"})
-			default:
-				kept = append(kept, f)
-			}
-		}
-		cands = kept
-	}
-	rulesFamily, tie := rt.rulesPick(cands, level, category)
+	rulesFamily, tie := rt.rulesPick(cands, level, category, req.Floor)
 	useRules := rt.Roster.Router.Backend == "rules" || (req.Project != nil && req.Project.Router == "rules")
 	if !useRules {
 		key, err := jev.Key()
@@ -333,6 +318,28 @@ func (rt *Router) candidates(req Request, level roster.Level) ([]*roster.Family,
 			excluded = append(excluded, Exclusion{f.ID, "budget: " + v.Reason})
 			continue
 		}
+		// Keep only levels allowed for an automatic Route. Do not change the Roster.
+		allowed := *f
+		allowed.Levels = map[roster.Level]string{}
+		for _, l := range roster.Levels {
+			effort, serves := f.Levels[l]
+			if !serves {
+				continue
+			}
+			if roster.FanOut(effort) {
+				excluded = append(excluded, Exclusion{f.ID, "fan-out effort " + effort + " at level " + string(l) + " requires an explicit Lane and effort"})
+				continue
+			}
+			if !allowedTier(req, f.TierFor(l)) {
+				continue
+			}
+			allowed.Levels[l] = effort
+		}
+		if len(allowed.Levels) == 0 {
+			excluded = append(excluded, Exclusion{f.ID, "no level in the allowed Tier range"})
+			continue
+		}
+		f = &allowed
 		if rt.Roster.Accounts[f.Account].Billing == "metered" {
 			metered = append(metered, f)
 			continue
@@ -362,6 +369,9 @@ func (rt *Router) candidates(req Request, level roster.Level) ([]*roster.Family,
 // Preflight is hard rule 4: installed, version gate, model in the catalog,
 // and a launch shape for this Access. Empty means the family passes.
 func (rt *Router) Preflight(f *roster.Family, access string) string {
+	if len(f.Models) == 0 {
+		return "family " + f.ID + " has no model"
+	}
 	if err := rt.Roster.ValidateAccounts(); err != nil {
 		return err.Error()
 	}
@@ -376,7 +386,7 @@ func (rt *Router) Preflight(f *roster.Family, access string) string {
 	if min := rt.Roster.Harness[f.Harness].MinVersion; min != "" && rec.Version != "" && harness.VersionLess(rec.Version, min) {
 		return fmt.Sprintf("needs %s ≥ %s (have %s)", f.Harness, min, rec.Version)
 	}
-	model, ok := rt.Disc.Resolve(f.Harness, f.Models)
+	model, ok := rt.Disc.Resolve(f.Harness, rt.Roster.LaunchModels(f))
 	if !ok {
 		return fmt.Sprintf("%s not in the %s catalog", strings.Join(f.Models, "/"), f.Harness)
 	}
@@ -398,12 +408,15 @@ func (rt *Router) Preflight(f *roster.Family, access string) string {
 
 // rulesPick walks the Tier's chain for the category and takes the first
 // candidate that serves the level; then any candidate in the Tier.
-func (rt *Router) rulesPick(cands []*roster.Family, level roster.Level, category string) (*roster.Family, string) {
+func (rt *Router) rulesPick(cands []*roster.Family, level roster.Level, category string, floor roster.Tier) (*roster.Family, string) {
 	byID := map[string]*roster.Family{}
 	for _, f := range cands {
 		byID[f.ID] = f
 	}
 	tier := roster.TierOf(level)
+	if floor.Rank() > tier.Rank() {
+		tier = floor
+	}
 	for _, id := range rt.Roster.Chain(tier, category) {
 		if f, ok := byID[id]; ok && f.Serves(level) {
 			return f, "chain " + category
@@ -471,6 +484,9 @@ func (rt *Router) requested(req Request, level, estimate roster.Level, category 
 	if useLevel == "" {
 		return nil, fmt.Errorf("family %s serves no level", id)
 	}
+	if effort == "" && roster.FanOut(f.Levels[useLevel]) {
+		return nil, fmt.Errorf("family %s fan-out effort %s requires an explicit Lane and effort", id, f.Levels[useLevel])
+	}
 	r := rt.finish(f, useLevel, estimate, category, req.Access, "requested", defaults, nil)
 	if effort != "" {
 		switch effort {
@@ -499,7 +515,7 @@ func nearestLevel(f *roster.Family, want roster.Level) roster.Level {
 }
 
 func (rt *Router) finish(f *roster.Family, level, estimate roster.Level, category, access, source string, defaults []string, excluded []Exclusion) *Route {
-	model, _ := rt.Disc.Resolve(f.Harness, f.Models)
+	model, _ := rt.Disc.Resolve(f.Harness, rt.Roster.LaunchModels(f))
 	h, _ := rt.Reg.Get(f.Harness)
 	r := &Route{
 		Family: f, FamilyID: f.ID, Harness: f.Harness, Tier: f.TierFor(level), LevelEstimate: estimate, Level: level,
@@ -555,4 +571,24 @@ func titleCase(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// constrainedLevel applies the same level bounds to the estimate and Jev score.
+func constrainedLevel(req Request, level roster.Level) roster.Level {
+	if req.Floor != "" && roster.TierOf(level).Rank() < req.Floor.Rank() {
+		level = levelForTier(req.Floor)
+	}
+	if req.Ceiling != "" && roster.TierOf(level).Rank() > req.Ceiling.Rank() {
+		level = levelForTier(req.Ceiling)
+	}
+	if req.Access == brief.AccessEdit && level == roster.LevelNone {
+		level = roster.LevelSome
+	}
+	return level
+}
+
+func allowedTier(req Request, tier roster.Tier) bool {
+	return (req.Access != brief.AccessEdit || tier != roster.TierLight) &&
+		(req.Floor == "" || tier.Rank() >= req.Floor.Rank()) &&
+		(req.Ceiling == "" || tier.Rank() <= req.Ceiling.Rank())
 }

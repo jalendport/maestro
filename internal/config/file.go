@@ -139,6 +139,7 @@ func (d Duration) MarshalText() ([]byte, error) { return []byte(d.String()), nil
 // Project is the shape of .agents/maestro.toml: five tighten-only keys plus
 // the per-project Claude permission switch from the permission contract.
 type Project struct {
+	Unknown    []string `toml:"-"`
 	Forbid     []string `toml:"forbid"`
 	Checks     []string `toml:"checks"`
 	Allow      []string `toml:"allow"`
@@ -213,8 +214,12 @@ func LoadProject(root string) (*Project, error) {
 		return nil, err
 	}
 	var p Project
-	if _, err := toml.Decode(string(b), &p); err != nil {
+	md, err := toml.Decode(string(b), &p)
+	if err != nil {
 		return nil, fmt.Errorf("%s: %w", ProjectFile(root), err)
+	}
+	for _, key := range md.Undecoded() {
+		p.Unknown = append(p.Unknown, key.String())
 	}
 	return &p, nil
 }

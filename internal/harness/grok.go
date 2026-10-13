@@ -10,9 +10,7 @@ import (
 	"strings"
 )
 
-// Grok is the Grok CLI adapter. Its read shape is best-effort on macOS,
-// so it takes no automatic read work;
-// the shape still exists for an explicit --lane request.
+// Grok is the Grok CLI adapter. Its read shape uses a tool allowlist.
 type Grok struct{ bin string }
 
 func (g *Grok) Name() string { return "grok" }
@@ -44,7 +42,9 @@ func (g *Grok) Catalog() ([]Model, string, error) {
 
 func (g *Grok) Enforcement(access string) string {
 	switch access {
-	case "read", "edit":
+	case "read":
+		return Enforced
+	case "edit":
 		return BestEffort
 	}
 	return NoShape
@@ -79,7 +79,14 @@ func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	var flags []string
 	switch l.Access {
 	case "read":
-		flags = append(flags, "--permission-mode", "dontAsk", "--deny", "Write", "--deny", "Edit")
+		flags = append(flags, "--permission-mode", "dontAsk", "--deny", "Write", "--deny", "Edit", "--deny", "Bash")
+		for _, rule := range readTools {
+			flags = append(flags, "--allow", rule)
+		}
+		// Like Claude, a read Lane can write its Report in its Run folder.
+		if l.RunFolder != "" {
+			flags = append(flags, "--allow", fmt.Sprintf("Write(//%s/**)", l.RunFolder), "--allow", fmt.Sprintf("Edit(//%s/**)", l.RunFolder))
+		}
 	case "edit":
 		flags = append(flags, "--permission-mode", "dontAsk")
 		for _, cmd := range l.AllowedCommands {
@@ -100,7 +107,7 @@ func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	cmd := exec.Command(g.bin, args...)
 	cmd.Dir = l.Root
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Flags: flags, PromptStdin: false}, nil
+	return &Command{Cmd: cmd, Flags: flags, PromptStdin: false, ReportByText: l.Access == "read" && !tab}, nil
 }
 
 func (g *Grok) NewParser() Parser { return &grokParser{out: &Outcome{}} }

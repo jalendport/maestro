@@ -55,6 +55,7 @@ strip_env = ["OPENAI_API_KEY", "CLAUDE_CODE_EFFORT_LEVEL", "CUSTOM_API_KEY_SUFFI
 				t.Fatal(err)
 			}
 			r := Merge(d, u)
+			tt.want = append(tt.want, "TYPESAFE_API_KEY")
 			names := slices.Clone(r.Harness[tt.harness].StripEnv)
 			if got := r.StripEnv(tt.harness); !slices.Equal(got, tt.want) {
 				t.Fatalf("StripEnv(%q) = %v, want %v", tt.harness, got, tt.want)

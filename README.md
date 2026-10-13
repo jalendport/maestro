@@ -4,6 +4,8 @@
 
 Maestro is a local command-line tool that owns agent work after the thinking is done. An orchestrating session writes a brief or a plan; Maestro routes each task to a lane that is strong enough for it across Claude Code, Codex, Grok, and Antigravity, dispatches it, checks the result, and runs councils for second opinions, with one ledger of what ran and why.
 
+Antigravity takes explicit requests only. Its read Access remains `best-effort`; it does not take automatic Routes or Council Seats.
+
 ## Features
 
 - **Routing with a reason** — every task goes to one harness, model, and effort, picked by [Jev](https://typesafe.ai) with a deterministic rules table as the fallback, and every route prints one reason line
