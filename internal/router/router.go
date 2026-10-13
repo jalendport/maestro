@@ -140,6 +140,9 @@ func (rt *Router) Weight(f *roster.Family) float64 {
 // Route applies the hard rules, then asks Jev to pick a Family.
 // The rules table uses the same candidates when Jev is absent.
 func (rt *Router) Route(req Request) (*Route, error) {
+	if req.Lane == "" && req.Seat == "" {
+		req.Lane = req.Brief.Lane
+	}
 	category := req.Brief.Category
 	var defaults []string
 	if category == "" {
@@ -166,6 +169,9 @@ func (rt *Router) Route(req Request) (*Route, error) {
 		f, ok := rt.Roster.Family(req.Seat)
 		if !ok {
 			return nil, fmt.Errorf("unknown family %q", req.Seat)
+		}
+		if err := rt.CheckAccess(f, req.Access); err != nil {
+			return nil, err
 		}
 		if v := rt.View(f.Account); v.State == "blocked" {
 			return nil, fmt.Errorf("family %s is blocked by budget: %s", f.ID, v.Reason)
@@ -413,8 +419,23 @@ func (rt *Router) rulesPick(cands []*roster.Family, level roster.Level, category
 	return nil, ""
 }
 
-// requested honours --lane: it beats every rule except Budget block and a
-// dead or disabled Lane, with a one-line warning when it breaks one.
+// CheckAccess refuses a requested Lane whose shape cannot hold the Access.
+func (rt *Router) CheckAccess(f *roster.Family, access string) error {
+	h, ok := rt.Reg.Get(f.Harness)
+	if !ok {
+		return fmt.Errorf("unknown harness %s", f.Harness)
+	}
+	switch h.Enforcement(access) {
+	case harness.NoShape:
+		return fmt.Errorf("lane %s cannot take %s work: has no %s shape (see maestro roster)", f.ID, access, access)
+	case harness.BestEffort:
+		return fmt.Errorf("lane %s cannot take %s work: its %s shape is best-effort (see maestro roster)", f.ID, access, access)
+	}
+	return nil
+}
+
+// requested honours --lane, except for Access, Budget, and dead or disabled
+// Lanes, with a one-line warning when it breaks another rule.
 func (rt *Router) requested(req Request, level, estimate roster.Level, category string, defaults []string) (*Route, error) {
 	id, effort := req.Lane, ""
 	if i := strings.IndexByte(id, ':'); i >= 0 {
@@ -427,6 +448,9 @@ func (rt *Router) requested(req Request, level, estimate roster.Level, category 
 	if !f.Enabled {
 		return nil, fmt.Errorf("family %s is disabled", id)
 	}
+	if err := rt.CheckAccess(f, req.Access); err != nil {
+		return nil, err
+	}
 	if why := rt.Preflight(f, req.Access); why != "" {
 		return nil, fmt.Errorf("family %s fails pre-flight: %s", id, why)
 	}
@@ -436,11 +460,6 @@ func (rt *Router) requested(req Request, level, estimate roster.Level, category 
 	var warnings []string
 	if f.RequestOnly {
 		warnings = append(warnings, "request-only family")
-	}
-	if req.Access == brief.AccessRead {
-		if h, _ := rt.Reg.Get(f.Harness); h.Enforcement("read") != harness.Enforced {
-			warnings = append(warnings, "read task on a best-effort lane")
-		}
 	}
 	if rt.Roster.Accounts[f.Account].Billing == "metered" && req.Access == brief.AccessEdit {
 		return nil, fmt.Errorf("family %s is read-only (token-billed harness without an edit shape)", id)

@@ -4,7 +4,7 @@
 
 Maestro is a local command-line tool that owns agent work after the thinking is done. An orchestrating session writes a brief or a plan; Maestro routes each task to a lane that is strong enough for it across Claude Code, Codex, Grok, and Antigravity, dispatches it, checks the result, and runs councils for second opinions, with one ledger of what ran and why.
 
-Claude Code, Codex, and Grok take automatic Routes and Council Seats, because each holds read Access with its own sandbox or allowlist. Antigravity takes explicit requests only. Its read Access remains `best-effort`, and it has no edit shape; it does not take automatic Routes or Council Seats.
+Claude Code, Codex, and Grok take automatic Routes and Council Seats, because each holds read Access with its own sandbox or allowlist. Maestro refuses a requested Lane whose Access shape is `best-effort` or missing; see `maestro roster`. Antigravity's read Access remains `best-effort`, and it has no edit shape, so Maestro refuses its Dispatches and Council Seats.
 
 ## Features
 
@@ -57,6 +57,8 @@ It writes two paths:
 
 Manual step: start a new Claude Code session. It loads the hook.
 
+A Claude tab in a project you have not opened in Claude Code will wait on its folder trust dialog; open the project in Claude Code once first.
+
 Verify: `maestro doctor` shows `adapter claude` as `ok`.
 
 Probe the hook. A sub-agent that can write code must get a `deny`:
@@ -79,6 +81,8 @@ It writes two paths:
 - `~/.codex/hooks.json` gets one `PreToolUse` hook entry for `maestro hook`; Maestro adds or replaces only its own entry and keeps all other hooks.
 
 Manual step: start Codex, open `/hooks`, and trust the Maestro `PreToolUse` hook. This review is a security boundary. Only you cross it. An agent must not trust the hook for you.
+
+Maestro passes `-c 'projects={"<root>"={trust_level="trusted"}}'` to each Codex tab to trust the project root for that process.
 
 Verify: `maestro doctor` shows `adapter codex` as `ok`.
 

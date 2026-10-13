@@ -64,7 +64,7 @@ func TestTaskKeepsSoloTodoAfterEscalationAndCompletesUnverified(t *testing.T) {
 	if err := brief.Write(b, b.Path); err != nil {
 		t.Fatal(err)
 	}
-	first, err := Prepare(env, b, router.Request{Lane: "codex-sol:medium"}, "r-0001", "abcd")
+	first, err := Prepare(env, b, router.Request{}, "r-0001", "abcd")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestTaskKeepsSoloTodoAfterEscalationAndCompletesUnverified(t *testing.T) {
 	if rec.Outcome.Outcome == OutcomeVerified || rec.Outcome.Outcome == OutcomeUnverified {
 		t.Fatalf("first attempt succeeded: %+v", rec.Outcome)
 	}
-	second, err := Prepare(env, b, router.Request{Lane: "codex-astra:high"}, "r-0001", "abcd")
+	second, err := Prepare(env, b, router.Request{Floor: roster.TierFrontier}, "r-0001", "abcd")
 	if err != nil {
 		t.Fatal(err)
 	}

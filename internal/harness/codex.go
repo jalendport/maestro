@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -77,6 +78,13 @@ func (c *Codex) build(l Launch, tab bool) (*Command, error) {
 			root = l.RunFolder
 		}
 		args = []string{l.Pointer, "-m", l.Model, "-C", root, "-c", "approval_policy=never"}
+		projectRoot := l.Root
+		if resolved, err := filepath.EvalSymlinks(projectRoot); err == nil {
+			projectRoot = resolved
+		}
+		// An inline table preserves dots and quotes in the project path; the
+		// CLI splits dotted override keys without parsing quoted TOML keys.
+		args = append(args, "-c", fmt.Sprintf("projects={%q={trust_level=\"trusted\"}}", projectRoot))
 	}
 	if l.Effort != "" {
 		args = append(args, "-c", "model_reasoning_effort="+l.Effort)

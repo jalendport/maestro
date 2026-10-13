@@ -152,11 +152,13 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 	rec.SoloProcess = pid
 	rec.Events = append(rec.Events, Event{At: launched, Kind: "tab", Text: fmt.Sprintf("solo process %d", pid)})
 	_ = rec.Save()
+	output := &tabOutput{}
 	defer func() {
 		l.saveTabLog(pid, t.Folder)
 		if out == nil {
 			out = &harness.Outcome{}
 		}
+		out.TabWorked = output.worked
 		if raw, err := os.ReadFile(filepath.Join(t.Folder, "tab.log")); err == nil {
 			out.Text = string(raw)
 			out.Signals = append(out.Signals, harness.ClassifyText(h.Name(), out.Text))
@@ -164,7 +166,6 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 	}()
 	start := time.Now()
 	lastOutput := time.Now()
-	lastTail := ""
 	relays := &relayTracker{}
 	nudged := false
 	var nudgedAt time.Time
@@ -201,6 +202,9 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 		default:
 		}
 		st, err := l.Client.Status(pid)
+		if tail, outputErr := l.Client.Output(pid, 40); outputErr == nil && output.observe(tail) {
+			lastOutput = time.Now()
+		}
 		if err == nil && st.Status != "" && !st.Running() {
 			// The tab ended without a Report.
 			if st.Uptime < 30 {
@@ -208,11 +212,6 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 				return &harness.Outcome{ErrorText: "early exit"}, "", nil
 			}
 			break
-		}
-		tail, _ := l.Client.Output(pid, 40)
-		if tail != lastTail {
-			lastTail = tail
-			lastOutput = time.Now()
 		}
 		// Solo's own idle reading is the primary signal; the output diff is the backup.
 		idleFor := time.Since(lastOutput)
@@ -253,6 +252,28 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 	}
 	stop("report ready or tab ended")
 	return &harness.Outcome{}, "", nil
+}
+
+// tabOutput compares output without reading or interpreting prompt text.
+type tabOutput struct {
+	seen   bool
+	last   string
+	worked bool
+}
+
+func (o *tabOutput) observe(text string) bool {
+	if !o.seen {
+		if strings.TrimSpace(text) == "" {
+			return false
+		}
+		o.seen, o.last = true, text
+		return true
+	}
+	if text == o.last {
+		return false
+	}
+	o.last, o.worked = text, true
+	return true
 }
 
 // CloseTab applies close_tabs after the Dispatch is judged.

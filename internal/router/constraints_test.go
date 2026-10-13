@@ -92,6 +92,7 @@ func TestFanOutNeedsExplicitLaneAndEffort(t *testing.T) {
 					t.Fatal("missing exclusion", route.Excluded)
 				}
 				req.Lane = "codex-sol"
+				req.Access = "read"
 				if _, err = rt.Route(req); err == nil {
 					t.Fatal("implicit fan-out effort accepted")
 				}

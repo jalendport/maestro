@@ -96,7 +96,7 @@ func TestRequestedLaneWarns(t *testing.T) {
 	rt := testRouter(t)
 	rt.Roster.Families["claude-fable"].RequestOnly = true
 	b := mustBrief(t, "---\ntitle: x\n---\n## Goal\ng\n## Done\nd\n")
-	r, err := rt.Route(Request{Brief: b, Access: "edit", Lane: "claude-fable:high"})
+	r, err := rt.Route(Request{Brief: b, Access: "read", Lane: "claude-fable:high"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +110,51 @@ func TestAgyRefusesEdit(t *testing.T) {
 	b := mustBrief(t, "---\ntitle: x\n---\n## Goal\ng\n## Done\nd\n")
 	if _, err := rt.Route(Request{Brief: b, Access: "edit", Lane: "agy-flash"}); err == nil {
 		t.Fatal("agy must refuse an edit task")
+	}
+}
+
+func TestRequestedLaneRefusesAccess(t *testing.T) {
+	for _, tc := range []struct {
+		lane, access, reason string
+	}{
+		{"agy-flash", "read", "its read shape is best-effort"},
+		{"agy-flash:high", "edit", "has no edit shape"},
+		{"codex-sol", "edit", "its edit shape is best-effort"},
+	} {
+		for _, source := range []string{"brief", "flag", "seat"} {
+			t.Run(tc.lane+"/"+tc.access+"/"+source, func(t *testing.T) {
+				rt := testRouter(t)
+				req := Request{Brief: &brief.Brief{}, Access: tc.access}
+				id := strings.Split(tc.lane, ":")[0]
+				switch source {
+				case "brief":
+					req.Brief.Lane = tc.lane
+				case "flag":
+					req.Lane = tc.lane
+				case "seat":
+					req.Seat = id
+				}
+				route, err := rt.Route(req)
+				want := fmt.Sprintf("lane %s cannot take %s work: %s (see maestro roster)", id, tc.access, tc.reason)
+				if route != nil || err == nil || err.Error() != want {
+					t.Fatalf("route=%+v err=%v, want %s", route, err, want)
+				}
+			})
+		}
+	}
+}
+
+func TestBriefLaneIsRequestedAndFlagWins(t *testing.T) {
+	rt := testRouter(t)
+	b := &brief.Brief{Fields: brief.Fields{Lane: "codex-sol:high"}}
+	route, err := rt.Route(Request{Brief: b, Access: "read"})
+	if err != nil || !route.Requested || route.FamilyID != "codex-sol" || route.Effort != "high" {
+		t.Fatalf("Brief Lane: %+v, %v", route, err)
+	}
+	b.Lane = "agy-flash"
+	route, err = rt.Route(Request{Brief: b, Access: "read", Lane: "codex-sol"})
+	if err != nil || !route.Requested || route.FamilyID != "codex-sol" {
+		t.Fatalf("flag Lane: %+v, %v", route, err)
 	}
 }
 
@@ -173,26 +218,26 @@ func TestMeteredCapBindsRouterViewAndRequestedRoute(t *testing.T) {
 		t.Run(tc.state+fmt.Sprint(tc.spent), func(t *testing.T) {
 			rt := testRouter(t)
 			rt.Roster.Budget.WarnAt = .8
-			account := rt.Roster.Accounts["agy"]
+			account := rt.Roster.Accounts["grok"]
 			account.Billing = "metered"
 			account.Cap = &config.Cap{USD: 20, Period: "30d"}
-			rt.Roster.Accounts["agy"] = account
+			rt.Roster.Accounts["grok"] = account
 			for _, row := range []map[string]any{
-				{"kind": "dispatch", "ended_at": time.Now(), "route": map[string]any{"account": "agy"}, "budget": map[string]any{"cost_usd": tc.spent}},
-				{"kind": "dispatch", "ended_at": time.Now().Add(-31 * 24 * time.Hour), "route": map[string]any{"account": "agy"}, "budget": map[string]any{"cost_usd": 100}},
+				{"kind": "dispatch", "ended_at": time.Now(), "route": map[string]any{"account": "grok"}, "budget": map[string]any{"cost_usd": tc.spent}},
+				{"kind": "dispatch", "ended_at": time.Now().Add(-31 * 24 * time.Hour), "route": map[string]any{"account": "grok"}, "budget": map[string]any{"cost_usd": 100}},
 				{"kind": "dispatch", "ended_at": time.Now(), "route": map[string]any{"account": "other"}, "budget": map[string]any{"cost_usd": 100}},
-				{"kind": "run", "ended_at": time.Now(), "route": map[string]any{"account": "agy"}, "budget": map[string]any{"cost_usd": 100}},
+				{"kind": "run", "ended_at": time.Now(), "route": map[string]any{"account": "grok"}, "budget": map[string]any{"cost_usd": 100}},
 			} {
 				if err := ledger.Append(row); err != nil {
 					t.Fatal(err)
 				}
 			}
-			v := rt.View("agy")
+			v := rt.View("grok")
 			if v.State != tc.state || v.Tight == nil || v.Tight.Used != tc.spent/20 {
 				t.Fatalf("view %+v for spend %v", v, tc.spent)
 			}
 			b := &brief.Brief{}
-			_, err := rt.Route(Request{Brief: b, Access: "read", Lane: "agy-flash"})
+			_, err := rt.Route(Request{Brief: b, Access: "read", Lane: "grok"})
 			if (err != nil) != (tc.state == "blocked") {
 				t.Fatalf("route error %v for spend %v", err, tc.spent)
 			}
@@ -237,7 +282,7 @@ orchestrator = "codex-sol"
 	if !found {
 		t.Fatal("Orchestrator exclusion missing", r.Excluded)
 	}
-	r, err = rt.Route(Request{Brief: b, Access: "edit", Lane: "codex-sol"})
+	r, err = rt.Route(Request{Brief: b, Access: "read", Lane: "codex-sol"})
 	if err != nil || r.FamilyID != "codex-sol" || !r.Requested {
 		t.Fatalf("explicit request: %+v, %v", r, err)
 	}

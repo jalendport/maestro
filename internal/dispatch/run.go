@@ -299,7 +299,7 @@ attempts:
 	for attempt := first; attempt <= t.MaxAttempt; attempt++ {
 		clearAnswers(t.Folder)
 		rec = runOnce(env, t, b, attempt, retry)
-		wait, again := retryWait(rec.Outcome.FailureClass)
+		wait, again := retryWait(rec.Outcome)
 		// The Run supervisor records its final attempt after the escalation decision.
 		if !t.LedgerByRun {
 			if err := ledger.Append(rec); err != nil {
@@ -341,8 +341,13 @@ func clearAnswers(folder string) {
 	}
 }
 
-func retryWait(class string) (time.Duration, bool) {
-	switch class {
+const tabStartupError = "the tab never started working (startup prompt or launch error); see tab.log"
+
+func retryWait(outcome Outcome) (time.Duration, bool) {
+	if outcome.FailureClass == FailLane && outcome.ErrorText == tabStartupError {
+		return 0, false
+	}
+	switch outcome.FailureClass {
 	case FailLane:
 		return 5 * time.Second, true
 	case FailTransient:
@@ -1002,6 +1007,14 @@ func runTab(env *Env, t *Task, h harness.Harness, command *harness.Command, laun
 				}
 			}
 		}
+	}
+	if (!found || strings.TrimSpace(report.Raw) == "") && out != nil && !out.TabWorked {
+		rec.Outcome.FailureClass = FailLane
+		rec.Outcome.Outcome = OutcomeFailed
+		rec.Outcome.ErrorText = tabStartupError
+		rec.Outcome.Timer = timer
+		finish(rec)
+		return rec
 	}
 	if timer == "idle" || timer == "wall" {
 		rec.Outcome.Timer = timer

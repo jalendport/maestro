@@ -87,6 +87,7 @@ type Signal struct {
 
 // Outcome is what a parser knows when the process ends.
 type Outcome struct {
+	TabWorked bool // tab output changed after its first screen
 	SessionID string
 	ModelRan  string
 	Text      string // the final assistant message

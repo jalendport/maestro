@@ -292,6 +292,9 @@ func pickSeats(env *dispatch.Env, c *Council, o Opts) ([]*Seat, []string, error)
 		if !ok || !f.Enabled {
 			return nil, nil, fmt.Errorf("unknown or disabled family %q", id)
 		}
+		if err := rt.CheckAccess(f, brief.AccessRead); err != nil {
+			return nil, nil, err
+		}
 		if why := rt.Preflight(f, brief.AccessRead); why != "" {
 			return nil, nil, fmt.Errorf("family %s fails pre-flight: %s", id, why)
 		}

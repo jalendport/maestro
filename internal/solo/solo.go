@@ -355,11 +355,11 @@ func (c *Client) Output(processID, lines int) (string, error) {
 		return "", err
 	}
 	var out struct {
-		Output string   `json:"output"`
+		Output *string  `json:"output"`
 		Lines  []string `json:"lines"`
 	}
-	if json.Unmarshal(res, &out) == nil && out.Output != "" {
-		return out.Output, nil
+	if json.Unmarshal(res, &out) == nil && out.Output != nil {
+		return *out.Output, nil
 	}
 	var s string
 	if json.Unmarshal(res, &s) == nil {
