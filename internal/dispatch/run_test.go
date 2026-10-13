@@ -197,3 +197,25 @@ func TestReadDispatchWorksWithoutGitOrRepository(t *testing.T) {
 		t.Fatalf("outcome: %+v", rec.Outcome)
 	}
 }
+
+func TestUnknownFullClaudeModelKeepsCLIError(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	root, folder := t.TempDir(), t.TempDir()
+	bin := filepath.Join(t.TempDir(), "claude")
+	message := "There is an issue with the selected model (claude-opuss-5-5). It may not exist or you may not have access to it."
+	script := "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '" + message + "' >&2\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := &Env{Root: root, Roster: &roster.Roster{}, Reg: harness.New(map[string]string{"claude": bin})}
+	task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "bad-model", Access: brief.AccessRead,
+		Route: &router.Route{Harness: "claude", Model: "claude-opuss-5-5"}, WallLimit: "1m", IdleLimit: "1m"}
+	rec := runOnce(env, task, &brief.Brief{}, 1, nil)
+	if rec.Outcome.FailureClass != FailLane || rec.Outcome.ErrorText != message {
+		t.Fatalf("outcome: %+v", rec.Outcome)
+	}
+	stored, err := LoadRecord(folder)
+	if err != nil || stored.Outcome.FailureClass != FailLane || stored.Outcome.ErrorText != message {
+		t.Fatalf("stored record=%+v err=%v", stored, err)
+	}
+}

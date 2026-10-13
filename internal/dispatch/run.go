@@ -1,7 +1,7 @@
 package dispatch
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -106,10 +106,18 @@ func (env *Env) harvest(account string, ws []harness.Window) {
 	_ = env.Budget.Save()
 }
 
+const limitProbeTimeout = "probe timed out; limit unconfirmed"
+
 // confirmLimit checks a limit message against a fresh reading before the
 // Account blocks. It returns true when the
 // limit stands; a reading under the block point downgrades it.
-func (env *Env) confirmLimit(account, harnessName string) (bool, string) {
+func (env *Env) confirmLimit(rec *Record, account, harnessName string) (bool, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	return env.confirmLimitContext(ctx, rec, account, harnessName)
+}
+
+func (env *Env) confirmLimitContext(ctx context.Context, rec *Record, account, harnessName string) (bool, string) {
 	if env.Budget == nil {
 		return true, "no budget file"
 	}
@@ -121,13 +129,18 @@ func (env *Env) confirmLimit(account, harnessName string) (bool, string) {
 	reason := "limit hit"
 	switch harnessName {
 	case "claude":
-		if ws, err := budget.ProbeClaude(h.Bin(), harness.Env(env.Roster.StripEnv("claude"), map[string]string{"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1"})); err == nil {
+		if ws, err := budget.ProbeClaudeContext(ctx, h.Bin(), harness.Env(env.Roster.StripEnv("claude"), map[string]string{"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1"})); err == nil {
 			env.Budget.Record(account, ws, budget.SourceProbe)
 			if v := env.NewRouter().View(account); v.State != "blocked" {
 				_ = env.Budget.Save()
 				return false, "probe shows headroom: " + describe(ws)
 			}
 			until = nearestReset(ws, until)
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			note := limitProbeTimeout
+			rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "limit", Text: note})
+			ui.Eventf("limit", "%s: %s", account, note)
+			return false, note
 		}
 	case "codex":
 		if cl, err := budget.ReadCodex(h.Bin()); err == nil {
@@ -493,22 +506,14 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	var mu sync.Mutex
 	lastOutput := time.Now()
 	pumpDone := make(chan struct{})
+	var streamEvents []Event
 	go func() {
 		defer close(pumpDone)
-		sc := bufio.NewScanner(stdout)
-		sc.Buffer(make([]byte, 1<<20), 1<<26)
-		for sc.Scan() {
-			line := sc.Bytes()
-			if outFile != nil {
-				outFile.Write(line)
-				outFile.Write([]byte{'\n'})
-			}
-			if parser.Line(line) {
-				mu.Lock()
-				lastOutput = time.Now()
-				mu.Unlock()
-			}
-		}
+		streamEvents = pumpStream(stdout, outFile, parser, func() {
+			mu.Lock()
+			lastOutput = time.Now()
+			mu.Unlock()
+		})
 	}()
 
 	// Timers: Idle and Wall, Maestro-owned.
@@ -526,6 +531,7 @@ loop:
 	for {
 		select {
 		case waitErr = <-waitDone:
+			ticker.Stop()
 			relays.poll(env, t, rec, h.Name(), time.Now())
 			break loop
 		case <-t.Cancel:
@@ -534,6 +540,11 @@ loop:
 			waitErr = terminate(cmd, waitDone)
 			break loop
 		case now := <-ticker.C:
+			if err, finished := laneFinished(waitDone, ticker.Stop); finished {
+				waitErr = err
+				relays.poll(env, t, rec, h.Name(), time.Now())
+				break loop
+			}
 			// A clock jump after Mac sleep: a live Dispatch gets a fresh Idle timer.
 			// Wall clocks, not monotonic readings: the monotonic clock stands still during sleep on macOS.
 			if jump := now.Round(0).Sub(lastTick.Round(0)); jump > 2*time.Minute {
@@ -569,6 +580,7 @@ loop:
 		}
 	}
 	ticker.Stop()
+	rec.Events = append(rec.Events, streamEvents...)
 	if outFile != nil {
 		outFile.Close()
 	}
@@ -629,7 +641,7 @@ loop:
 	if timer != "" {
 		if limit != "" {
 			// A Lane that hit a vendor limit and then hung is a Limit hit, not a Stall.
-			stands, note := env.confirmLimit(t.Route.Account, t.Route.Harness)
+			stands, note := env.confirmLimit(rec, t.Route.Account, t.Route.Harness)
 			rec.Outcome.LimitConfirmation = note
 			if stands {
 				return fail(FailLimit, limit)
@@ -663,13 +675,15 @@ loop:
 		report = brief.ParseReport(report.Raw)
 	}
 	if limit != "" {
-		stands, note := env.confirmLimit(t.Route.Account, t.Route.Harness)
+		stands, note := env.confirmLimit(rec, t.Route.Account, t.Route.Harness)
 		rec.Outcome.LimitConfirmation = note
 		shaped := found && report.Status != brief.StatusUnshaped
 		switch {
 		case shaped:
 			// The work is done and reported; the Account blocks, the Report stands.
-			rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "limit", Text: note})
+			if note != limitProbeTimeout {
+				rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "limit", Text: note})
+			}
 		case !stands:
 			return fail(FailTransient, limit+" (downgraded: "+note+")")
 		default:
@@ -989,7 +1003,7 @@ func runTab(env *Env, t *Task, h harness.Harness, command *harness.Command, laun
 	if out != nil {
 		for _, sig := range out.Signals {
 			if sig.Class == "limit" {
-				stands, note := env.confirmLimit(t.Route.Account, t.Route.Harness)
+				stands, note := env.confirmLimit(rec, t.Route.Account, t.Route.Harness)
 				rec.Outcome.LimitConfirmation = note
 				if stands && (!found || report.Status == brief.StatusUnshaped) {
 					rec.Outcome.FailureClass = FailLimit

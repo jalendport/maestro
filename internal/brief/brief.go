@@ -37,6 +37,7 @@ func DefaultAccess(category string) string {
 // Fields is the front matter of a Brief file (and of a Plan file's Run-wide
 // defaults and Task sections).
 type Fields struct {
+	Todo      int               `yaml:"todo,omitempty"`
 	Title     string            `yaml:"title"`
 	Category  string            `yaml:"category"`
 	Level     string            `yaml:"level"`

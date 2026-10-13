@@ -2,6 +2,7 @@ package budget
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,13 +21,22 @@ import (
 // It costs a few thousand cached tokens; it runs only when a reading is stale
 // and a Claude Lane is a candidate.
 func ProbeClaude(bin string, env []string) ([]harness.Window, error) {
+	return ProbeClaudeContext(context.Background(), bin, env)
+}
+
+// ProbeClaudeContext permits a caller to bound a Probe's lifetime.
+func ProbeClaudeContext(ctx context.Context, bin string, env []string) ([]harness.Window, error) {
 	if bin == "" {
 		return nil, fmt.Errorf("claude is not installed")
 	}
-	cmd := exec.Command(bin, "-p", "--model", "haiku", "--output-format", "stream-json", "--verbose", "--permission-mode", "dontAsk", "--permission-prompts", "none", "--allowedTools", "Read", "--no-session-persistence")
+	cmd := exec.CommandContext(ctx, bin, "-p", "--model", "haiku", "--output-format", "stream-json", "--verbose", "--permission-mode", "dontAsk", "--permission-prompts", "none", "--allowedTools", "Read", "--no-session-persistence")
+	cmd.WaitDelay = time.Second
 	cmd.Env = env
 	cmd.Stdin = strings.NewReader("Reply with the single word OK.\n")
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil && len(out) == 0 {
 		return nil, err
 	}

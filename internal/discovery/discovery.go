@@ -120,10 +120,10 @@ func (c *Cache) Model(harnessName, id string) (harness.Model, bool) {
 	return harness.Model{}, false
 }
 
-// Resolve returns the first family model present in the catalog.
+// Resolve returns the first catalog model or a full Claude model id.
 func (c *Cache) Resolve(harnessName string, models []string) (string, bool) {
 	for _, m := range models {
-		if _, ok := c.Model(harnessName, m); ok {
+		if _, ok := c.Model(harnessName, m); ok || (harnessName == "claude" && harness.ClaudeModelID(m)) {
 			return m, true
 		}
 	}

@@ -52,10 +52,19 @@ func (l *SoloLink) Close() {
 	}
 }
 
-// TodoFor creates the Task's todo (Tasks are Solo todos) and records its id.
+// TodoFor adopts a named todo or creates the Task's todo (Tasks are Solo todos) and records its id.
 func (l *SoloLink) TodoFor(t *Task, b *brief.Brief) int {
 	if l == nil || t.Todo != 0 {
 		return t.Todo
+	}
+	if b.Todo != 0 {
+		if _, err := l.Client.Call("todo_get", map[string]any{"project_id": l.ProjectID, "todo_id": b.Todo}); err == nil {
+			t.Todo = b.Todo
+			_ = t.Save()
+			return t.Todo
+		} else {
+			ui.Warnf("solo todo %d: %v; creating a todo", b.Todo, err)
+		}
 	}
 	body := fmt.Sprintf("Maestro task `%s` of run `%s`. Brief: `%s`.\n\n## Goal\n%s\n\n## Done\n%s\n", t.Task, t.Run, relOrAbs(t.Project, t.BriefPath), strings.TrimSpace(b.Goal), strings.TrimSpace(b.Done))
 	id, err := l.Client.CreateTodo(l.ProjectID, t.Title, body, []string{"maestro"})
@@ -107,12 +116,21 @@ func failed(rec *Record) int {
 	return n
 }
 
-// Wake types one line into the Orchestrator's session.
-func (l *SoloLink) Wake(text string) {
+// Wake types a fixed Maestro message into the Orchestrator's session.
+func (l *SoloLink) Wake(kind, id, title, harnessName string) {
 	if l == nil || l.Orchestrator == 0 {
 		return
 	}
-	if err := l.Client.Timer(l.ProjectID, l.Orchestrator, time.Second, text); err != nil {
+	verb := "maestro wait " + id
+	switch kind {
+	case "relay":
+		verb = "maestro answer " + id + " allow|deny"
+	case "run end", "council end":
+	default:
+		return
+	}
+	body := fmt.Sprintf("Maestro %s: id=%q title=%q harness=%q. Run: %s", kind, id, title, harnessName, verb)
+	if err := l.Client.Timer(l.ProjectID, l.Orchestrator, time.Second, body); err != nil {
 		ui.Warnf("solo wake-up: %v", err)
 	}
 }

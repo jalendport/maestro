@@ -5,6 +5,7 @@ package router
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -375,13 +376,21 @@ func (rt *Router) Preflight(f *roster.Family, access string) string {
 	if min := rt.Roster.Harness[f.Harness].MinVersion; min != "" && rec.Version != "" && harness.VersionLess(rec.Version, min) {
 		return fmt.Sprintf("needs %s ≥ %s (have %s)", f.Harness, min, rec.Version)
 	}
-	if _, ok := rt.Disc.Resolve(f.Harness, f.Models); !ok {
+	model, ok := rt.Disc.Resolve(f.Harness, f.Models)
+	if !ok {
 		return fmt.Sprintf("%s not in the %s catalog", strings.Join(f.Models, "/"), f.Harness)
+	}
+	if entry, found := rt.Disc.Model(f.Harness, model); found && len(entry.Efforts) > 0 {
+		for _, level := range roster.Levels {
+			if effort, set := f.Levels[level]; set && !slices.Contains(entry.Efforts, effort) {
+				return fmt.Sprintf("family %s effort %q is not supported by %s (supported: %s)", f.ID, effort, model, strings.Join(entry.Efforts, ", "))
+			}
+		}
 	}
 	if h.Enforcement(access) == harness.NoShape {
 		return fmt.Sprintf("%s has no %s shape", f.Harness, access)
 	}
-	if _, err := h.Build(harness.Launch{Model: f.Models[0], Access: access, Root: "."}); err != nil {
+	if _, err := h.Build(harness.Launch{Model: model, Access: access, Root: "."}); err != nil {
 		return err.Error()
 	}
 	return ""

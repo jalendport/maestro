@@ -293,3 +293,49 @@ func TestCodexReserveAndAllocationWeight(t *testing.T) {
 		t.Fatalf("blocked Codex route: %+v, %v", r, err)
 	}
 }
+
+func TestPreflightClaudeFullModelIDs(t *testing.T) {
+	rt := testRouter(t)
+	f := *rt.Roster.Families["claude-opus"]
+	for _, id := range []string{"opus", "claude-opus-5-5", "claude-opus-5-5-20261001"} {
+		f.Models = []string{id}
+		if why := rt.Preflight(&f, "read"); why != "" {
+			t.Fatalf("%s: %s", id, why)
+		}
+		route := rt.finish(&f, roster.LevelSome, roster.LevelSome, "research", "read", "requested", nil, nil)
+		if route.Model != id {
+			t.Fatalf("route model = %q, want %q", route.Model, id)
+		}
+	}
+	for _, id := range []string{"opuss", "cluade-opus-5-5", "claude-opus-5", "claude-opus-5-5-bad"} {
+		f.Models = []string{id}
+		if why := rt.Preflight(&f, "read"); !strings.Contains(why, "not in the claude catalog") {
+			t.Fatalf("%s: %s", id, why)
+		}
+	}
+}
+
+func TestPreflightChecksDiscoveredEfforts(t *testing.T) {
+	rt := testRouter(t)
+	f := *rt.Roster.Families["codex-sol"]
+	f.Levels = map[roster.Level]string{roster.LevelSome: "ultra"}
+	rec := rt.Disc.Harness["codex"]
+	rec.Models[0].Efforts = []string{"low", "medium", "high"}
+	rt.Disc.Harness["codex"] = rec
+	why := rt.Preflight(&f, "edit")
+	for _, want := range []string{"codex-sol", "ultra", "low, medium, high"} {
+		if !strings.Contains(why, want) {
+			t.Fatalf("missing %q: %s", want, why)
+		}
+	}
+	f.Levels[roster.LevelSome] = "high"
+	if why := rt.Preflight(&f, "edit"); why != "" {
+		t.Fatal(why)
+	}
+	rec.Models[0].Efforts = nil
+	rt.Disc.Harness["codex"] = rec
+	f.Levels[roster.LevelSome] = "ultra"
+	if why := rt.Preflight(&f, "edit"); why != "" {
+		t.Fatal(why)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -32,6 +33,11 @@ func (c *Claude) Catalog() ([]Model, string, error) {
 		{ID: "fable", Efforts: efforts, DefaultEffort: "high", Context: 1000000},
 	}, "", nil
 }
+
+var claudeModelID = regexp.MustCompile(`^claude-[a-z][a-z0-9]*-[0-9]+-[0-9]+(?:-[0-9]{8})?$`)
+
+// ClaudeModelID reports whether an id has the CLI's full model-id shape.
+func ClaudeModelID(id string) bool { return claudeModelID.MatchString(id) }
 
 func (c *Claude) Enforcement(access string) string {
 	switch access {

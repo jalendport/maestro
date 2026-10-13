@@ -24,6 +24,7 @@ commit: false                # true lets the Lane commit as its own guidance say
 lane: codex-sol:high         # request a Lane; also floor: / ceiling:
 wall_limit: 45m              # raise the Tier's Wall limit for this Task
 facts: {input: very large log}   # short named facts for the Router
+todo: 247                    # adopt this Solo todo for the Task instead of creating one
 ---
 
 ## Goal

@@ -19,7 +19,7 @@ func ClassifyText(harness, text string) Signal {
 			return Signal{Class: "transient", Text: text}
 		}
 		return Signal{Class: "limit", Text: text}
-	case strings.Contains(t, "billing"), strings.Contains(t, "not logged in"), strings.Contains(t, "login"), strings.Contains(t, "unauthorized"), strings.Contains(t, "unknown model"), strings.Contains(t, "model not found"):
+	case strings.Contains(t, "billing"), strings.Contains(t, "not logged in"), strings.Contains(t, "login"), strings.Contains(t, "unauthorized"), strings.Contains(t, "unknown model"), strings.Contains(t, "model not found"), strings.Contains(t, "invalid model"), strings.Contains(t, "issue with the selected model"):
 		return Signal{Class: "lane", Text: text}
 	}
 	return Signal{Class: "transient", Text: text}

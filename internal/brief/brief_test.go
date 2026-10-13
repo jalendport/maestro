@@ -117,3 +117,18 @@ func TestParseReport(t *testing.T) {
 		t.Fatal("missing status must be unshaped")
 	}
 }
+
+func TestNamedTodoSurvivesBriefWrite(t *testing.T) {
+	b, err := ParseText("---\ntitle: Named todo\ntodo: 123\n---\n## Goal\nWork\n## Done\nDone\n")
+	if err != nil || b.Todo != 123 {
+		t.Fatalf("Brief=%+v err=%v", b, err)
+	}
+	path := t.TempDir() + "/brief.md"
+	if err := Write(b, path); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := Parse(path)
+	if err != nil || parsed.Todo != 123 {
+		t.Fatalf("Brief=%+v err=%v", parsed, err)
+	}
+}

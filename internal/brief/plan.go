@@ -145,6 +145,9 @@ func parseTaskSection(title, section string, defaults Fields) (*Brief, error) {
 // mergeFields overlays the set fields of t on d.
 func mergeFields(d, t Fields) Fields {
 	out := d
+	if t.Todo != 0 {
+		out.Todo = t.Todo
+	}
 	if t.Category != "" {
 		out.Category = t.Category
 	}

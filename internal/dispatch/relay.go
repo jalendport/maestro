@@ -2,7 +2,6 @@ package dispatch
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -112,7 +111,7 @@ func (r *relayTracker) start(env *Env, t *Task, rec *Record, name string, reques
 	rec.Events = append(rec.Events, Event{At: request.AskedAt, Kind: "relay", Text: text})
 	_ = rec.Save()
 	ui.Eventf("relay", "task %s  %s asks:\n%s", t.Task, name, text)
-	env.Solo.Wake(fmt.Sprintf("Maestro task %s (%s, %s) waits on a permission prompt. Answer with: maestro answer %s allow|deny. Prompt:\n%s", t.Task, name, t.Title, t.Task, text))
+	env.Solo.Wake("relay", t.Task, t.Title, name)
 }
 
 func (r *relayTracker) finish(rec *Record, answer string, now time.Time) {

@@ -87,3 +87,10 @@ func TestWriteRoundTrip(t *testing.T) {
 		t.Fatalf("%+v %q", b.Fields, b.Goal)
 	}
 }
+
+func TestPlanTaskNamesTodo(t *testing.T) {
+	p, err := ParsePlanText("# Plan\n## Task\n- todo: 123\n### Goal\nWork\n### Done\nDone\n")
+	if err != nil || p.Tasks[0].Todo != 123 {
+		t.Fatalf("Plan=%+v err=%v", p, err)
+	}
+}

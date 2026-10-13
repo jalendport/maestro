@@ -3,6 +3,7 @@ package dispatch
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +33,10 @@ func TestSoloTabHelper(t *testing.T) {
 			ID     int    `json:"id"`
 			Method string `json:"method"`
 			Params struct {
-				Name string `json:"name"`
+				Name      string `json:"name"`
+				Arguments struct {
+					TodoID int `json:"todo_id"`
+				} `json:"arguments"`
 			} `json:"params"`
 		}
 		if err := json.Unmarshal(sc.Bytes(), &req); err != nil {
@@ -48,6 +52,15 @@ func TestSoloTabHelper(t *testing.T) {
 			}
 			text := `{}`
 			switch req.Params.Name {
+			case "todo_get":
+				if req.Params.Arguments.TodoID == 999 {
+					result = map[string]any{"isError": true, "content": []any{map[string]any{"type": "text", "text": "todo not found"}}}
+					if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result}); err != nil {
+						panic(err)
+					}
+					continue
+				}
+				text = fmt.Sprintf(`{"todo":{"id":%d}}`, req.Params.Arguments.TodoID)
 			case "todo_create":
 				text = `{"todo_id":7}`
 			case "spawn_agent":
