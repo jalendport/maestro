@@ -11,28 +11,21 @@ version = 1
 harness       = "claude"
 billing       = "subscription"
 block_at      = 0.90
-paid_overflow = false
-budget_source = "harvest+probe"
 
 [accounts.codex]
 harness       = "codex"
 billing       = "subscription"
 block_at      = 0.90
-paid_overflow = false
-budget_source = "harvest+probe"
 
 [accounts.grok]
 harness       = "grok"
 billing       = "subscription"
 block_at      = 0.90
-paid_overflow = false
-budget_source = "none"
 
 [accounts.agy]
 harness       = "agy"
 billing       = "metered"
 block_at      = 0.90
-budget_source = "computed"
 
 [harness.claude]
 min_version = "2.1.283"
@@ -238,7 +231,6 @@ idle_limit = "10m"
 wall_limit = { light = "15m", daily = "30m", heavy = "60m", frontier = "90m" }
 max_dispatches = 6
 keep_awake = true
-cooling_period = "1h"
 run_pause_after_escalations = 3
 run_pause_after_same_error = 2
 

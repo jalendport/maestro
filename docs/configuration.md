@@ -25,23 +25,20 @@ Keys of `accounts.<id>`:
 | `plan_price` | float | none | Gives the plan price in USD, which Maestro multiplies by Headroom to break a tie between equally fit subscription Lanes. |
 | `block_at` | float | `0.90` | Sets the used share of a window at which the Account's Lanes leave the Route list. |
 | `reserve` | float | none | Keeps this share of the weekly window for the Orchestrator, so automatic Dispatches cannot use it. |
-| `paid_overflow` | boolean | `false` | Reserved: Maestro reads the value, and no verb uses it yet. |
-| `budget_source` | string | none | Names where the Budget comes from: `harvest+probe`, `computed`, or `none`. |
 | `budget` | table | none | Sets the spend cap of a `metered` Account. |
 | `budget.usd` | float | none | Sets the cap in USD. |
 | `budget.period` | string | none | Sets the period of the cap, for example `30d`. |
-| `base_url` | string | none | Reserved: Maestro reads the value, and no verb uses it yet. |
 
 A new Account in your file starts from `billing = "subscription"` and `block_at = 0.90`. For an Account that has a default entry, Maestro changes only the keys you write.
 
 Default entries:
 
-| Account | `harness` | `billing` | `block_at` | `paid_overflow` | `budget_source` |
-|---|---|---|---|---|---|
-| `claude` | `"claude"` | `"subscription"` | `0.90` | `false` | `"harvest+probe"` |
-| `codex` | `"codex"` | `"subscription"` | `0.90` | `false` | `"harvest+probe"` |
-| `grok` | `"grok"` | `"subscription"` | `0.90` | `false` | `"none"` |
-| `agy` | `"agy"` | `"metered"` | `0.90` | none | `"computed"` |
+| Account | `harness` | `billing` | `block_at` |
+|---|---|---|---|
+| `claude` | `"claude"` | `"subscription"` | `0.90` |
+| `codex` | `"codex"` | `"subscription"` | `0.90` |
+| `grok` | `"grok"` | `"subscription"` | `0.90` |
+| `agy` | `"agy"` | `"metered"` | `0.90` |
 
 ### [harness]
 
@@ -248,9 +245,8 @@ These keys set when Maestro stops a Dispatch and when it stops a Run. A duration
 | `wall_limit` | table of durations | see below | Sets the longest total time of a Dispatch for each Tier. |
 | `max_dispatches` | integer | `6` | Sets how many Dispatches a Task may use before Maestro fails it instead of re-routing it. |
 | `keep_awake` | boolean | `true` | Keeps the Mac awake with `caffeinate` while a Dispatch or a Run is live. |
-| `cooling_period` | duration | `"1h"` | Reserved: Maestro reads the value, and no verb uses it yet. |
-| `run_pause_after_escalations` | integer | `3` | Reserved: Maestro reads the value, and no verb uses it yet. |
-| `run_pause_after_same_error` | integer | `2` | Reserved: Maestro reads the value, and no verb uses it yet. |
+| `run_pause_after_escalations` | integer | `3` | Sets the number of consecutive Task hand-offs to the Orchestrator that pauses a Run; a completed Task resets the count. Maestro prints the count and Task number; running Dispatches finish, and no new Dispatch starts. |
+| `run_pause_after_same_error` | integer | `2` | Sets the number of Task hand-offs with the same first error line that pauses a Run; the count accumulates until the Run resumes. Maestro prints the count, Task number, and error; running Dispatches finish, and no new Dispatch starts. |
 
 Default `wall_limit`:
 
@@ -270,8 +266,8 @@ These keys set how many Lanes run at the same time.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `max_parallel` | integer | `4` | Sets how many Council Seats or Run Tasks run at the same time. |
-| `max_per_account` | integer | `2` | Reserved: Maestro reads the value, and no verb uses it yet. |
-| `max_total` | integer | `6` | Reserved: Maestro reads the value, and no verb uses it yet. |
+| `max_per_account` | integer | `2` | Caps concurrent Run Dispatches on one Account across the machine. A Task waits with `account cap <id>` until a slot is free. |
+| `max_total` | integer | `6` | Caps concurrent Run Dispatches across the machine. A Task waits with `machine cap` until a slot is free. |
 | `close_tabs` | string | `"on-success"` | Chooses when Maestro closes the Solo tab of a Lane: `on-success` closes it after a verified, answered, or unverified result, `always` closes it every time, and `never` leaves it open. |
 
 ## .agents/maestro.toml
@@ -281,7 +277,6 @@ This file is in the root of a project. It can only tighten what the user file al
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `forbid` | array of strings | none | Lists the Families that Maestro never routes to in this project. |
-| `pattern_setting` | string | none | Reserved: Maestro reads the value, and no verb uses it yet. |
 | `checks` | array of strings | none | Lists the commands that Maestro runs after every edit Dispatch, and that the Lane may run. |
 | `allow` | array of strings | none | Lists extra permission rules that Maestro gives to every edit Dispatch in this project. |
 | `router` | string | none | When it is `rules`, Maestro never calls Jev for this project, so no text of the project leaves the machine. |

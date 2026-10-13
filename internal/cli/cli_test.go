@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jalendport/maestro/internal/config"
@@ -49,5 +52,54 @@ func TestDoctorFailsForInstalledHarnessError(t *testing.T) {
 	}
 	if _, err := os.Stat(config.DiscoveryFile()); !os.IsNotExist(err) {
 		t.Fatalf("discovery cache error = %v", err)
+	}
+}
+
+func TestDoctorWarnsOnceForRemovedUserKeys(t *testing.T) {
+	// Build retired names in parts so the source search lists only live keys.
+	for _, tc := range []struct {
+		section, key, value string
+	}{
+		{"accounts.claude", "paid_" + "overflow", "true"},
+		{"accounts.claude", "budget_" + "source", `"harvest+probe"`},
+		{"accounts.claude", "base_" + "url", `"https://example.test"`},
+		{"failure", "cooling_" + "period", `"1h"`},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
+			t.Setenv("PATH", "")
+			t.Setenv("SOLO_PROCESS_ID", "")
+			src := fmt.Sprintf("[%s]\n%s = %s\n", tc.section, tc.key, tc.value)
+			if err := os.WriteFile(config.UserFile(), []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, unknown, err := config.LoadUser()
+			key := tc.section + "." + tc.key
+			if err != nil || len(unknown) != 1 || unknown[0] != key {
+				t.Fatalf("load error = %v, unknown = %v", err, unknown)
+			}
+			stderr, err := os.CreateTemp(t.TempDir(), "doctor-stderr")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stderr.Close()
+			previous := os.Stderr
+			os.Stderr = stderr
+			defer func() { os.Stderr = previous }()
+			root := (&app{}).build()
+			root.SetArgs([]string{"doctor"})
+			captureStdout(t, root.Execute)
+			if _, err := stderr.Seek(0, 0); err != nil {
+				t.Fatal(err)
+			}
+			output, err := io.ReadAll(stderr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			warning := fmt.Sprintf("unknown key %q", key)
+			if strings.Count(string(output), warning) != 1 {
+				t.Fatalf("doctor output = %q, want one %q", output, warning)
+			}
+		})
 	}
 }

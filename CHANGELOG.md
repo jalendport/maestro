@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `maestro --version` to print the installed version
 
 ### Removed
+- Removed the unused config keys `accounts.<id>.paid_overflow`, `accounts.<id>.budget_source`, `accounts.<id>.base_url`, `failure.cooling_period`, and project `pattern_setting`
 - Removed the Claude Code plugin; anyone who installed it runs `claude plugin uninstall maestro@jalendport`
 
 ## 1.0.0 - 2026-10-13

@@ -311,15 +311,6 @@ func withAccountDefaults(a, base config.Account) config.Account {
 	if a.Has("reserve") {
 		base.Reserve = a.Reserve
 	}
-	if a.Has("paid_overflow") {
-		base.PaidOverflow = a.PaidOverflow
-	}
-	if a.Has("budget_source") {
-		base.BudgetSource = a.BudgetSource
-	}
-	if a.Has("base_url") {
-		base.BaseURL = a.BaseURL
-	}
 	if a.Has("budget") && a.Cap != nil {
 		cap := config.Cap{}
 		if base.Cap != nil {
@@ -456,9 +447,6 @@ func mergeFailure(dst *config.Failure, u config.Failure) {
 	}
 	if u.KeepAwake != nil {
 		dst.KeepAwake = u.KeepAwake
-	}
-	if u.CoolingPeriod.Duration != 0 {
-		dst.CoolingPeriod = u.CoolingPeriod
 	}
 	if u.RunPauseAfterEscalations != 0 {
 		dst.RunPauseAfterEscalations = u.RunPauseAfterEscalations

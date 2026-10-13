@@ -31,16 +31,13 @@ type File struct {
 
 // Account is one login that Lanes bill against.
 type Account struct {
-	Harness      string  `toml:"harness"`
-	Billing      string  `toml:"billing"` // subscription | metered
-	PlanPrice    float64 `toml:"plan_price"`
-	BlockAt      float64 `toml:"block_at"`
-	Reserve      float64 `toml:"reserve"`
-	PaidOverflow bool    `toml:"paid_overflow"`
-	BudgetSource string  `toml:"budget_source"`
-	Cap          *Cap    `toml:"budget"`
-	BaseURL      string  `toml:"base_url"`
-	defined      map[string]bool
+	Harness   string  `toml:"harness"`
+	Billing   string  `toml:"billing"` // subscription | metered
+	PlanPrice float64 `toml:"plan_price"`
+	BlockAt   float64 `toml:"block_at"`
+	Reserve   float64 `toml:"reserve"`
+	Cap       *Cap    `toml:"budget"`
+	defined   map[string]bool
 }
 
 // Has reports whether the user wrote an Account field. Programmatic Accounts
@@ -113,7 +110,6 @@ type Failure struct {
 	WallLimit                map[string]Duration `toml:"wall_limit"`
 	MaxDispatches            int                 `toml:"max_dispatches"`
 	KeepAwake                *bool               `toml:"keep_awake"`
-	CoolingPeriod            Duration            `toml:"cooling_period"`
 	RunPauseAfterEscalations int                 `toml:"run_pause_after_escalations"`
 	RunPauseAfterSameError   int                 `toml:"run_pause_after_same_error"`
 }
@@ -143,14 +139,13 @@ func (d Duration) MarshalText() ([]byte, error) { return []byte(d.String()), nil
 // Project is the shape of .agents/maestro.toml: five tighten-only keys plus
 // the per-project Claude permission switch from the permission contract.
 type Project struct {
-	Forbid         []string `toml:"forbid"`
-	PatternSetting string   `toml:"pattern_setting"`
-	Checks         []string `toml:"checks"`
-	Allow          []string `toml:"allow"`
-	Router         string   `toml:"router"`
-	Redact         []string `toml:"redact"`
-	Councils       string   `toml:"councils"`
-	ClaudeAuto     bool     `toml:"claude_auto"`
+	Forbid     []string `toml:"forbid"`
+	Checks     []string `toml:"checks"`
+	Allow      []string `toml:"allow"`
+	Router     string   `toml:"router"`
+	Redact     []string `toml:"redact"`
+	Councils   string   `toml:"councils"`
+	ClaudeAuto bool     `toml:"claude_auto"`
 	// Dirs are extra writable directories for every edit Dispatch in this
 	// project (a toolchain cache, for example). A Brief's dirs: adds to them.
 	Dirs []string `toml:"dirs"`
@@ -176,7 +171,7 @@ func ParseFile(src string) (*File, []string, error) {
 	}
 	for id, account := range f.Accounts {
 		account.defined = map[string]bool{}
-		for _, field := range []string{"harness", "billing", "plan_price", "block_at", "reserve", "paid_overflow", "budget_source", "budget", "base_url"} {
+		for _, field := range []string{"harness", "billing", "plan_price", "block_at", "reserve", "budget"} {
 			account.defined[field] = md.IsDefined("accounts", id, field)
 		}
 		for _, field := range []string{"usd", "period"} {

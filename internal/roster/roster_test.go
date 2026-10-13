@@ -117,7 +117,7 @@ plan_price = 10
 	}
 	r := Merge(d, u)
 	claude := r.Accounts["claude"]
-	if claude.PlanPrice != 20 || claude.Reserve != d.Accounts["claude"].Reserve || claude.Harness != "claude" || claude.BlockAt != .9 || claude.BudgetSource != "harvest+probe" {
+	if claude.PlanPrice != 20 || claude.Reserve != d.Accounts["claude"].Reserve || claude.Harness != "claude" || claude.BlockAt != .9 {
 		t.Fatalf("lost defaults: %+v", claude)
 	}
 	agy := r.Accounts["agy"]
@@ -126,30 +126,26 @@ plan_price = 10
 	}
 }
 
-func TestAccountExplicitZeroAndFalseOverrideDefaults(t *testing.T) {
+func TestAccountExplicitZeroOverrideDefaults(t *testing.T) {
 	d, _, _ := config.ParseFile(`[accounts.claude]
 harness = "claude"
 billing = "subscription"
 reserve = 0.35
 plan_price = 200
 block_at = 0.9
-paid_overflow = true
-base_url = "https://example.test"
 budget = { usd = 20, period = "30d" }
 `)
 	u, _, err := config.ParseFile(`[accounts.claude]
 reserve = 0
 plan_price = 0
 block_at = 0
-paid_overflow = false
-base_url = ""
 budget = { usd = 0 }
 `)
 	if err != nil {
 		t.Fatal(err)
 	}
 	account := Merge(d, u).Accounts["claude"]
-	if account.Reserve != 0 || account.PlanPrice != 0 || account.BlockAt != 0 || account.PaidOverflow || account.BaseURL != "" || account.Cap.USD != 0 || account.Cap.Period != "30d" || account.Harness != "claude" {
+	if account.Reserve != 0 || account.PlanPrice != 0 || account.BlockAt != 0 || account.Cap.USD != 0 || account.Cap.Period != "30d" || account.Harness != "claude" {
 		t.Fatalf("explicit values lost: %+v", account)
 	}
 	if d.Accounts["claude"].Cap.USD != 20 {
