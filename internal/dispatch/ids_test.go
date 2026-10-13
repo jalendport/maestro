@@ -27,8 +27,8 @@ func TestNextRunID(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if got := NextRunID(root); got != tt.want {
-				t.Fatalf("NextRunID() = %q, want %q", got, tt.want)
+			if got, err := NextRunID(root); err != nil || got != tt.want {
+				t.Fatalf("NextRunID() = %q, %v, want %q", got, err, tt.want)
 			}
 			if info, err := os.Stat(filepath.Join(config.RunsDir(root), tt.want)); err != nil || !info.IsDir() {
 				t.Fatalf("reserved folder: info=%v err=%v", info, err)
@@ -45,7 +45,11 @@ func TestNextRunIDConcurrent(t *testing.T) {
 	for i := 0; i < count; i++ {
 		go func() {
 			<-start
-			ids <- NextRunID(root)
+			id, err := NextRunID(root)
+			if err != nil {
+				t.Error(err)
+			}
+			ids <- id
 		}()
 	}
 	close(start)
@@ -71,13 +75,10 @@ func TestNextRunIDAllocationError(t *testing.T) {
 	if err := os.WriteFile(runsDir, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		failure := recover()
-		if failure == nil || !strings.Contains(fmt.Sprint(failure), "reserve Run id:") {
-			t.Fatalf("panic = %v, want Run id allocation error", failure)
-		}
-	}()
-	NextRunID(root)
+	id, err := NextRunID(root)
+	if id != "" || err == nil || !strings.Contains(err.Error(), "reserve Run id:") {
+		t.Fatalf("NextRunID() = %q, %v, want Run id allocation error", id, err)
+	}
 }
 
 func TestNewTaskID(t *testing.T) {

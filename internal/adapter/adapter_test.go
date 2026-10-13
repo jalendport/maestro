@@ -379,13 +379,13 @@ func TestOwnedHookSets(t *testing.T) {
 			path := filepath.Join(home, spec.HookFile)
 			source := `{"before":{"z":1,"a":2},"maestro":{"PreToolUse":[]},"after":true}`
 			put(t, path, source)
-			actions(t, Install(name, home, "skill"), "created", "created", "updated")
+			actions(t, Install(name, home, "skill"), "created", "created", "created")
 			root, err := decode(read(t, path))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if name == "grok" {
-				if !equal(root, object(member{"hooks", hookSet(spec)})) {
+				if !equal(root.get("hooks"), hookSet(spec)) || !equal(root.get("after"), scalar(true)) || root.get("before") == nil {
 					t.Fatal(string(read(t, path)))
 				}
 			} else {
@@ -396,6 +396,44 @@ func TestOwnedHookSets(t *testing.T) {
 				if !bytes.Equal(mustJSON(t, before.get("before")), mustJSON(t, root.get("before"))) || !equal(before.get("after"), root.get("after")) {
 					t.Fatal("other sets changed")
 				}
+			}
+			actions(t, Install(name, home, "skill"), "unchanged", "unchanged", "unchanged")
+		})
+	}
+}
+
+func TestInstallKeepsForeignHandlersInMaestroEntry(t *testing.T) {
+	for _, name := range Harnesses {
+		t.Run(name, func(t *testing.T) {
+			home := testHome(t)
+			spec, _ := Spec(name)
+			path := filepath.Join(home, spec.HookFile)
+			key := "hooks"
+			if name == "agy" {
+				key = "maestro"
+			}
+			source := `{"` + key + `":{"PreToolUse":[{"matcher":"shared","extra":"keep","hooks":[{"command":"before","type":"command"},{"command":"maestro hook old","type":"command","timeout":99},{"command":"after","type":"command"}]}]}}`
+			put(t, path, source)
+			before, err := decode([]byte(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			actions(t, Install(name, home, "skill"), "created", "created", "updated")
+			after, err := decode(read(t, path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldEntry := before.get(key).get("PreToolUse").array[0]
+			newEntry := after.get(key).get("PreToolUse").array[0]
+			oldHooks, newHooks := oldEntry.get("hooks"), newEntry.get("hooks")
+			if len(newHooks.array) != 3 || !equal(oldHooks.array[0], newHooks.array[0]) || !equal(oldHooks.array[2], newHooks.array[2]) || !equal(newHooks.array[1], entry(spec).get("hooks").array[0]) {
+				t.Fatalf("handlers changed: %s", read(t, path))
+			}
+			if !equal(oldEntry.get("matcher"), newEntry.get("matcher")) || !equal(oldEntry.get("extra"), newEntry.get("extra")) {
+				t.Fatal("shared entry fields changed")
+			}
+			if got := State(name, home); got.Hook != "ok" {
+				t.Fatal(got)
 			}
 			actions(t, Install(name, home, "skill"), "unchanged", "unchanged", "unchanged")
 		})

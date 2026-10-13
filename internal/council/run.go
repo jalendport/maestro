@@ -14,6 +14,7 @@ import (
 	"github.com/jalendport/maestro/internal/jev"
 	"github.com/jalendport/maestro/internal/ledger"
 	"github.com/jalendport/maestro/internal/router"
+	"github.com/jalendport/maestro/internal/solo"
 	"github.com/jalendport/maestro/internal/ui"
 )
 
@@ -44,7 +45,7 @@ func Start(env *dispatch.Env, folder string) (*Council, error) {
 		_ = c.Save()
 		runRound(env, c, round)
 		_ = c.Save()
-		if round < c.RoundsAsked && allConfirmed(c, round) {
+		if round > 1 && round < c.RoundsAsked && allConfirmed(c, round) {
 			ui.Eventf("council", "%s  every seat confirmed after round %d; stopping early", c.Slug, round)
 			break
 		}
@@ -135,7 +136,7 @@ func runSeat(env *dispatch.Env, c *Council, s *Seat, round int, roundDir string,
 		return
 	}
 	b.Path = filepath.Join(seatDir, "brief.source.md")
-	req := router.Request{Seat: s.Family, SeatEffort: s.Effort, Access: brief.AccessRead, Level: c.Level, Project: env.Project, InSolo: dispatch.InSolo()}
+	req := router.Request{Seat: s.Family, SeatEffort: s.Effort, Access: brief.AccessRead, Level: c.Level, Project: env.Project, InSolo: solo.InSolo()}
 	task, err := dispatch.PrepareIn(env, b, req, c.Slug, s.Family, roundDir)
 	if err != nil {
 		sr.Status = "failed"
@@ -155,15 +156,12 @@ func runSeat(env *dispatch.Env, c *Council, s *Seat, round int, roundDir string,
 	sr.DurationS = rec.DurationS
 	report, found := rec.Report()
 	switch {
-	case !found || rec.Outcome.Outcome == dispatch.OutcomeFailed || rec.Outcome.Outcome == dispatch.OutcomeTimedOut:
+	case !found || rec.Outcome.Outcome != dispatch.OutcomeAnswered || report.Position == "" || strings.TrimSpace(report.Sections["Answer"]) == "":
 		sr.Status = "dropped"
-		sr.Error = rec.Outcome.FailureClass + ": " + firstLine(rec.Outcome.ErrorText)
+		sr.Error = rec.Outcome.FailureClass + ": " + ui.FirstLine(rec.Outcome.ErrorText, 80)
 	default:
 		sr.Status = "ok"
 		sr.Position = report.Position
-		if sr.Position == "" {
-			sr.Position = "confirmed"
-		}
 		// The canonical per-Seat file: <family>.md beside the Seat folder.
 		dst := filepath.Join(roundDir, s.Family+".md")
 		_ = os.WriteFile(dst, []byte(report.Raw), 0o644)
@@ -315,16 +313,6 @@ func merge(env *dispatch.Env, c *Council) {
 			c.Filtered = append(c.Filtered, f)
 		}
 	}
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	if len(s) > 80 {
-		s = s[:80] + "…"
-	}
-	return s
 }
 
 func titleCase(s string) string {

@@ -48,7 +48,7 @@ func ParsePlanText(src string) (*Plan, error) {
 	front, body := SplitFrontMatter(src)
 	p := &Plan{}
 	if front != "" {
-		if err := yaml.Unmarshal([]byte(front), &p.Defaults); err != nil {
+		if err := decodeFields(front, &p.Defaults); err != nil {
 			return nil, fmt.Errorf("front matter: %w", err)
 		}
 	}
@@ -155,7 +155,7 @@ func parseTaskSection(title, section string, defaults Fields) (*Brief, error) {
 	}
 	if len(fieldLines) > 0 {
 		var f Fields
-		if err := yaml.Unmarshal([]byte(strings.Join(fieldLines, "\n")), &f); err != nil {
+		if err := decodeFields(strings.Join(fieldLines, "\n"), &f); err != nil {
 			return nil, fmt.Errorf("fields: %w", err)
 		}
 		b.Fields = mergeFields(defaults, f)

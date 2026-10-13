@@ -1,11 +1,12 @@
 // Package proc holds the small helpers shared by every verb that runs a child
-// process: the exit-code error that rides up to main, and shell quoting for
-// faithful command echoes.
+// process: the exit-code error that rides up to main and sleep prevention.
 package proc
 
 import (
 	"errors"
-	"strings"
+	"os"
+	"os/exec"
+	"strconv"
 )
 
 // Exit codes: 0 ok, 1 failed, 2 needs the Orchestrator.
@@ -34,22 +35,18 @@ func Code(err error) (int, bool) {
 	return 0, false
 }
 
-// Quote POSIX-quotes each arg and joins them with spaces so a shell (or a
-// human copy-pasting an echoed command) sees exactly the original tokens.
-func Quote(args []string) string {
-	parts := make([]string, len(args))
-	for i, a := range args {
-		parts[i] = quoteOne(a)
+// KeepAwake starts caffeinate tied to this process; no-op when off or absent.
+func KeepAwake(on bool) func() {
+	if !on {
+		return nil
 	}
-	return strings.Join(parts, " ")
-}
-
-func quoteOne(s string) string {
-	if s == "" {
-		return "''"
+	path, err := exec.LookPath("caffeinate")
+	if err != nil {
+		return nil
 	}
-	if !strings.ContainsAny(s, " \t\n'\"\\$`&|;<>()*?![]{}#~") {
-		return s
+	c := exec.Command(path, "-s", "-w", strconv.Itoa(os.Getpid()))
+	if err := c.Start(); err != nil {
+		return nil
 	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	return func() { _ = c.Process.Kill(); _, _ = c.Process.Wait() }
 }

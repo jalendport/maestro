@@ -9,7 +9,6 @@ import (
 
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/jev"
-	"github.com/jalendport/maestro/internal/ui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -41,8 +40,7 @@ func (a *app) keyCmd() *cobra.Command {
 			if err := jev.SaveKey(key); err != nil {
 				return err
 			}
-			ui.Successf("key written to %s", config.EnvFile())
-			return nil
+			return a.result(map[string]any{"state": "saved", "path": config.EnvFile()}, "key written to %s", config.EnvFile())
 		},
 	})
 	return c

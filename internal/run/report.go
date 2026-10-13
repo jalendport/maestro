@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/dispatch"
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
@@ -21,7 +22,7 @@ func Report(s *State) string {
 	if ended.IsZero() {
 		ended = time.Now()
 	}
-	fmt.Fprintf(&w, "run %s  %s  %s %s  %s  %d tasks: %d done", s.Run, s.Title, s.State, ended.Format("15:04"), fmtDur(ended.Sub(s.StartedAt)), len(s.Tasks), done)
+	fmt.Fprintf(&w, "run %s  %s  %s %s  %s  %d tasks: %d done", s.Run, s.Title, s.State, ended.Format("15:04"), ui.Duration(ended.Sub(s.StartedAt)), len(s.Tasks), done)
 	if blocked > 0 {
 		fmt.Fprintf(&w, ", %d blocked", blocked)
 	}
@@ -47,7 +48,7 @@ func Report(s *State) string {
 		case TaskBlocked:
 			needs = append(needs, fmt.Sprintf("task %d  blocked: %s  → answer, edit the Brief, or skip (maestro resume %s --task %d ...)", t.Number, blockedText(t), s.Run, t.Number))
 		case TaskFailed:
-			needs = append(needs, fmt.Sprintf("task %d  failed after %d attempt(s): %s  → maestro resume %s --task %d --lane F | --brief <file> | --skip", t.Number, t.Attempt, firstLine(t.Error), s.Run, t.Number))
+			needs = append(needs, fmt.Sprintf("task %d  failed after %d attempt(s): %s  → maestro resume %s --task %d --lane F | --brief <file> | --skip", t.Number, t.Attempt, ui.FirstLine(t.Error, 80), s.Run, t.Number))
 		case TaskWaiting:
 			if t.Waiting != "" {
 				needs = append(needs, fmt.Sprintf("task %d  %s", t.Number, t.Waiting))
@@ -116,7 +117,7 @@ func blockedText(t *TaskState) string {
 	if rec, err := dispatch.LoadRecord(t.Folder); err == nil && len(rec.Permission.Blocked) > 0 {
 		return strings.Join(rec.Permission.Blocked, "; ")
 	}
-	return firstLine(t.Error)
+	return ui.FirstLine(t.Error, 80)
 }
 
 // Status renders the live view of maestro status.
@@ -142,11 +143,11 @@ func Status(s *State) string {
 		var tail string
 		switch t.State {
 		case TaskRunning:
-			tail = fmt.Sprintf("%-4d %s   idle %s", t.Attempt+1, fmtDur(now.Sub(t.StartedAt)), fmtDur(now.Sub(t.LastOutput)))
+			tail = fmt.Sprintf("%-4d %s   idle %s", t.Attempt+1, ui.Duration(now.Sub(t.StartedAt)), ui.Duration(now.Sub(t.LastOutput)))
 		case TaskWaiting:
 			tail = fmt.Sprintf("—    %s", t.Waiting)
 		default:
-			tail = fmt.Sprintf("%-4d %s", t.Attempt, fmtDur(t.EndedAt.Sub(t.StartedAt)))
+			tail = fmt.Sprintf("%-4d %s", t.Attempt, ui.Duration(t.EndedAt.Sub(t.StartedAt)))
 		}
 		lane := laneWord(t)
 		if t.Provisional {
@@ -165,15 +166,4 @@ func cutTitle(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
-}
-
-func fmtDur(d time.Duration) string {
-	if d < 0 {
-		d = 0
-	}
-	d = d.Round(time.Second)
-	if d >= time.Hour {
-		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
-	}
-	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }

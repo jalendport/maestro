@@ -52,8 +52,16 @@ func (a *app) runCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printPlan(s)
+			if !a.json {
+				printPlan(s)
+			}
 			if s.State == run.StateHeld {
+				if a.json {
+					if err := a.result(s, ""); err != nil {
+						return err
+					}
+					return &proc.ExitError{Code: proc.CodeOrchestrator}
+				}
 				for _, ap := range s.Approval {
 					ui.Outf("approval needed: %s", ap)
 				}
@@ -123,8 +131,7 @@ func (a *app) startRun(env *dispatch.Env, s *run.State, wait bool) error {
 	if err := detachRun(s.Folder); err != nil {
 		return err
 	}
-	ui.Outf("run %s started  (maestro status %s; maestro wait %s)", s.Run, s.Run, s.Run)
-	return nil
+	return a.result(s, "run %s started  (maestro status %s; maestro wait %s)", s.Run, s.Run, s.Run)
 }
 
 func detachRun(folder string) error {
@@ -245,19 +252,22 @@ func (a *app) resumeCmd() *cobra.Command {
 			if err := os.WriteFile(filepath.Join(folder, "control", fmt.Sprintf("resume-%s-%d.json", t.ID, time.Now().UnixNano())), b, 0o644); err != nil {
 				return err
 			}
-			switch {
-			case skip:
-				ui.Outf("task %s skipped", t.ID)
-			case lane != "":
-				ui.Outf("task %s re-routed on %s  requested   attempt %d of %d", t.ID, lane, t.Attempt+1, env.Roster.Failure.MaxDispatches)
-			default:
-				ui.Outf("task %s will restart with the brief %s", t.ID, briefPath)
+			if !a.json {
+				switch {
+				case skip:
+					ui.Outf("task %s skipped", t.ID)
+				case lane != "":
+					ui.Outf("task %s re-routed on %s  requested   attempt %d of %d", t.ID, lane, t.Attempt+1, env.Roster.Failure.MaxDispatches)
+				default:
+					ui.Outf("task %s will restart with the brief %s", t.ID, briefPath)
+				}
 			}
 			if _, live := run.LiveRunFor(env.Root); live {
-				ui.Outf("run %s is live; the supervisor picks the answer up", s.Run)
-				return nil
+				return a.result(map[string]any{"run": s.Run, "state": s.State, "task": t.ID, "resume": ans}, "run %s is live; the supervisor picks the answer up", s.Run)
 			}
-			ui.Outf("run %s resumed", s.Run)
+			if !a.json {
+				ui.Outf("run %s resumed", s.Run)
+			}
 			return a.startRun(env, s, wait)
 		},
 	}
@@ -294,8 +304,7 @@ func (a *app) addCmd() *cobra.Command {
 			if err := os.WriteFile(dst, src, 0o644); err != nil {
 				return err
 			}
-			ui.Outf("task queued on run %s", idx.Run)
-			return nil
+			return a.result(map[string]any{"run": idx.Run, "state": "queued", "brief": args[0]}, "task queued on run %s", idx.Run)
 		},
 	}
 }
@@ -320,21 +329,18 @@ func (a *app) cancelCmd() *cobra.Command {
 					if err := os.WriteFile(filepath.Join(idx.Folder, "control", "cancel-"+t.ID), nil, 0o644); err != nil {
 						return err
 					}
-					ui.Outf("task %s (%d) cancel requested on run %s", t.ID, t.Number, s.Run)
-					return nil
+					return a.result(map[string]any{"run": s.Run, "task": t.ID, "state": "cancel_requested"}, "task %s (%d) cancel requested on run %s", t.ID, t.Number, s.Run)
 				}
 			}
 			if folder, ok := dispatch.FindTask(env.Root, args[0]); ok {
 				if _, err := os.Stat(filepath.Join(filepath.Dir(folder), "run.json")); os.IsNotExist(err) {
 					if rec, err := dispatch.LoadRecord(folder); err == nil && rec.State == "ended" {
-						ui.Outf("task %s already finished (%s)", rec.Task, rec.Outcome.Outcome)
-						return nil
+						return a.result(map[string]any{"task": rec.Task, "state": rec.State, "outcome": rec.Outcome.Outcome}, "task %s already finished (%s)", rec.Task, rec.Outcome.Outcome)
 					}
 					if err := dispatch.RequestCancel(folder); err != nil {
 						return err
 					}
-					ui.Outf("task %s cancel requested", args[0])
-					return nil
+					return a.result(map[string]any{"task": args[0], "state": "cancel_requested"}, "task %s cancel requested", args[0])
 				}
 			}
 			folder, s, err := findRun(env.Root, args[0])
@@ -342,8 +348,7 @@ func (a *app) cancelCmd() *cobra.Command {
 				return fmt.Errorf("no live task or run %q under %s", args[0], env.Root)
 			}
 			if s.State == run.StateFinished || s.State == run.StateCancelled {
-				ui.Outf("run %s already finished (%s)", s.Run, s.State)
-				return nil
+				return a.result(s, "run %s already finished (%s)", s.Run, s.State)
 			}
 			if err := os.MkdirAll(filepath.Join(folder, "control"), 0o755); err != nil {
 				return err
@@ -351,11 +356,13 @@ func (a *app) cancelCmd() *cobra.Command {
 			if err := os.WriteFile(filepath.Join(folder, "control", "cancel"), nil, 0o644); err != nil {
 				return err
 			}
-			ui.Outf("run %s cancel requested", s.Run)
 			if live && idx.Run == s.Run {
-				return nil
+				return a.result(map[string]any{"run": s.Run, "state": "cancel_requested"}, "run %s cancel requested", s.Run)
 			}
-			return run.Start(env, folder)
+			if err := run.Start(env, folder); err != nil {
+				return err
+			}
+			return a.result(map[string]any{"run": s.Run, "state": run.StateCancelled}, "run %s cancel requested", s.Run)
 		},
 	}
 }
@@ -378,6 +385,9 @@ func (a *app) statusCmd() *cobra.Command {
 				return err
 			}
 			root := config.FindProjectRoot(cwd)
+			if root == "" {
+				return fmt.Errorf("the home directory cannot be a project root; change to a project folder")
+			}
 			status := projectStatus{Runs: []*run.State{}, Dispatches: []*dispatch.Record{}, Councils: []*council.Council{}}
 			if len(args) == 1 {
 				id := args[0]
@@ -483,6 +493,9 @@ func (a *app) cleanCmd() *cobra.Command {
 			}
 			cwd, _ := os.Getwd()
 			root := config.FindProjectRoot(cwd)
+			if root == "" {
+				return fmt.Errorf("the home directory cannot be a project root; change to a project folder")
+			}
 			live := map[string]bool{}
 			for _, idx := range run.LiveRuns() {
 				live[idx.Folder] = true
@@ -504,8 +517,7 @@ func (a *app) cleanCmd() *cobra.Command {
 					}
 				}
 			}
-			ui.Outf("removed %d folder(s) older than %s", removed, olderThan)
-			return nil
+			return a.result(map[string]any{"removed": removed, "older_than": olderThan}, "removed %d folder(s) older than %s", removed, olderThan)
 		},
 	}
 	c.Flags().StringVar(&olderThan, "older-than", "30d", "age threshold, for example 30d or 12h")
@@ -587,6 +599,9 @@ func (a *app) answerCmd() *cobra.Command {
 			}
 			cwd, _ := os.Getwd()
 			root := config.FindProjectRoot(cwd)
+			if root == "" {
+				return fmt.Errorf("the home directory cannot be a project root; change to a project folder")
+			}
 			folder, ok := dispatch.FindTask(root, args[0])
 			if !ok {
 				return fmt.Errorf("no task %q under %s", args[0], root)
@@ -594,8 +609,7 @@ func (a *app) answerCmd() *cobra.Command {
 			if err := os.WriteFile(filepath.Join(folder, "answer-"+args[1]), nil, 0o644); err != nil {
 				return err
 			}
-			ui.Outf("task %s: %s", args[0], args[1])
-			return nil
+			return a.result(map[string]any{"task": args[0], "answer": args[1]}, "task %s: %s", args[0], args[1])
 		},
 	}
 }
@@ -621,7 +635,10 @@ func (a *app) tellCmd() *cobra.Command {
 			if err != nil || rec.SoloProcess == 0 || rec.State != "running" {
 				return fmt.Errorf("task %s has no running Solo tab", args[0])
 			}
-			return env.Solo.Client.SendInput(rec.SoloProcess, strings.Join(args[1:], " ")+"\n")
+			if err := env.Solo.Client.SendInput(rec.SoloProcess, strings.Join(args[1:], " ")+"\n"); err != nil {
+				return err
+			}
+			return a.result(map[string]any{"task": args[0], "state": "sent"}, "task %s: note sent", args[0])
 		},
 	}
 }

@@ -21,8 +21,10 @@ import (
 	"github.com/jalendport/maestro/internal/discovery"
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/ledger"
+	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
+	"github.com/jalendport/maestro/internal/solo"
 	"github.com/jalendport/maestro/internal/ui"
 	"github.com/jalendport/maestro/internal/verify"
 )
@@ -171,9 +173,6 @@ func nearestReset(ws []harness.Window, fallback time.Time) time.Time {
 	return best
 }
 
-// InSolo reports whether this process runs inside a Solo tab.
-func InSolo() bool { return os.Getenv("SOLO_PROCESS_ID") != "" }
-
 // Prepare routes one Brief and lays out its Run folder. It returns the Task
 // to execute, inline or in a detached supervisor.
 func Prepare(env *Env, b *brief.Brief, req router.Request, runID, taskID string) (*Task, error) {
@@ -196,13 +195,16 @@ func PrepareIn(env *Env, b *brief.Brief, req router.Request, runID, taskID, runD
 	req.Brief = b
 	req.Project = env.Project
 	req.Access = b.EffectiveAccess()
-	req.InSolo = InSolo()
+	req.InSolo = solo.InSolo()
 	route, err := rt.Route(req)
 	if err != nil {
 		return nil, err
 	}
 	if runID == "" {
-		runID = NextRunID(env.Root)
+		runID, err = NextRunID(env.Root)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if runDir == "" {
 		if err := config.EnsureIgnoredDir(config.RunsDir(env.Root)); err != nil {
@@ -237,7 +239,7 @@ func PrepareIn(env *Env, b *brief.Brief, req router.Request, runID, taskID, runD
 		Project: env.Root, Run: runID, Task: taskID, BriefPath: b.Path, Title: b.Title,
 		Category: route.Category, Access: req.Access, Commit: b.WantsCommit(), Touch: b.Touch, Dirs: dirs,
 		Checks: b.Checks, WallLimit: wall.String(), IdleLimit: env.Roster.Failure.IdleLimit.Duration.String(),
-		Route: route, Folder: folder, ClaudeAuto: env.Project != nil && env.Project.ClaudeAuto, InSolo: InSolo(),
+		Route: route, Folder: folder, ClaudeAuto: env.Project != nil && env.Project.ClaudeAuto, InSolo: solo.InSolo(),
 		MaxAttempt: 2, Council: req.Seat != "",
 	}
 	// A new Route for the same Task keeps the existing Solo todo.
@@ -272,8 +274,10 @@ func Execute(env *Env, t *Task) (*Record, error) {
 		}
 		t.Route.Family = f
 	}
-	stopAwake := keepAwake(env.Roster.KeepAwake())
-	defer stopAwake()
+	stopAwake := proc.KeepAwake(env.Roster.KeepAwake())
+	if stopAwake != nil {
+		defer stopAwake()
+	}
 
 	var rec *Record
 	var retry *brief.Retry
@@ -295,25 +299,33 @@ attempts:
 	for attempt := first; attempt <= t.MaxAttempt; attempt++ {
 		clearAnswers(t.Folder)
 		rec = runOnce(env, t, b, attempt, retry)
-		if err := ledger.Append(rec); err != nil {
-			ui.Warnf("ledger: %v", err)
+		wait, again := retryWait(rec.Outcome.FailureClass)
+		// The Run supervisor records its final attempt after the escalation decision.
+		if !t.LedgerByRun {
+			if err := ledger.Append(rec); err != nil {
+				ui.Warnf("ledger: %v", err)
+			}
 		}
 		if !t.Council {
 			env.Solo.ReportComment(t, rec)
 		}
 		env.Solo.CloseTab(env, rec)
-		wait, again := retryWait(rec.Outcome.FailureClass)
 		if !again || attempt == t.MaxAttempt {
 			break
 		}
-		ui.Eventf("retry", "task %s  %s: %s; retrying on %s in %s", t.Task, rec.Outcome.FailureClass, firstLine(rec.Outcome.ErrorText), t.Route.FamilyID, wait)
-		archiveAttempt(t.Folder, attempt)
+		ui.Eventf("retry", "task %s  %s: %s; retrying on %s in %s", t.Task, rec.Outcome.FailureClass, ui.FirstLine(rec.Outcome.ErrorText, 0), t.Route.FamilyID, wait)
 		retry = &brief.Retry{Attempt: attempt + 1, Reason: rec.Outcome.FailureClass}
 		select {
 		case <-time.After(wait):
 		case <-t.Cancel:
 			break attempts
 		}
+		if t.LedgerByRun {
+			if err := ledger.Append(rec); err != nil {
+				ui.Warnf("ledger: %v", err)
+			}
+		}
+		archiveAttempt(t.Folder, attempt)
 	}
 	return rec, nil
 }
@@ -363,7 +375,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		rec.Outcome.ErrorText = cut(text, 500)
 		rec.Outcome.Status = ""
 		finish(rec)
-		ui.Eventf("failed", "task %s  %s: %s", t.Task, class, firstLine(text))
+		ui.Eventf("failed", "task %s  %s: %s", t.Task, class, ui.FirstLine(text, 0))
 		return rec
 	}
 
@@ -797,7 +809,7 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 			rec.Outcome.FailureClass = FailBad
 			for _, c := range rec.Verification.Checks {
 				if !c.OK {
-					rec.Outcome.ErrorText = fmt.Sprintf("check failed: %s: %s", c.Command, firstLine(c.Output))
+					rec.Outcome.ErrorText = fmt.Sprintf("check failed: %s: %s", c.Command, ui.FirstLine(c.Output, 0))
 					break
 				}
 			}
@@ -881,22 +893,6 @@ func terminate(cmd *exec.Cmd, waitDone <-chan error) error {
 	}
 }
 
-// keepAwake starts caffeinate -s tied to this process; no-op when off or absent.
-func keepAwake(on bool) func() {
-	if !on {
-		return func() {}
-	}
-	path, err := exec.LookPath("caffeinate")
-	if err != nil {
-		return func() {}
-	}
-	c := exec.Command(path, "-s", "-w", strconv.Itoa(os.Getpid()))
-	if err := c.Start(); err != nil {
-		return func() {}
-	}
-	return func() { _ = c.Process.Kill(); _, _ = c.Process.Wait() }
-}
-
 // classifyErr maps stderr or error text to a class word for the failure path.
 func classifyErr(harnessName, text string) string {
 	return harness.ClassifyText(harnessName, text).Class
@@ -907,13 +903,6 @@ func cut(s string, n int) string {
 		return s
 	}
 	return s[:n]
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
 }
 
 func tail(path string, n int) string {
@@ -989,7 +978,7 @@ func runTab(env *Env, t *Task, h harness.Harness, command *harness.Command, laun
 		rec.Outcome.Outcome = OutcomeFailed
 		rec.Outcome.ErrorText = cut(err.Error(), 500)
 		finish(rec)
-		ui.Eventf("failed", "task %s  %s: %s", t.Task, FailLane, firstLine(err.Error()))
+		ui.Eventf("failed", "task %s  %s: %s", t.Task, FailLane, ui.FirstLine(err.Error(), 0))
 		return rec
 	}
 	if timer == "cancelled" {

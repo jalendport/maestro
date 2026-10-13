@@ -21,9 +21,6 @@ const (
 	NoShape    = ""
 )
 
-// ErrNotReady marks an adapter that has a catalog but no launch shape yet.
-var ErrNotReady = errors.New("this harness has no dispatch shape in this build")
-
 // Model is one catalog entry.
 type Model struct {
 	ID            string   `json:"id"`

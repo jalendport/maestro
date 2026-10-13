@@ -17,6 +17,7 @@ import (
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 func TestCommittedAttemptReachesScopeGuardAndGateDiff(t *testing.T) {
@@ -64,7 +65,7 @@ func TestCheckFailureNamesCommandAndFirstOutputLine(t *testing.T) {
 			rec := &Record{Path: folder}
 			task := &Task{Project: root, Access: brief.AccessEdit}
 			judge(env, task, rec, brief.ParseReport("STATUS: done\n"), []string{command}, &brief.Brief{}, attemptBaseline{})
-			want := "check failed: " + command + ": " + firstLine(rec.Verification.Checks[0].Output)
+			want := "check failed: " + command + ": " + ui.FirstLine(rec.Verification.Checks[0].Output, 0)
 			if rec.Outcome.ErrorText != want || rec.Outcome.Outcome != OutcomeFailed {
 				t.Fatalf("outcome: %+v, want %q", rec.Outcome, want)
 			}
@@ -110,7 +111,7 @@ func TestNoChecksReasonAppearsInPrintedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(firstLine(string(printed)), "no checks configured") {
+	if !strings.Contains(ui.FirstLine(string(printed), 0), "no checks configured") {
 		t.Fatalf("print: %s", printed)
 	}
 }

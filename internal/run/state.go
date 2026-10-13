@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
 )
@@ -228,9 +229,12 @@ var ErrNoRun = errors.New("no run found")
 
 // NewestRun returns the newest Run folder in a project.
 func NewestRun(root string) (string, error) {
-	entries, _ := os.ReadDir(config.RunsDir(root))
-	for i := len(entries) - 1; i >= 0; i-- {
-		p := filepath.Join(config.RunsDir(root), entries[i].Name())
+	entries, err := dispatch.RunFolders(root)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	for _, entry := range entries {
+		p := filepath.Join(config.RunsDir(root), entry.Name())
 		if _, err := os.Stat(filepath.Join(p, FileState)); err == nil {
 			return p, nil
 		}

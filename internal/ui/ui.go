@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -22,8 +24,7 @@ var (
 	labelStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#9CA3AF"})
 )
 
-// Quiet suppresses everything on stdout except the verb's record; set by
-// --quiet and implied by --json.
+// Quiet suppresses human event lines on stdout; set by --quiet.
 var Quiet bool
 
 // Warnf prints a styled warning to stderr.
@@ -61,4 +62,27 @@ func Successf(format string, a ...any) {
 // Fprintln writes a plain line to the given writer.
 func Fprintln(w io.Writer, s string) {
 	fmt.Fprintln(w, s)
+}
+
+// FirstLine returns the first line, with an optional display limit (0 is unlimited).
+func FirstLine(s string, limit int) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if limit > 0 && len(s) > limit {
+		s = s[:limit] + "…"
+	}
+	return s
+}
+
+// Duration formats elapsed time for Run, Dispatch, and Council output.
+func Duration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	d = d.Round(time.Second)
+	if d >= time.Hour {
+		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }

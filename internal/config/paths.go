@@ -64,12 +64,20 @@ func EnsureHome() error {
 }
 
 // FindProjectRoot walks up from dir to the nearest folder that holds .git or
-// .agents; the current directory is the root when neither is found. Maestro
+// .agents/maestro.toml; the current directory is the root when neither is found. Maestro
 // needs a root for the Run folder and the scope guard, not for its global verbs.
+// The home directory cannot be a project root; starting there returns no root.
 func FindProjectRoot(dir string) string {
+	home, _ := os.UserHomeDir()
 	d := dir
 	for {
-		for _, marker := range []string{".git", ".agents"} {
+		if filepath.Clean(d) == filepath.Clean(home) {
+			if filepath.Clean(dir) == filepath.Clean(home) {
+				return ""
+			}
+			return dir
+		}
+		for _, marker := range []string{".git", filepath.Join(".agents", "maestro.toml")} {
 			if _, err := os.Stat(filepath.Join(d, marker)); err == nil {
 				return d
 			}

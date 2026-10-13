@@ -12,7 +12,8 @@ func TestFindProjectRoot(t *testing.T) {
 		marker string
 	}{
 		{name: "git ancestor", marker: ".git"},
-		{name: "agents ancestor", marker: ".agents"},
+		{name: "project file ancestor", marker: ".agents/maestro.toml"},
+		{name: "bare agents", marker: ".agents"},
 		{name: "no marker"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -23,15 +24,47 @@ func TestFindProjectRoot(t *testing.T) {
 			}
 			want := start
 			if tt.marker != "" {
-				if err := os.Mkdir(filepath.Join(root, tt.marker), 0o755); err != nil {
+				if tt.marker == ".agents/maestro.toml" {
+					if err := os.MkdirAll(filepath.Join(root, ".agents"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(root, tt.marker), nil, 0o644); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := os.Mkdir(filepath.Join(root, tt.marker), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				want = root
+				if tt.marker != ".agents" {
+					want = root
+				}
 			}
 			if got := FindProjectRoot(start); got != want {
 				t.Fatalf("FindProjectRoot(%q) = %q, want %q", start, got, want)
 			}
 		})
+	}
+}
+
+func TestFindProjectRootSkipsHomeMarkers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, marker := range []string{".git", ".agents/skills"} {
+		if err := os.MkdirAll(filepath.Join(home, marker), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(home, ".agents", "maestro.toml"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	start := filepath.Join(home, "work", "folder")
+	if err := os.MkdirAll(start, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := FindProjectRoot(start); got != start {
+		t.Fatalf("root = %q, want working directory %q", got, start)
+	}
+	if got := FindProjectRoot(home); got != "" {
+		t.Fatalf("home must have no project root, got %q", got)
 	}
 }
 

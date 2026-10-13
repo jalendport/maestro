@@ -17,6 +17,7 @@ import (
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/jev"
 	"github.com/jalendport/maestro/internal/roster"
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 // Request is everything a Route needs.
@@ -171,7 +172,7 @@ func (rt *Router) Route(req Request) (*Route, error) {
 		}
 		useLevel := level
 		if !f.Serves(useLevel) {
-			useLevel = nearestLevel(f, level)
+			useLevel = f.NearestLevel(level)
 		}
 		if roster.FanOut(f.Levels[useLevel]) || roster.FanOut(req.SeatEffort) {
 			return nil, fmt.Errorf("fan-out effort requires an explicit Lane and effort")
@@ -232,7 +233,7 @@ func (rt *Router) Route(req Request) (*Route, error) {
 		r.RulesPick = rulesFamily.ID
 		r.Band = "fallback"
 		r.TieBreak = tie
-		r.ReasonLine = reason(r, "rules fallback ("+firstLine(why)+")")
+		r.ReasonLine = reason(r, "rules fallback ("+ui.FirstLine(why, 60)+")")
 		return r, nil
 	}
 	if rulesFamily == nil {
@@ -244,29 +245,6 @@ func (rt *Router) Route(req Request) (*Route, error) {
 	r.TieBreak = tie
 	r.ReasonLine = reason(r, "rules table")
 	return r, nil
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	if len(s) > 60 {
-		s = s[:60] + "…"
-	}
-	return s
-}
-
-func levelForTier(t roster.Tier) roster.Level {
-	switch t {
-	case roster.TierLight:
-		return roster.LevelNone
-	case roster.TierDaily:
-		return roster.LevelSome
-	case roster.TierFrontier:
-		return roster.LevelExpert
-	default:
-		return roster.LevelSignificant
-	}
 }
 
 // candidates removes disabled, request-only, forbidden, excluded, and
@@ -476,7 +454,7 @@ func (rt *Router) requested(req Request, level, estimate roster.Level, category 
 	}
 	useLevel := level
 	if !f.Serves(useLevel) {
-		useLevel = nearestLevel(f, level)
+		useLevel = f.NearestLevel(level)
 		if useLevel != level {
 			warnings = append(warnings, fmt.Sprintf("family serves level %s, not %s", useLevel, level))
 		}
@@ -499,19 +477,6 @@ func (rt *Router) requested(req Request, level, estimate roster.Level, category 
 	r.OverrideWarning = strings.Join(warnings, "; ")
 	r.ReasonLine = reason(r, "requested")
 	return r, nil
-}
-
-func nearestLevel(f *roster.Family, want roster.Level) roster.Level {
-	var best roster.Level
-	for _, l := range roster.Levels {
-		if !f.Serves(l) {
-			continue
-		}
-		if best == "" || l.Rank() <= want.Rank() {
-			best = l
-		}
-	}
-	return best
 }
 
 func (rt *Router) finish(f *roster.Family, level, estimate roster.Level, category, access, source string, defaults []string, excluded []Exclusion) *Route {
@@ -576,10 +541,10 @@ func titleCase(s string) string {
 // constrainedLevel applies the same level bounds to the estimate and Jev score.
 func constrainedLevel(req Request, level roster.Level) roster.Level {
 	if req.Floor != "" && roster.TierOf(level).Rank() < req.Floor.Rank() {
-		level = levelForTier(req.Floor)
+		level = roster.LevelForTier(req.Floor)
 	}
 	if req.Ceiling != "" && roster.TierOf(level).Rank() > req.Ceiling.Rank() {
-		level = levelForTier(req.Ceiling)
+		level = roster.LevelForTier(req.Ceiling)
 	}
 	if req.Access == brief.AccessEdit && level == roster.LevelNone {
 		level = roster.LevelSome

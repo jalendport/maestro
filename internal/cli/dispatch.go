@@ -66,20 +66,7 @@ func (a *app) dispatchCmd() *cobra.Command {
 					if err != nil {
 						return err
 					}
-					printSeats(env, c)
-					if wait {
-						if _, err := council.Start(env, c.Path); err != nil {
-							return err
-						}
-						done, _ := council.Load(c.Path)
-						council.PrintMerge(done, a.json)
-						return nil
-					}
-					if err := detachCouncil(c.Path); err != nil {
-						return err
-					}
-					ui.Outf("council %s started.  Collect with: maestro wait %s", c.Slug, c.Slug)
-					return nil
+					return a.startCouncil(env, c, wait)
 				}
 				return err
 			}

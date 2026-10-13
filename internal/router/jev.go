@@ -6,7 +6,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/jev"
 	"github.com/jalendport/maestro/internal/roster"
 )
@@ -205,5 +204,3 @@ func secondOption(probs map[string]float64, first string) (string, float64) {
 	}
 	return all[0].k, all[0].v
 }
-
-var _ = brief.AccessRead

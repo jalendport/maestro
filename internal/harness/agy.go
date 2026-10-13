@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
-	"time"
 )
 
 // Agy is the Antigravity CLI adapter: read only (its edit needs the bypass
@@ -156,5 +155,3 @@ func (p *agyParser) Line(line []byte) bool {
 	p.buf.WriteByte('\n')
 	return len(strings.TrimSpace(string(line))) > 0
 }
-
-var _ = time.Second

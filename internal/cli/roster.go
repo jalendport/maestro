@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
-	"github.com/jalendport/maestro/internal/discovery"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/roster"
@@ -220,8 +219,6 @@ func ago(t time.Time) string {
 	}
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
-
-var _ = discovery.MaxAge
 
 func soloPresetNote(env *dispatch.Env, name string) string {
 	if id := env.Roster.Harness[name].SoloTool; id != 0 {

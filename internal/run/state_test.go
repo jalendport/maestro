@@ -36,6 +36,25 @@ func TestStateTask(t *testing.T) {
 	}
 }
 
+func TestNewestRunUsesDescendingNumericOrder(t *testing.T) {
+	root := t.TempDir()
+	for _, id := range []string{"r-0001", "r-9999", "r-10000", "r-10001"} {
+		folder := filepath.Join(config.RunsDir(root), id)
+		if err := os.MkdirAll(folder, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if id != "r-10001" {
+			if err := (&State{Run: id, Folder: folder}).Save(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	want := filepath.Join(config.RunsDir(root), "r-10000")
+	if got, err := NewestRun(root); err != nil || got != want {
+		t.Fatalf("NewestRun() = %q, %v; want %q", got, err, want)
+	}
+}
+
 func TestStateCounts(t *testing.T) {
 	s := &State{Tasks: []*TaskState{
 		{State: TaskWaiting},

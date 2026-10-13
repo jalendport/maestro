@@ -53,20 +53,7 @@ func (a *app) councilCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printSeats(env, c)
-			if wait {
-				if _, err := council.Start(env, c.Path); err != nil {
-					return err
-				}
-				done, _ := council.Load(c.Path)
-				council.PrintMerge(done, a.json)
-				return nil
-			}
-			if err := detachCouncil(c.Path); err != nil {
-				return err
-			}
-			ui.Outf("started.  Collect with: maestro wait %s", c.Slug)
-			return nil
+			return a.startCouncil(env, c, wait)
 		},
 	}
 	c.Flags().IntVar(&seats, "seats", 3, "number of Seats, 2 to 4")
@@ -177,17 +164,38 @@ func (a *app) waitCouncil(folder string) error {
 			return err
 		}
 		if c.State == "finished" {
-			council.PrintMerge(c, a.json)
-			if c.SingleOpinion {
-				return &proc.ExitError{Code: proc.CodeOrchestrator}
-			}
-			return nil
+			return a.printCouncilMerge(c)
 		}
 		if time.Since(started) > 5*time.Second && !council.SupervisorAlive(c) {
 			return &proc.ExitError{Code: proc.CodeFailed, Message: fmt.Sprintf("council %s: its supervisor is gone; see %s", c.Slug, filepath.Join(folder, "supervisor.log"))}
 		}
 		time.Sleep(2 * time.Second)
 	}
+}
+
+func (a *app) printCouncilMerge(c *council.Council) error {
+	council.PrintMerge(c, a.json)
+	if c.SingleOpinion {
+		return &proc.ExitError{Code: proc.CodeOrchestrator}
+	}
+	return nil
+}
+
+func (a *app) startCouncil(env *dispatch.Env, c *council.Council, wait bool) error {
+	if !a.json {
+		printSeats(env, c)
+	}
+	if wait {
+		done, err := council.Start(env, c.Path)
+		if err != nil {
+			return err
+		}
+		return a.printCouncilMerge(done)
+	}
+	if err := detachCouncil(c.Path); err != nil {
+		return err
+	}
+	return a.result(map[string]any{"slug": c.Slug, "seats": c.Seats, "state": c.State}, "council %s started.  Collect with: maestro wait %s", c.Slug, c.Slug)
 }
 
 func relPath(root, p string) string {

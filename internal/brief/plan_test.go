@@ -26,7 +26,7 @@ Add it.
 
 ## Document the probe command
 - category: prose
-- access: read
+- access: edit
 - blocked_by: [1]
 
 ### Goal
@@ -58,7 +58,7 @@ func TestParsePlan(t *testing.T) {
 	if a.Access != "edit" || a.Category != "implement" || a.Touch[0] != "internal/probe/**" || len(a.BlockedBy) != 0 {
 		t.Fatalf("task 1: %+v", a.Fields)
 	}
-	if d.Access != "read" || d.BlockedBy[0] != "Add the probe command" {
+	if d.Access != "edit" || d.BlockedBy[0] != "Add the probe command" {
 		t.Fatalf("task 2: %+v", d.Fields)
 	}
 	if r.Access != "edit" || r.EffectiveAccess() != "edit" || r.BlockedBy[0] != "Add the probe command" {

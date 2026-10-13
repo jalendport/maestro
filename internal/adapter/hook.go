@@ -71,25 +71,22 @@ func preToolUse(root *value) (*value, error) {
 func mergeHook(harness string, root *value, spec HarnessSpec) (*value, string, error) {
 	switch harness {
 	case "grok":
-		desired := object(member{"hooks", hookSet(spec)})
-		if equal(root, desired) {
-			return root, "unchanged", nil
-		}
-		return desired, "updated", nil
+		return mergeHook("codex", root, spec)
 	case "agy":
 		if root.kind != '{' {
 			return nil, "error", fmt.Errorf("hook file must be a JSON object")
 		}
 		old := root.get("maestro")
-		desired := hookSet(spec)
-		if equal(old, desired) {
-			return root, "unchanged", nil
+		wrapper := object()
+		if old != nil {
+			wrapper.set("hooks", old)
 		}
-		root.set("maestro", desired)
-		if old == nil {
-			return root, "created", nil
+		_, state, err := mergeHook("codex", wrapper, spec)
+		if err != nil {
+			return nil, state, err
 		}
-		return root, "updated", nil
+		root.set("maestro", wrapper.get("hooks"))
+		return root, state, nil
 	default:
 		entries, err := preToolUse(root)
 		if err != nil {
@@ -101,10 +98,30 @@ func mergeHook(harness string, root *value, spec HarnessSpec) (*value, string, e
 			entries.array = append(entries.array, desired)
 			return root, "created", nil
 		}
-		if equal(entries.array[index], desired) {
+		item := entries.array[index]
+		handlers := item.get("hooks")
+		if len(handlers.array) == 1 {
+			if equal(item, desired) {
+				return root, "unchanged", nil
+			}
+			entries.array[index] = desired
+			return root, "updated", nil
+		}
+		changed := false
+		for i, handler := range handlers.array {
+			command := handler.get("command")
+			if command == nil {
+				continue
+			}
+			text, ok := command.scalar.(string)
+			if ok && strings.HasPrefix(text, Command) && !equal(handler, desired.get("hooks").array[0]) {
+				handlers.array[i] = desired.get("hooks").array[0]
+				changed = true
+			}
+		}
+		if !changed {
 			return root, "unchanged", nil
 		}
-		entries.array[index] = desired
 		return root, "updated", nil
 	}
 }
@@ -186,6 +203,13 @@ func hookState(harness, path string, spec HarnessSpec) string {
 	}
 	if equal(entries.array[index], entry(spec)) {
 		return "ok"
+	}
+	if handlers := entries.array[index].get("hooks"); len(handlers.array) > 1 {
+		for _, handler := range handlers.array {
+			if equal(handler, entry(spec).get("hooks").array[0]) {
+				return "ok"
+			}
+		}
 	}
 	return "wrong"
 }

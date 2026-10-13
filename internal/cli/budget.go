@@ -13,7 +13,6 @@ import (
 
 	"github.com/jalendport/maestro/internal/budget"
 	"github.com/jalendport/maestro/internal/dispatch"
-	"github.com/jalendport/maestro/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -55,8 +54,7 @@ func (a *app) budgetCmd() *cobra.Command {
 			if err := env.Budget.Save(); err != nil {
 				return err
 			}
-			ui.Successf("%s recorded at %.0f%% used (manual)", args[0], pct)
-			return nil
+			return a.result(map[string]any{"account": args[0], "used": pct / 100, "source": "manual"}, "%s recorded at %.0f%% used (manual)", args[0], pct)
 		},
 	})
 	c.AddCommand(&cobra.Command{
@@ -103,8 +101,7 @@ func (a *app) budgetCmd() *cobra.Command {
 			fmt.Fprintf(os.Stderr, "Spend one of %d Codex reset credits now? [y/N] ", cl.Credits)
 			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 			if strings.TrimSpace(strings.ToLower(line)) != "y" {
-				ui.Outf("kept")
-				return nil
+				return a.result(map[string]any{"state": "kept", "credits": cl.Credits}, "kept")
 			}
 			if err := budget.ConsumeCodexReset(h.Bin()); err != nil {
 				return err
@@ -116,8 +113,7 @@ func (a *app) budgetCmd() *cobra.Command {
 				env.Budget.Unblock(id)
 				_ = env.Budget.Save()
 			}
-			ui.Successf("reset credit spent; %d left", cl.Credits)
-			return nil
+			return a.result(map[string]any{"state": "spent", "credits": cl.Credits}, "reset credit spent; %d left", cl.Credits)
 		},
 	})
 	return c

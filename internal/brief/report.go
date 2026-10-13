@@ -48,14 +48,6 @@ func ParseReport(text string) *Report {
 	return r
 }
 
-// Unshaped builds a Report from a Harness's final text when the Lane left
-// no result.md. The checks and the gate judge the work, not the shape.
-func Unshaped(text string) *Report {
-	r := ParseReport(text)
-	r.Status = StatusUnshaped
-	return r
-}
-
 // cleanList drops "none" placeholders.
 func cleanList(items []string) []string {
 	var out []string

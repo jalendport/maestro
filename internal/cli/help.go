@@ -65,7 +65,7 @@ Add a probe verb that prints ok.
 
 ## Document the probe command
 - category: prose
-- access: read
+- access: edit
 - blocked_by: [1]
 
 ### Goal

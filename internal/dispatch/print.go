@@ -10,6 +10,7 @@ import (
 
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/proc"
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 // Print writes the human result of one Dispatch
@@ -31,7 +32,7 @@ func Print(rec *Record, asJSON bool) int {
 	if rec.Route.Effort != "" {
 		lane += " " + rec.Route.Effort
 	}
-	fmt.Fprintf(os.Stdout, "task %s  %-32s %-9s %-20s attempt %d  %s\n", rec.Task, cutTitle(rec.TaskInfo.Title, 32), status, lane, rec.Attempt, fmtDur(rec.DurationS))
+	fmt.Fprintf(os.Stdout, "task %s  %-32s %-9s %-20s attempt %d  %s\n", rec.Task, cutTitle(rec.TaskInfo.Title, 32), status, lane, rec.Attempt, ui.Duration(time.Duration(rec.DurationS*float64(time.Second))))
 	if rec.Outcome.FailureClass != "" && rec.Outcome.Status == "" {
 		fmt.Fprintf(os.Stdout, "error    %s\n", rec.Outcome.ErrorText)
 		if rec.Outcome.Timer != "" {
@@ -120,12 +121,4 @@ func cutTitle(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
-}
-
-func fmtDur(s float64) string {
-	d := time.Duration(s * float64(time.Second)).Round(time.Second)
-	if d >= time.Hour {
-		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
-	}
-	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }

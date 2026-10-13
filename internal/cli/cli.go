@@ -15,6 +15,7 @@ import (
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
+	"github.com/jalendport/maestro/internal/solo"
 	"github.com/jalendport/maestro/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -50,7 +51,7 @@ func (a *app) build() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
-			ui.Quiet = a.quiet || a.json
+			ui.Quiet = a.quiet
 			return nil
 		},
 	}
@@ -72,8 +73,7 @@ func (a *app) build() *cobra.Command {
 		Use:   "version",
 		Short: "Print the version",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			fmt.Fprintln(os.Stdout, "maestro "+a.version)
-			return nil
+			return a.result(map[string]any{"version": a.version}, "maestro %s", a.version)
 		},
 	})
 	root.AddCommand(a.runCmd())
@@ -149,6 +149,9 @@ func (a *app) loadEnv(refresh, persist bool) (*dispatch.Env, error) {
 	}
 	cwd, _ := os.Getwd()
 	root := config.FindProjectRoot(cwd)
+	if root == "" {
+		return nil, fmt.Errorf("the home directory cannot be a project root; change to a project folder")
+	}
 	project, err := config.LoadProject(root)
 	if err != nil {
 		return nil, err
@@ -158,7 +161,7 @@ func (a *app) loadEnv(refresh, persist bool) (*dispatch.Env, error) {
 		return nil, err
 	}
 	env := &dispatch.Env{Roster: r, Disc: disc, Reg: reg, Project: project, Root: root, Budget: bf}
-	if dispatch.InSolo() {
+	if solo.InSolo() {
 		env.Solo = dispatch.ConnectSolo()
 		if env.Solo != nil && (refresh || soloToolsMissing(disc)) {
 			recordSoloTools(env, persist)
@@ -176,11 +179,11 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, "  "+ui.Name.Render("dispatch <brief.md>")+"      Route and dispatch one Task (returns at once; --wait to block)")
 	ui.Fprintln(out, "  "+ui.Name.Render("council <question>")+"       Ask several Lanes the same question in parallel")
 	ui.Fprintln(out, "  "+ui.Name.Render("wait <run|task|council>")+"  Block until a Run, Task, or Council ends; print its report")
-	ui.Fprintln(out, "  "+ui.Name.Render("status [run]")+"             Show the live state of a Run")
+	ui.Fprintln(out, "  "+ui.Name.Render("status [run|task|council]")+" Show Runs, Dispatches, and Councils")
 	ui.Fprintln(out, "")
 	ui.Fprintln(out, ui.Section.Render("Mid-run"))
 	ui.Fprintln(out, "  "+ui.Name.Render("add <brief.md>")+"           Add a Task to the live Run")
-	ui.Fprintln(out, "  "+ui.Name.Render("cancel <task>")+"            Cancel a Task (a running Dispatch is stopped)")
+	ui.Fprintln(out, "  "+ui.Name.Render("cancel <task|run>")+"        Cancel a Task or a Run (running Dispatches are stopped)")
 	ui.Fprintln(out, "  "+ui.Name.Render("tell <task> <text>")+"       Send a note into a running Lane (Solo tab only)")
 	ui.Fprintln(out, "  "+ui.Name.Render("answer <task> allow|deny")+" Answer a relayed permission prompt")
 	ui.Fprintln(out, "  "+ui.Name.Render("approve <run>")+"            Approve a breakdown that was held for approval")
@@ -200,18 +203,27 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, "  "+ui.Name.Render("router stats")+"             Jev vs rules agreement, verified rates per Route source")
 	ui.Fprintln(out, "  "+ui.Name.Render("key set")+"                  Store the Jev key in ~/.maestro/env (no echo)")
 	ui.Fprintln(out, "  "+ui.Name.Render("adapter [harness]")+"        Print the Adapter install lines (skill file + hook file)")
-	ui.Fprintln(out, "  "+ui.Name.Render("hook <harness>")+"           PreToolUse hook entry point (called by the Adapters)")
+	ui.Fprintln(out, "    "+ui.Name.Render("adapter install [harness]")+" Install the Adapter skill, link, and hook")
+	ui.Fprintln(out, "  "+ui.Name.Render("hook [harness]")+"           PreToolUse hook entry point (called by the Adapters)")
 	ui.Fprintln(out, "  "+ui.Name.Render("help brief|plan|report")+"   Print the Brief file, Plan file, or Report formats")
 	ui.Fprintln(out, "")
 	ui.Fprintln(out, ui.Section.Render("Route flags")+ui.Dim.Render("  (run, dispatch, council)"))
 	ui.Fprintln(out, "  --lane <family[:effort]>   Request a Lane (warns when it breaks a rule)")
-	ui.Fprintln(out, "  --floor <tier>             At least this Tier        --ceiling <tier>  At most this Tier")
+	ui.Fprintln(out, "  --floor <tier>             At least this Tier        --ceiling <tier>  At most this Tier (run, dispatch)")
 	ui.Fprintln(out, "  --level <L>                Judgment level estimate: none | some | significant | expert")
 	ui.Fprintln(out, "")
 	ui.Fprintln(out, ui.Section.Render("Output flags"))
 	ui.Fprintln(out, "  --json                     Machine output (one object)    --quiet  progress only, on stderr")
 	ui.Fprintln(out, "")
-	ui.Fprintln(out, ui.Dim.Render("Not in this build yet: roster stats."))
+}
+
+// result prints the verb's one result object or its human line.
+func (a *app) result(value any, format string, args ...any) error {
+	if a.json {
+		return json.NewEncoder(os.Stdout).Encode(value)
+	}
+	ui.Outf(format, args...)
+	return nil
 }
 
 // soloToolsMissing also refreshes old caches that did not record preset choices.

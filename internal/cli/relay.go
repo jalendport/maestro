@@ -20,6 +20,9 @@ func (a *app) relayCmd() *cobra.Command {
 					return err
 				}
 				root := config.FindProjectRoot(cwd)
+				if root == "" {
+					return fmt.Errorf("the home directory cannot be a project root; change to a project folder")
+				}
 				var ok bool
 				folder, ok = dispatch.FindTask(root, args[0])
 				if !ok {

@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
+
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 // PrintMerge writes the Merge.
@@ -32,7 +33,7 @@ func Merge(c *Council) string {
 		header = fmt.Sprintf("council %s  %s  %d rounds  %d of %d seats answered", c.Slug, titleCase(string(c.Tier)), c.RoundsRun, answered, len(c.Seats))
 	}
 	if !c.EndedAt.IsZero() {
-		header += "  " + fmtDur(c.EndedAt.Sub(c.StartedAt))
+		header += "  " + ui.Duration(c.EndedAt.Sub(c.StartedAt))
 	}
 	if c.SingleOpinion {
 		header += "  (single opinion, not a council)"
@@ -103,12 +104,4 @@ func Merge(c *Council) string {
 		fmt.Fprintf(&w, "reports  %s\n", strings.Join(paths, "  "))
 	}
 	return w.String()
-}
-
-func fmtDur(d time.Duration) string {
-	d = d.Round(time.Second)
-	if d >= time.Hour {
-		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
-	}
-	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }

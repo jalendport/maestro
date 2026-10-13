@@ -13,7 +13,6 @@ import (
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/jev"
 	"github.com/jalendport/maestro/internal/proc"
-	"github.com/jalendport/maestro/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -161,5 +160,3 @@ func soloRow(env *dispatch.Env) doctorRow {
 	}
 	return doctorRow{Name: "solo", Detail: fmt.Sprintf("project %d, orchestrator process %d   agent tools: %s", env.Solo.ProjectID, env.Solo.Orchestrator, strings.Join(tools, ", ")), State: "ok"}
 }
-
-var _ = ui.Quiet

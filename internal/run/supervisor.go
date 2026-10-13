@@ -15,8 +15,10 @@ import (
 	"github.com/jalendport/maestro/internal/council"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/ledger"
+	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
+	"github.com/jalendport/maestro/internal/solo"
 	"github.com/jalendport/maestro/internal/ui"
 )
 
@@ -43,7 +45,10 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 	if err := config.EnsureIgnoredDir(config.RunsDir(env.Root)); err != nil {
 		return nil, err
 	}
-	runID := dispatch.NextRunID(env.Root)
+	runID, err := dispatch.NextRunID(env.Root)
+	if err != nil {
+		return nil, err
+	}
 	folder := filepath.Join(config.RunsDir(env.Root), runID)
 	if err := os.MkdirAll(filepath.Join(folder, "control"), 0o755); err != nil {
 		return nil, err
@@ -65,7 +70,7 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 		if ts.BlockedBy == nil {
 			ts.BlockedBy = []string{}
 		}
-		req := router.Request{Brief: b, Access: ts.Access, Lane: firstNonEmpty(b.Lane, o.Lane), Level: o.Level, Project: env.Project, InSolo: dispatch.InSolo()}
+		req := router.Request{Brief: b, Access: ts.Access, Lane: firstNonEmpty(b.Lane, o.Lane), Level: o.Level, Project: env.Project, InSolo: solo.InSolo()}
 		req.Floor, req.Ceiling = routeBounds(s, b)
 		route, err := rt.Route(req)
 		switch e := err.(type) {
@@ -177,7 +182,7 @@ func (sup *Supervisor) loop() error {
 		return err
 	}
 	defer RemoveIndex(s.Project, s.Run)
-	stopAwake := keepAwake(sup.Env.Roster.KeepAwake())
+	stopAwake := proc.KeepAwake(sup.Env.Roster.KeepAwake())
 	s.Awake = stopAwake != nil
 	defer func() {
 		if stopAwake != nil {
@@ -421,6 +426,7 @@ func (sup *Supervisor) start(t *TaskState) {
 		return
 	}
 	task.FirstAttempt = t.Attempt + 1
+	task.LedgerByRun = true
 	task.MaxAttempt = min(t.Attempt+2, sup.Env.Roster.Failure.MaxDispatches)
 	cancel := make(chan struct{})
 	task.Cancel = cancel
@@ -455,6 +461,18 @@ func firstNonEmpty3(a, b, c string) string { return firstNonEmpty(a, firstNonEmp
 // handle applies one finished Dispatch to the Task and the Run.
 func (sup *Supervisor) handle(r result) {
 	t := r.task
+	if r.rec != nil {
+		defer func() {
+			if r.rec.Path != "" {
+				if err := r.rec.Save(); err != nil {
+					ui.Warnf("dispatch record: %v", err)
+				}
+			}
+			if err := ledger.Append(r.rec); err != nil {
+				ui.Warnf("ledger: %v", err)
+			}
+		}()
+	}
 	delete(sup.running, t.ID)
 	t.EndedAt = time.Now()
 	if t.Cancel {
@@ -558,14 +576,16 @@ func (sup *Supervisor) escalate(t *TaskState, rec *dispatch.Record, errText stri
 		return
 	}
 	t.State = TaskWaiting
-	t.Waiting = "re-route after " + firstLine(errText)
-	ui.Eventf("escalate", "task %s  %s; re-routing above %s", t.ID, firstLine(errText), t.Route.Tier)
+	rec.Outcome.Outcome = dispatch.OutcomeEscalated
+	t.Outcome = dispatch.OutcomeEscalated
+	t.Waiting = "re-route after " + ui.FirstLine(errText, 80)
+	ui.Eventf("escalate", "task %s  %s; re-routing above %s", t.ID, ui.FirstLine(errText, 80), t.Route.Tier)
 }
 
 // noteEscalation counts Orchestrator hand-offs for the Run pause rule.
 func (sup *Supervisor) noteEscalation(t *TaskState, errText string) {
 	sup.escalationsInARow++
-	key := firstLine(errText)
+	key := ui.FirstLine(errText, 80)
 	if key != "" {
 		sup.errorTexts[key]++
 	}
@@ -880,21 +900,6 @@ func notify(text string) {
 	_ = exec.Command("osascript", "-e", fmt.Sprintf(`display notification %q with title "Maestro"`, text)).Run()
 }
 
-func keepAwake(on bool) func() {
-	if !on {
-		return nil
-	}
-	path, err := exec.LookPath("caffeinate")
-	if err != nil {
-		return nil
-	}
-	c := exec.Command(path, "-s", "-w", fmt.Sprint(os.Getpid()))
-	if err := c.Start(); err != nil {
-		return nil
-	}
-	return func() { _ = c.Process.Kill(); _, _ = c.Process.Wait() }
-}
-
 func appendUnique(xs []string, x string) []string {
 	for _, y := range xs {
 		if y == x {
@@ -902,16 +907,6 @@ func appendUnique(xs []string, x string) []string {
 		}
 	}
 	return append(xs, x)
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	if len(s) > 80 {
-		s = s[:80] + "…"
-	}
-	return s
 }
 
 // sortedTasks returns Tasks in plan order.

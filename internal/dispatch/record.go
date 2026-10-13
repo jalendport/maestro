@@ -38,31 +38,32 @@ const (
 // Task is the input half of a Dispatch, saved as task.json so a detached
 // supervisor can pick it up.
 type Task struct {
-	Project    string         `json:"project"`
-	Run        string         `json:"run"`
-	Task       string         `json:"task"`
-	BriefPath  string         `json:"brief_path"`
-	Title      string         `json:"title"`
-	Category   string         `json:"category"`
-	Access     string         `json:"access"`
-	Commit     bool           `json:"commit"`
-	Touch      []string       `json:"touch,omitempty"`
-	Dirs       []string       `json:"dirs,omitempty"`
-	Checks     []string       `json:"checks,omitempty"`
-	WallLimit  string         `json:"wall_limit"`
-	IdleLimit  string         `json:"idle_limit"`
-	Route      *router.Route  `json:"route"`
-	Request    router.Request `json:"-"`
-	Folder     string         `json:"folder"`
-	ClaudeAuto bool           `json:"claude_auto"`
-	InSolo     bool           `json:"in_solo"`
-	MaxAttempt int            `json:"max_attempts"`
+	Project    string        `json:"project"`
+	Run        string        `json:"run"`
+	Task       string        `json:"task"`
+	BriefPath  string        `json:"brief_path"`
+	Title      string        `json:"title"`
+	Category   string        `json:"category"`
+	Access     string        `json:"access"`
+	Commit     bool          `json:"commit"`
+	Touch      []string      `json:"touch,omitempty"`
+	Dirs       []string      `json:"dirs,omitempty"`
+	Checks     []string      `json:"checks,omitempty"`
+	WallLimit  string        `json:"wall_limit"`
+	IdleLimit  string        `json:"idle_limit"`
+	Route      *router.Route `json:"route"`
+	Folder     string        `json:"folder"`
+	ClaudeAuto bool          `json:"claude_auto"`
+	InSolo     bool          `json:"in_solo"`
+	MaxAttempt int           `json:"max_attempts"`
 	// Council marks a Seat Dispatch: the Report ends with POSITION, not STATUS.
 	Council bool `json:"council,omitempty"`
 	// Todo is the Solo todo of this Task, 0 outside Solo.
 	Todo int `json:"todo,omitempty"`
 	// FirstAttempt lets a re-Route inside a Run keep the attempt count.
 	FirstAttempt int `json:"first_attempt,omitempty"`
+	// LedgerByRun lets the Run record its final attempt after deciding on escalation.
+	LedgerByRun bool `json:"ledger_by_run,omitempty"`
 	// Cancel, when closed, stops the running Lane (never serialized).
 	Cancel <-chan struct{} `json:"-"`
 }
@@ -152,7 +153,6 @@ type Verification struct {
 	TouchViolations []string             `json:"touch_violations"`
 	Checks          []verify.CheckResult `json:"checks"`
 	Gate            json.RawMessage      `json:"gate,omitempty"`
-	FindingsFilter  json.RawMessage      `json:"findings_filter,omitempty"`
 }
 
 // Event is one timeline entry inside a Dispatch (never a ledger row).

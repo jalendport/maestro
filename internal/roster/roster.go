@@ -38,6 +38,31 @@ const (
 // Tiers in ladder order, lowest first.
 var Tiers = []Tier{TierLight, TierDaily, TierHeavy, TierFrontier}
 
+// LevelForTier returns the Judgment level for a Tier.
+func LevelForTier(t Tier) Level {
+	switch t {
+	case TierLight:
+		return LevelNone
+	case TierDaily:
+		return LevelSome
+	case TierFrontier:
+		return LevelExpert
+	default:
+		return LevelSignificant
+	}
+}
+
+// NearestLevel returns the closest served level at or below want, else the lowest.
+func (f *Family) NearestLevel(want Level) Level {
+	var best Level
+	for _, l := range Levels {
+		if f.Serves(l) && (best == "" || l.Rank() <= want.Rank()) {
+			best = l
+		}
+	}
+	return best
+}
+
 // TierOf maps a Judgment level to the Tier that serves it.
 func TierOf(l Level) Tier {
 	switch l {

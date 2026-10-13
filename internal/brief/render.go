@@ -13,7 +13,6 @@ type RenderOpts struct {
 	ProjectChecks []string
 	BriefChecks   []string
 	ReportPath    string
-	SoloPreamble  string
 	Retry         *Retry
 	// ReportByMessage: the Lane cannot write files (Codex read-only sandbox);
 	// its final message is the Report and the Harness writes it to the path.
@@ -38,9 +37,6 @@ func Pointer(briefPath string) string {
 // The Lane never sees the Tier, the level, the reason, effort or cost words.
 func Render(b *Brief, o RenderOpts) string {
 	var w strings.Builder
-	if o.SoloPreamble != "" {
-		w.WriteString(strings.TrimSpace(o.SoloPreamble) + "\n\n")
-	}
 	fmt.Fprintf(&w, "# %s\n\n", b.Title)
 	fmt.Fprintf(&w, "Task %s · Run %s · Access: %s\n\n", o.TaskID, o.RunID, o.Access)
 	fmt.Fprintf(&w, "## Goal\n\n%s\n\n", strings.TrimSpace(b.Goal))
@@ -79,8 +75,15 @@ func Render(b *Brief, o RenderOpts) string {
 	if o.Access == AccessEdit {
 		w.WriteString("- Edit files with your editor tools (Write, Edit), not with shell scripts or heredocs; run the checks exactly as listed, without pipes.\n")
 	}
-	w.WriteString("- Report every blocked or denied command in `## Blocked`.\n")
-	w.WriteString("- When the Done cannot be met, stop and report `STATUS: blocked` or `STATUS: partial`.\n\n")
+	if o.Access == AccessRead || o.Council {
+		w.WriteString("- Report every blocked or denied command in `## Concerns`.\n")
+	} else {
+		w.WriteString("- Report every blocked or denied command in `## Blocked`.\n")
+	}
+	if !o.Council {
+		w.WriteString("- When the Done cannot be met, stop and report `STATUS: blocked` or `STATUS: partial`.\n")
+	}
+	w.WriteString("\n")
 	if o.Council {
 		w.WriteString(CouncilShape(o.ReportPath, o.ReportByMessage))
 	} else {

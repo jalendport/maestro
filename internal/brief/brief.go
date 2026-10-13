@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -86,7 +85,7 @@ func ParseText(src string) (*Brief, error) {
 	front, body := SplitFrontMatter(src)
 	b := &Brief{Sections: map[string]string{}}
 	if front != "" {
-		if err := yaml.Unmarshal([]byte(front), &b.Fields); err != nil {
+		if err := decodeFields(front, &b.Fields); err != nil {
 			return nil, fmt.Errorf("front matter: %w", err)
 		}
 	}
@@ -237,12 +236,8 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-// sortedKeys is used for deterministic rendering of facts.
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+func decodeFields(src string, fields *Fields) error {
+	d := yaml.NewDecoder(strings.NewReader(src))
+	d.KnownFields(true)
+	return d.Decode(fields)
 }

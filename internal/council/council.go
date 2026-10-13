@@ -106,7 +106,7 @@ type Council struct {
 	DurationS     float64      `json:"duration_s"`
 	Path          string       `json:"path"`
 	Files         []string     `json:"files,omitempty"`
-	Context       string       `json:"-"`
+	Context       string       `json:"context,omitempty"`
 }
 
 const FileManifest = "council.json"
@@ -208,7 +208,7 @@ func Create(env *dispatch.Env, o Opts) (*Council, error) {
 	// Tier: given by an automatic point, else --level, else Jev's score, else Daily.
 	level := o.Level
 	if o.Tier != "" {
-		level = levelForTier(o.Tier)
+		level = roster.LevelForTier(o.Tier)
 	}
 	if level == "" {
 		level = jevLevel(env, o.Question)
@@ -235,18 +235,6 @@ func Create(env *dispatch.Env, o Opts) (*Council, error) {
 	}
 	todoFor(env, c)
 	return c, nil
-}
-
-func levelForTier(t roster.Tier) roster.Level {
-	switch t {
-	case roster.TierLight:
-		return roster.LevelNone
-	case roster.TierDaily:
-		return roster.LevelSome
-	case roster.TierFrontier:
-		return roster.LevelExpert
-	}
-	return roster.LevelSignificant
 }
 
 // jevLevel asks the Router's Jev backend for the question's Judgment level.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 // List lists standalone Dispatches that are running or ended in the last hour.
@@ -66,7 +67,7 @@ func Status(rec *Record) string {
 	if rec.SoloProcess > 0 {
 		tab = "tab yes"
 	}
-	return fmt.Sprintf("  task %s  %s  %s  attempt %d  %s  %s  %s\n", rec.Task, rec.TaskInfo.Title, lane, rec.Attempt, fmtDur(elapsed), tab, state) + RelayEvents(rec)
+	return fmt.Sprintf("  task %s  %s  %s  attempt %d  %s  %s  %s\n", rec.Task, rec.TaskInfo.Title, lane, rec.Attempt, ui.Duration(time.Duration(elapsed*float64(time.Second))), tab, state) + RelayEvents(rec)
 }
 
 func RelayEvents(rec *Record) string {
