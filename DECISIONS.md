@@ -14,7 +14,7 @@ The name is taken on Homebrew (the RunMaestro cask), npm (`maestro`, `maestro-cl
 
 - **Status:** accepted
 - **Considered options:** `baton` (free on Homebrew, abandoned npm and PyPI packages, clear on GitHub in this space); `kapell` (free on every registry, obscure); `podium`, `downbeat`, `upbeat`, `rehearsal` (weak conflicts); `tempo`, `tutti`, `cue` (strong conflicts: Temporal, the tutti-os agent platform, the CUE language).
-- **Consequences:** the README's install line always carries the tap path; a user with mobile.dev's `maestro` on PATH gets a name clash that the README names; no npm wrapper package, ever.
+- **Consequences:** the README's install line always carries the tap path; no npm wrapper package, ever.
 
 ## A passing gate verdict under the close threshold yields `unverified`, not failed
 

@@ -30,8 +30,6 @@ Or with the install script (macOS and Linux):
 curl -fsSL https://raw.githubusercontent.com/jalendport/maestro/main/install.sh | sh
 ```
 
-The binary is also named `maestro` by [mobile.dev's Maestro](https://maestro.mobile.dev), the mobile testing tool. The two share no users or purpose; if both are on your PATH, the one found first wins, so put the one you use first.
-
 Then check the machine and connect the harnesses:
 
 ```sh
