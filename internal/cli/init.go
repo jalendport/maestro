@@ -35,6 +35,16 @@ func (a *app) initCmd() *cobra.Command {
 				return fmt.Errorf("maestro init needs a project directory")
 			}
 			path := config.ProjectFile(root)
+			info, err := os.Stat(path)
+			if os.IsNotExist(err) {
+				info, err = os.Lstat(path)
+			}
+			if err == nil && !info.Mode().IsRegular() {
+				return fmt.Errorf("%s exists and is not a regular file", path)
+			}
+			if err != nil && !os.IsNotExist(err) {
+				return err
+			}
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				return err
 			}

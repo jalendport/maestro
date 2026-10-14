@@ -15,6 +15,7 @@ import (
 )
 
 func TestInitCreatesProjectFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	for _, git := range []bool{true, false} {
 		for _, machine := range []bool{false, true} {
 			name := "plain"
@@ -25,6 +26,7 @@ func TestInitCreatesProjectFile(t *testing.T) {
 				name += " JSON"
 			}
 			t.Run(name, func(t *testing.T) {
+				t.Setenv("HOME", t.TempDir())
 				project := t.TempDir()
 				cwd := project
 				if git {
@@ -76,6 +78,7 @@ func TestInitCreatesProjectFile(t *testing.T) {
 }
 
 func TestInitPreservesExistingProjectFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	project := t.TempDir()
 	if err := os.Mkdir(filepath.Join(project, ".agents"), 0o755); err != nil {
 		t.Fatal(err)
@@ -97,11 +100,47 @@ func TestInitPreservesExistingProjectFile(t *testing.T) {
 	}
 }
 
-func TestInitRefusesHomeDirectory(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
+func TestInitRefusesNonRegularProjectFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, kind := range []string{"directory", "dangling symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			project := t.TempDir()
+			path := config.ProjectFile(project)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "directory" {
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Symlink(filepath.Join(project, "missing"), path); err != nil {
+				t.Fatal(err)
+			}
+			t.Chdir(project)
+			root := (&app{}).build()
+			root.SetArgs([]string{"init"})
+			if err := root.Execute(); err == nil || err.Error() != path+" exists and is not a regular file" {
+				t.Fatalf("error = %v", err)
+			}
+			previous := os.Args
+			os.Args = []string{"maestro", "init"}
+			t.Cleanup(func() { os.Args = previous })
+			var code int
+			output := captureStdout(t, func() error { code = Execute("test"); return nil })
+			if code != proc.CodeFailed {
+				t.Fatalf("exit code = %d", code)
+			}
+			if output != "" {
+				t.Fatalf("output = %q", output)
+			}
+		})
 	}
+}
+
+func TestInitRefusesHomeDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	t.Chdir(home)
 	root := (&app{}).build()
 	root.SetArgs([]string{"init"})
@@ -119,6 +158,7 @@ func TestInitRefusesHomeDirectory(t *testing.T) {
 }
 
 func TestInitTemplateIncludesEveryProjectKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	lines := strings.Split(strings.TrimSpace(projectTemplate), "\n")
 	if lines[0] != "# Maestro project file. Its presence puts this project in hook scope." {
 		t.Fatalf("header = %q", lines[0])
@@ -155,6 +195,10 @@ func TestInitTemplateIncludesEveryProjectKey(t *testing.T) {
 }
 
 func TestInitProjectFileAppearsInDoctor(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	project := t.TempDir()
 	t.Chdir(project)
 	t.Setenv("MAESTRO_HOME", t.TempDir())
@@ -172,6 +216,7 @@ func TestInitProjectFileAppearsInDoctor(t *testing.T) {
 }
 
 func TestInitAppearsBeforeAdapterInHelp(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	root := (&app{}).build()
 	root.SetArgs([]string{"--help"})
 	output := captureStdout(t, root.Execute)
