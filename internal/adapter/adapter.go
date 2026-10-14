@@ -138,6 +138,10 @@ func Install(harness string, home string, skill string) Result {
 		state, err = ensureReminder(path)
 	} else {
 		state = states[1]
+		if err != nil {
+			state = "error"
+			err = nil
+		}
 	}
 	record("reminder", path, state, err)
 	return r

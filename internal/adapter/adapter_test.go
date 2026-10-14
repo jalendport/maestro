@@ -53,7 +53,8 @@ func actions(t *testing.T, r Result, states ...string) {
 		}
 		if a.State == "error" {
 			hasError = true
-			if !strings.Contains(a.Detail, a.Path) {
+			sharedHookError := a.Kind == "reminder" && a.Detail == "" && r.Actions[2].State == "error" && r.Actions[2].Path == a.Path
+			if !sharedHookError && !strings.Contains(a.Detail, a.Path) {
 				t.Fatalf("error does not name path: %+v", a)
 			}
 		} else if a.Detail != "" {
@@ -473,6 +474,9 @@ func TestInvalidJSON(t *testing.T) {
 				actions(t, r, "created", "created", "error", reminder)
 				if !strings.Contains(r.Actions[2].Detail, "parse JSON") {
 					t.Fatal(r)
+				}
+				if r.Err == nil || strings.Count(r.Err.Error(), "parse JSON") != 1 {
+					t.Fatalf("parse error must occur once: %v", r.Err)
 				}
 				if !bytes.Equal([]byte(source), read(t, path)) {
 					t.Fatal("invalid file changed")

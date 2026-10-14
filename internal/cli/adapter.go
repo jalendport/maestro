@@ -21,8 +21,8 @@ import (
 func (a *app) hookCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "hook [claude|codex|grok|agy]",
-		Short:  "PreToolUse and Reminder hook entry point (called by the Adapters)",
-		Long:   "Read the Harness's PreToolUse or Reminder event payload on stdin. Apply the scoped spawn rule and Antigravity Lane permissions to tool calls, or write the Reminder for an Orchestrator in scope.",
+		Short:  "Hook Carrier entry point for PreToolUse and Reminder events (called by the Adapters)",
+		Long:   "Read the Harness's PreToolUse or Reminder event payload on stdin. Apply the scoped spawn rule and Antigravity Lane permissions to tool calls. The hook Carrier writes the Reminder for an Orchestrator in scope on UserPromptSubmit (Claude Code and Codex) or PreInvocation (Antigravity). Grok uses a rules file Carrier.",
 		Args:   cobra.MaximumNArgs(1),
 		Hidden: false,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -107,8 +107,8 @@ func adapterNames(args []string) ([]string, error) {
 func (a *app) adapterCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "adapter [claude|codex|grok|agy]",
-		Short: "Print the Adapter install steps per Harness",
-		Long:  "Print the shared skill link, hook file, hook entry, and next step. Use maestro adapter install to do the steps.",
+		Short: "Print the Adapter install lines (skill file, PreToolUse hook, Reminder Carrier)",
+		Long:  "Print the shared skill link, hook file, PreToolUse entry, Reminder Carrier, and next step. The Carrier uses UserPromptSubmit (Claude Code and Codex), PreInvocation (Antigravity), or a rules file (Grok). Use maestro adapter install to do the steps.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			names, err := adapterNames(args)
@@ -127,30 +127,7 @@ func (a *app) adapterCmd() *cobra.Command {
 			fmt.Fprintln(os.Stdout, "maestro adapter prints the steps and writes nothing; maestro adapter install [harness] does them.")
 			for _, name := range names {
 				spec, _ := adapter.Paths(name, home)
-				hooks := map[string]any{}
-				for _, event := range spec.Events {
-					command, timeout := event.Command, event.Timeout
-					if command == "" {
-						command = adapter.Command
-					}
-					if timeout == 0 {
-						timeout = spec.Timeout
-					}
-					handler := map[string]any{"type": "command", "command": command, "timeout": timeout}
-					entry := map[string]any{"hooks": []any{handler}}
-					if event.Matcher {
-						entry["matcher"] = spec.Matcher
-					}
-					if event.Direct {
-						entry = handler
-					}
-					hooks[event.Name] = []any{entry}
-				}
-				key := "hooks"
-				if name == "agy" {
-					key = "maestro"
-				}
-				b, err := json.Marshal(map[string]any{key: hooks})
+				b, err := adapter.HookJSON(name)
 				if err != nil {
 					return err
 				}
@@ -172,7 +149,8 @@ func (a *app) adapterCmd() *cobra.Command {
 func (a *app) adapterInstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install [claude|codex|grok|agy]",
-		Short: "Install the Adapter skill link and hook per Harness",
+		Short: "Install the Adapter skill, link, PreToolUse hook, and Reminder Carrier",
+		Long:  "Install the shared skill, link, PreToolUse hook, and Reminder Carrier per Harness. The Carrier uses UserPromptSubmit (Claude Code and Codex), PreInvocation (Antigravity), or a rules file (Grok).",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			names, err := adapterNames(args)
@@ -214,7 +192,7 @@ func (a *app) adapterInstallCmd() *cobra.Command {
 				if !a.json {
 					for _, action := range result.Actions {
 						detail := ""
-						if action.State == "error" {
+						if action.State == "error" && action.Detail != "" {
 							detail = " " + action.Detail
 						}
 						ui.Eventf(action.Kind, "%s %s%s", action.State, action.Path, detail)

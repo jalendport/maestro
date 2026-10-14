@@ -1,11 +1,37 @@
 package adapter
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 )
+
+// HookJSON renders the same hook entries that Install writes.
+func HookJSON(harness string) (string, error) {
+	spec, ok := Spec(harness)
+	if !ok {
+		return "", fmt.Errorf("unknown harness %q", harness)
+	}
+	root := object()
+	set, err := events(root, harness, true)
+	if err != nil {
+		return "", err
+	}
+	set.object = hookSet(spec).object
+	data, err := root.MarshalJSON()
+	if err != nil {
+		return "", err
+	}
+	// The printed steps have always used sorted object keys from encoding/json.
+	var doc any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return "", err
+	}
+	data, err = json.Marshal(doc)
+	return string(data), err
+}
 
 func entry(spec HarnessSpec, event HookEvent) *value {
 	command, timeout := event.Command, event.Timeout

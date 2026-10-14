@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jalendport/maestro/internal/config"
 )
 
 func TestReminderText(t *testing.T) {
@@ -164,7 +166,7 @@ func TestGrokReminderFile(t *testing.T) {
 	if result.Actions[3].Path != path {
 		t.Fatal(result.Actions[3])
 	}
-	want := "# Maestro\n\nThis rule applies inside a project that holds `.agents/maestro.toml`, or everywhere when `[hook] scope = \"all\"` in `~/.maestro/config.toml`. Elsewhere, ignore it. If your prompt points you at a Maestro Brief file, you are a Lane, not the Orchestrator: ignore this rule and follow the Brief.\n\n" + Reminder + "\n"
+	want := "# Maestro\n\nThis rule applies inside a project that holds `.agents/maestro.toml`, or everywhere when `[hook] scope = \"all\"` in `" + config.UserFile() + "`. Elsewhere, ignore it. If your prompt points you at a Maestro Brief file, you are a Lane, not the Orchestrator: ignore this rule and follow the Brief.\n\n" + Reminder + "\n"
 	if string(read(t, path)) != want {
 		t.Fatalf("rules file = %q", read(t, path))
 	}
@@ -200,6 +202,31 @@ func TestGrokReminderFile(t *testing.T) {
 	actions(t, Install("grok", home, "skill"), "unchanged", "unchanged", "unchanged", "error")
 	if got := State("grok", home); got.Reminder != "wrong" {
 		t.Fatal(got)
+	}
+}
+
+func TestGrokReminderTracksMaestroHome(t *testing.T) {
+	home := testHome(t)
+	path := ReminderFile(home)
+	for _, maestroHome := range []string{"", filepath.Join(t.TempDir(), "home with spaces")} {
+		t.Setenv("MAESTRO_HOME", maestroHome)
+		want := "~/.maestro/config.toml"
+		if maestroHome != "" {
+			want = filepath.Join(maestroHome, "config.toml")
+		}
+		if !strings.Contains(ReminderRule(), "`"+want+"`") {
+			t.Fatal(ReminderRule())
+		}
+		if _, err := ensureReminder(path); err != nil {
+			t.Fatal(err)
+		}
+		if reminderState(path) != "ok" || string(read(t, path)) != ReminderRule() {
+			t.Fatal("rules file does not match current home")
+		}
+	}
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	if reminderState(path) != "wrong" {
+		t.Fatal("rules file with old config path accepted")
 	}
 }
 
