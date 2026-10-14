@@ -404,6 +404,11 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		if err != nil {
 			return fail(FailLane, err.Error())
 		}
+		if attempt > 1 {
+			if err := snap.inherit(t.Folder, attempt); err != nil {
+				return fail(FailLane, err.Error())
+			}
+		}
 	} else {
 		snap.Snapshot, _ = verify.Take(t.Project)
 	}

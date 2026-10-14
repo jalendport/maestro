@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jalendport/maestro/internal/verify"
@@ -97,4 +98,45 @@ func (s attemptBaseline) diff(root string, changed []string) (string, error) {
 		diff = diff[:maxDiffBytes] + "\n[diff cut]\n"
 	}
 	return diff, nil
+}
+
+// inherit carries the earlier attempts' work into this attempt's baseline.
+// Each path an earlier attempt changed is measured against the tree as it
+// stood before that attempt, and counts as changed even when this attempt
+// leaves it alone, so the gate and the end-of-run Council see the Task's
+// whole diff and not the last attempt's slice of it. The earliest attempt
+// wins for a path that several attempts changed.
+func (s *attemptBaseline) inherit(folder string, attempt int) error {
+	for n := attempt - 1; n >= 1; n-- {
+		dir := filepath.Join(folder, FileAttempts, strconv.Itoa(n))
+		rec, err := LoadRecord(dir)
+		if err != nil {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, FileBaseline))
+		if err != nil {
+			continue
+		}
+		var earlier attemptBaseline
+		if json.Unmarshal(b, &earlier) != nil {
+			continue
+		}
+		for _, p := range rec.Verification.Changed {
+			if before, ok := earlier.Contents[p]; ok {
+				s.Contents[p] = before
+			} else {
+				delete(s.Contents, p)
+			}
+			// Not dirty at the Task's start: Changed reports it from the status alone.
+			delete(s.Dirty, p)
+		}
+		if earlier.Commit != "" {
+			s.Commit = earlier.Commit
+		}
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(folder, FileBaseline), b, 0o644)
 }
