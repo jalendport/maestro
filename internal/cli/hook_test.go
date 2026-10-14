@@ -302,7 +302,10 @@ func TestHookCommandReminder(t *testing.T) {
 
 func TestHookCommandReminderInsideLane(t *testing.T) {
 	for _, harness := range []string{"", "claude", "codex", "agy", "agy detected"} {
-		for _, signal := range []string{"MAESTRO_LANE", "MAESTRO_TASK_FOLDER", "transcript"} {
+		for _, signal := range []string{"MAESTRO_LANE", "MAESTRO_TASK_FOLDER", "prompt", "transcript"} {
+			if signal == "prompt" && (harness == "agy" || harness == "agy detected") {
+				continue
+			}
 			for _, policy := range []string{"missing", "valid"} {
 				t.Run(harness+"/"+signal+"/"+policy, func(t *testing.T) {
 					t.Setenv("MAESTRO_HOME", t.TempDir())
@@ -335,6 +338,13 @@ func TestHookCommandReminderInsideLane(t *testing.T) {
 						t.Setenv(signal, "1")
 					case "MAESTRO_TASK_FOLDER":
 						t.Setenv(signal, folder)
+					case "prompt":
+						payload["prompt"] = "Read the file `" + filepath.Join(folder, "brief.md") + "` in full, then follow it."
+						transcript := filepath.Join(t.TempDir(), "empty.jsonl")
+						if err := os.WriteFile(transcript, nil, 0o600); err != nil {
+							t.Fatal(err)
+						}
+						payload[transcriptKey] = transcript
 					case "transcript":
 						transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
 						pointer := "Read the file `" + filepath.Join(folder, "brief.md") + "` in full, then follow it."

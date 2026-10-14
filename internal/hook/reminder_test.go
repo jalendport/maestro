@@ -42,6 +42,56 @@ func TestParseReminderEvents(t *testing.T) {
 	}
 }
 
+func TestReminderPromptPointer(t *testing.T) {
+	t.Setenv("MAESTRO_LANE", "")
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	transcript := filepath.Join(t.TempDir(), "empty.jsonl")
+	if err := os.WriteFile(transcript, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, harness := range []string{"", "claude", "codex"} {
+		for _, folder := range []string{
+			"/project/.agents/maestro/runs/r-test/task",
+			"/project/.agents/maestro/councils/review/seat",
+			"/project/.agents/maestro/councils/review/round-2/seat",
+		} {
+			path := folder + "/brief.md"
+			pointer := "Read the file `" + path + "` in full, then follow it."
+			for _, tc := range []struct {
+				name, prompt string
+				lane         bool
+			}{
+				{"empty", "", false},
+				{"ordinary prompt", "Explain this code.", false},
+				{"path only", path, false},
+				{"cat", "cat " + path, false},
+				{"partial sentence", "Read the file `" + path + "` in full", false},
+				{"missing period", strings.TrimSuffix(pointer, "."), false},
+				{"Pointer", pointer, true},
+				{"Pointer with Report instruction", pointer + " Write your report as the file says.", true},
+			} {
+				t.Run(harness+"/"+folder+"/"+tc.name, func(t *testing.T) {
+					payload, err := json.Marshal(map[string]any{"hook_event_name": "UserPromptSubmit", "prompt": tc.prompt, "transcript_path": transcript})
+					if err != nil {
+						t.Fatal(err)
+					}
+					call, err := Parse(harness, payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if call.Prompt != tc.prompt {
+						t.Fatalf("prompt = %q, want %q", call.Prompt, tc.prompt)
+					}
+					out := RenderReminder(call, "all")
+					if tc.lane && out != nil || !tc.lane && !strings.Contains(string(out), adapter.Reminder) {
+						t.Fatalf("Lane = %v, output = %s", tc.lane, out)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestParseToolCallPrecedesReminder(t *testing.T) {
 	for _, harness := range []string{"", "agy"} {
 		for _, fields := range []string{"", `"invocationNum":1,"hook_event_name":"UserPromptSubmit",`} {

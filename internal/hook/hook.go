@@ -29,6 +29,7 @@ func (d Decision) verdict() Verdict {
 type Call struct {
 	Harness        string
 	Event          string
+	Prompt         string
 	CWD            string
 	Tool           string
 	Input          map[string]any
@@ -62,6 +63,7 @@ func Parse(harness string, payload []byte) (*Call, error) {
 	c := &Call{Harness: harness, CWD: cwd, Input: map[string]any{}}
 	switch harness {
 	case "claude", "codex":
+		c.Prompt, _ = raw["prompt"].(string)
 		c.TranscriptPath, _ = raw["transcript_path"].(string)
 		c.Tool, _ = raw["tool_name"].(string)
 		if in, ok := raw["tool_input"].(map[string]any); ok {

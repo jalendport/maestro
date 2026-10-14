@@ -260,7 +260,7 @@ func TestFindLaneFolder(t *testing.T) {
 		{"Claude path only", "", "claude", "Read `/project/.agents/maestro/runs/r-test/abcd/brief.md`", ""},
 		{"empty transcript path", "", "claude", "", ""},
 		{"first Pointer", "", "agy", "`/project/.agents/maestro/runs/r-test/abcd/brief.md` `/project/.agents/maestro/runs/r-next/efgh/brief.md`", "/project/.agents/maestro/runs/r-test/abcd"},
-		{"past limit", "", "agy", strings.Repeat("x", 64*1024) + " `/project/.agents/maestro/runs/r-test/abcd/brief.md`", ""},
+		{"past old limit", "", "agy", strings.Repeat("x", 64*1024) + " `/project/.agents/maestro/runs/r-test/abcd/brief.md`", "/project/.agents/maestro/runs/r-test/abcd"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("MAESTRO_TASK_FOLDER", tc.env)
@@ -276,6 +276,48 @@ func TestFindLaneFolder(t *testing.T) {
 				t.Fatalf("folder = %q, %v; want %q", got, ok, tc.want)
 			}
 		})
+	}
+}
+
+func TestFindLaneFolderWholeTranscript(t *testing.T) {
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	folder := "/project/.agents/maestro/runs/r-test/abcd"
+	pointer, err := json.Marshal(map[string]string{"message": brief.Pointer(folder + "/brief.md")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathOnly, err := json.Marshal(map[string]string{"message": folder + "/brief.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := "{\"message\":\"" + strings.Repeat("x", 1024) + "\"}\n"
+	for _, harness := range []string{"claude", "codex", "agy"} {
+		for _, tc := range []struct {
+			name, text string
+			found      bool
+		}{
+			{"after 100 KB", strings.Repeat(line, 101) + string(pointer), true},
+			{"path only after 100 KB", strings.Repeat(line, 101) + string(pathOnly), harness == "agy"},
+			{"long JSONL line", "{\"message\":\"" + strings.Repeat("x", 512*1024) + "\"}\n" + string(pointer), true},
+			{"after 16 MB", strings.Repeat(line, 16*1024*1024/len(line)+1) + string(pointer), false},
+			{"path only after 16 MB", strings.Repeat(line, 16*1024*1024/len(line)+1) + string(pathOnly), false},
+			{"first match before long line", string(pointer) + "\n" + strings.Repeat("x", 2*1024*1024), true},
+		} {
+			t.Run(harness+"/"+tc.name, func(t *testing.T) {
+				transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
+				if err := os.WriteFile(transcript, []byte(tc.text), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				want := ""
+				if tc.found {
+					want = folder
+				}
+				got, found := FindLaneFolder(&Call{Harness: harness, TranscriptPath: transcript})
+				if got != want || found != tc.found {
+					t.Fatalf("folder = %q, %v; want %q, %v", got, found, want, tc.found)
+				}
+			})
+		}
 	}
 }
 

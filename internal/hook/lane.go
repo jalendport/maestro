@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -45,19 +46,18 @@ func FindLaneFolder(c *Call) (string, bool) {
 		return "", false
 	}
 	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, 64*1024))
-	if err != nil {
-		return "", false
-	}
 	pointer := lanePointer
 	if c.Harness == "claude" || c.Harness == "codex" {
 		pointer = lanePointerSentence
 	}
-	match := pointer.FindSubmatch(b)
-	if len(match) == 0 {
-		return "", false
+	scanner := bufio.NewScanner(io.LimitReader(f, 16*1024*1024))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		if match := pointer.FindSubmatch(scanner.Bytes()); len(match) > 0 {
+			return string(match[1]), true
+		}
 	}
-	return string(match[1]), true
+	return "", false
 }
 
 func LoadLane(folder string) (*Lane, bool) {
