@@ -2,19 +2,19 @@
 
 <h1 align="center">Maestro</h1>
 
-Maestro is a local command-line tool that owns agent work after the thinking is done. An orchestrating session writes a brief or a plan; Maestro routes each task to a lane that is strong enough for it across Claude Code, Codex, Grok, and Antigravity, dispatches it, checks the result, and runs councils for second opinions, with one ledger of what ran and why.
+Maestro is a small command-line tool that takes over once you and your coding agent have finished planning. The agent you are talking to writes down what needs doing as a brief or a plan, and Maestro picks a lane for each task (one of Claude Code, Codex, Grok, or Antigravity, at a given model and effort level), runs it, checks the result, and can put the same question to several models at once when you want a second opinion. Everything that ran, and why it went where it did, lands in one ledger.
 
 ## Features
 
-- **Routing with a reason** — every task goes to one harness, model, and effort, picked by [Jev](https://typesafe.ai) with a deterministic rules table as the fallback, and every route prints one reason line
-- **Subscriptions first** — day-to-day work spreads across the subscriptions you already pay for; token-billed lanes take read-only work automatically and edit work only when you request them by lane, and the orchestrator's own model is never spent automatically once you set `[router] orchestrator = "<family>"` in `~/.maestro/config.toml`
-- **Budgets that bind** — usage windows are harvested from every dispatch and probed when stale, with a block point, a warning, and a reserve for the orchestrator
-- **A permission contract** — a lane gets `read` or `edit` access through each harness's own sandbox or allowlist; Maestro never passes a bypass flag
-- **Checks and a gate** — the project's verification commands run after every edit, a `touch:` list guards the scope, and Jev judges the diff against the brief before a task closes
-- **Councils** — several lanes answer one question in parallel, with challenge rounds, and Maestro merges the findings without synthesizing them
-- **Runs** — a plan file becomes ordered tasks under concurrency caps, with a live status, a short report, a pause rule, and one-answer resumes
-- **Solo integration** — inside [Solo](https://soloterm.com), tasks are todos, lanes are tabs, results are comments, and the orchestrator is woken when a run ends
-- **Single static binary** — Go, no runtime dependencies; each harness needs only a skill file and one hook
+- **Councils** — put one question to several models at once (e.g. "is this diff safe to merge?"), let them challenge each other's answers in a second round, and get every finding back side by side, with the weak ones marked rather than dropped, so the final call stays with you
+- **Routing with a reason** — each task goes to the harness, model, and effort level that is strong enough for it, chosen by [Jev](https://typesafe.ai) (with a plain rules table as the fallback when there is no key), and every choice prints one line saying why
+- **Runs** — a plan file turns into ordered tasks that run in parallel where they can, with a live status view, a short report at the end, and a pause rule so a stuck task asks you one question instead of guessing
+- **Checks and a gate** — your project's own verification commands run after every edit, a `touch:` list keeps a task inside the files it was given, and Jev reads the diff against the brief before a task is allowed to close
+- **Subscriptions first** — everyday work spreads across the subscriptions you already pay for, while lanes billed per token get read-only work on their own and edit work only when you ask for them by name; set `[router] orchestrator = "<family>"` in `~/.maestro/config.toml` and the model you are talking to is never spent automatically
+- **Budgets that bind** — usage windows are read from every dispatch (and probed when stale), with a block point, a warning, and a reserve kept back for the session you are in
+- **A permission contract** — a lane gets `read` or `edit` access through its harness's own sandbox or allowlist, and Maestro never passes a bypass flag
+- **Solo integration** — inside [Solo](https://soloterm.com), tasks are todos, lanes are tabs, results are comments, and your session is woken when a run ends
+- **Single static binary** — Go, no runtime dependencies, and each harness needs only a skill file and a couple of hook entries
 
 ## Installation
 
