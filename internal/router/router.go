@@ -5,11 +5,13 @@ package router
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/jalendport/maestro/internal/adapter"
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/budget"
 	"github.com/jalendport/maestro/internal/config"
@@ -172,6 +174,9 @@ func (rt *Router) Route(req Request) (*Route, error) {
 		}
 		if err := rt.CheckAccess(f, req.Access); err != nil {
 			return nil, err
+		}
+		if why := rt.Preflight(f, req.Access); why != "" {
+			return nil, fmt.Errorf("family %s fails pre-flight: %s", f.ID, why)
 		}
 		if v := rt.View(f.Account); v.State == "blocked" {
 			return nil, fmt.Errorf("family %s is blocked by budget: %s", f.ID, v.Reason)
@@ -367,6 +372,12 @@ func (rt *Router) Preflight(f *roster.Family, access string) string {
 	if !ok || rec.Path == "" {
 		return f.Harness + " is not installed"
 	}
+	if f.Harness == "agy" {
+		home, err := os.UserHomeDir()
+		if err != nil || adapter.State("agy", home).Hook != "ok" {
+			return "agy needs its Maestro hook: run maestro adapter install agy"
+		}
+	}
 	if min := rt.Roster.Harness[f.Harness].MinVersion; min != "" && rec.Version != "" && harness.VersionLess(rec.Version, min) {
 		return fmt.Sprintf("needs %s ≥ %s (have %s)", f.Harness, min, rec.Version)
 	}
@@ -462,7 +473,7 @@ func (rt *Router) requested(req Request, level, estimate roster.Level, category 
 		warnings = append(warnings, "request-only family")
 	}
 	if rt.Roster.Accounts[f.Account].Billing == "metered" && req.Access == brief.AccessEdit {
-		return nil, fmt.Errorf("family %s is read-only (token-billed harness without an edit shape)", id)
+		return nil, fmt.Errorf("family %s takes read work only: its account is token-billed, and edit work goes to subscriptions", id)
 	}
 	if req.Project != nil {
 		for _, x := range req.Project.Forbid {

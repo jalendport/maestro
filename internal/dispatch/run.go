@@ -20,6 +20,7 @@ import (
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/discovery"
 	"github.com/jalendport/maestro/internal/harness"
+	"github.com/jalendport/maestro/internal/hook"
 	"github.com/jalendport/maestro/internal/ledger"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
@@ -330,10 +331,10 @@ attempts:
 	return rec, nil
 }
 
-// clearAnswers drops answer markers left by an earlier attempt or a late
-// `maestro answer`, so a prompt never gets an answer nobody gave it.
+// clearAnswers drops old Lane permissions and answer markers left by an
+// earlier attempt or a late `maestro answer`.
 func clearAnswers(folder string) {
-	for _, name := range []string{"relay.json", "relay-answer.json"} {
+	for _, name := range []string{"relay.json", "relay-answer.json", "lane.json"} {
 		_ = os.Remove(filepath.Join(folder, name))
 	}
 	for _, ans := range []string{"allow", "deny"} {
@@ -361,7 +362,7 @@ func retryWait(outcome Outcome) (time.Duration, bool) {
 func archiveAttempt(folder string, n int) {
 	dst := filepath.Join(folder, FileAttempts, strconv.Itoa(n))
 	_ = os.MkdirAll(dst, 0o755)
-	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, FileBaseline, "tab.log", "answer-allow", "answer-deny", "relay.json", "relay-answer.json"} {
+	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, FileBaseline, "tab.log", "answer-allow", "answer-deny", "relay.json", "relay-answer.json", "lane.json"} {
 		_ = os.Rename(filepath.Join(folder, f), filepath.Join(dst, f))
 	}
 }
@@ -429,7 +430,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	if t.Access == brief.AccessEdit && env.Project != nil {
 		allowRules = env.Project.Allow
 	}
-	useTab := env.Solo != nil && h.Name() != "agy" // Antigravity cannot deny interactive prompts, so it must use one-shot.
+	useTab := env.Solo != nil
 	launch := harness.Launch{
 		Model: t.Route.Model, Effort: t.Route.Effort, Access: t.Access, Root: t.Project, Dirs: t.Dirs,
 		TaskID: t.Task, AllowRules: allowRules, AllowedCommands: allChecks, AllowCommit: t.Commit, RunFolder: t.Folder, ReportPath: reportPath,
@@ -479,6 +480,16 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		ReportPath: reportRel, Retry: retry, ReportByMessage: command.ReportByText, Council: t.Council,
 	})
 	if err := os.WriteFile(filepath.Join(t.Folder, FileBrief), []byte(rendered), 0o644); err != nil {
+		return fail(FailLane, err.Error())
+	}
+	lane, err := json.MarshalIndent(hook.Lane{
+		Task: t.Task, Harness: h.Name(), Access: t.Access, Root: t.Project, Dirs: append([]string{}, t.Dirs...),
+		RunFolder: t.Folder, Allow: append([]string{}, allowRules...), Checks: allChecks, Commit: t.Commit, Tab: useTab,
+	}, "", "  ")
+	if err != nil {
+		return fail(FailLane, err.Error())
+	}
+	if err := os.WriteFile(filepath.Join(t.Folder, "lane.json"), lane, 0o644); err != nil {
 		return fail(FailLane, err.Error())
 	}
 	if useTab {

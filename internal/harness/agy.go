@@ -2,91 +2,14 @@ package harness
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 )
 
-// Agy is the Antigravity CLI adapter: read only (its edit needs the bypass
-// flag Maestro never passes). Print mode denies commands outside settings rules.
-type Agy struct {
-	bin      string
-	settings *AgySettings
-}
-
-type AgySettings struct {
-	Path     string    `json:"path"`
-	Absent   bool      `json:"absent"`
-	Commands []string  `json:"commands"`
-	ReadAt   time.Time `json:"read_at"`
-	Error    string    `json:"error,omitempty"`
-}
-
-func (a *Agy) Settings() AgySettings {
-	if a.settings != nil {
-		return *a.settings
-	}
-	return readAgySettings()
-}
-
-func readAgySettings() AgySettings {
-	s := AgySettings{ReadAt: time.Now(), Commands: []string{}}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		s.Error = err.Error()
-		return s
-	}
-	s.Path = filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")
-	b, err := os.ReadFile(s.Path)
-	if errors.Is(err, os.ErrNotExist) {
-		s.Absent = true
-		return s
-	}
-	if err != nil {
-		s.Error = err.Error()
-		return s
-	}
-	var doc struct {
-		Permissions struct {
-			Allow []string `json:"allow"`
-		} `json:"permissions"`
-	}
-	if err := json.Unmarshal(b, &doc); err != nil {
-		s.Error = err.Error()
-		return s
-	}
-	for _, rule := range doc.Permissions.Allow {
-		rule = strings.TrimSpace(rule)
-		if strings.HasPrefix(rule, "command(") && strings.HasSuffix(rule, ")") {
-			s.Commands = append(s.Commands, strings.TrimSuffix(strings.TrimPrefix(rule, "command("), ")"))
-		}
-	}
-	return s
-}
-
-func (s AgySettings) Reason() string {
-	if s.Error != "" {
-		return "settings unreadable: " + s.Error
-	}
-	for _, target := range s.Commands {
-		switch target {
-		case "cat", "ls", "head", "tail", "grep", "rg", "find", "wc", "pwd", "echo", "which", "env", "date",
-			"diff", "tree", "sort", "uniq", "cut", "basename", "dirname", "file", "stat", "realpath",
-			"git log", "git diff", "git show", "git status", "git branch", "git blame":
-			continue
-		default:
-			return "settings allow " + target
-		}
-	}
-	return ""
-}
-
-func (a *Agy) EnforcementReason() string { return a.Settings().Reason() }
+// Agy is the Antigravity CLI adapter. Maestro's hook holds the Lane's Access.
+type Agy struct{ bin string }
 
 func (a *Agy) Name() string { return "agy" }
 func (a *Agy) Bin() string  { return a.bin }
@@ -126,17 +49,13 @@ func (a *Agy) Catalog() ([]Model, string, error) {
 }
 
 func (a *Agy) Enforcement(access string) string {
-	if access == "read" {
-		if a.EnforcementReason() != "" {
-			return BestEffort
-		}
+	if access == "read" || access == "edit" {
 		return Enforced
 	}
 	return NoShape
 }
 
-// Build: the Pointer is the positional prompt; agy's effort rides in the
-// model name (gemini-3.8-flash-high), so the effort is folded into the model.
+// Build folds the effort into the model name for a one-shot Dispatch.
 func (a *Agy) Build(l Launch) (*Command, error) {
 	return a.build(l, false)
 }
@@ -149,7 +68,7 @@ func (a *Agy) build(l Launch, tab bool) (*Command, error) {
 	if a.bin == "" {
 		return nil, fmt.Errorf("agy is not installed")
 	}
-	if l.Access != "read" {
+	if l.Access != "read" && l.Access != "edit" {
 		return nil, fmt.Errorf("agy has no %q shape", l.Access)
 	}
 	model := l.Model
@@ -160,19 +79,30 @@ func (a *Agy) build(l Launch, tab bool) (*Command, error) {
 	if l.WallLimit > 0 {
 		timeout = l.WallLimit.String()
 	}
-	args := []string{"-p", l.Pointer, "--output-format", "json", "--model", model, "--print-timeout", timeout, "--disable-slash-commands", "--sandbox"}
-	flags := []string{"--print-timeout", timeout, "--sandbox"}
+	args := []string{"--sandbox", "--output-format", "json", "--model", model, "--print-timeout", timeout, "--disable-slash-commands"}
+	flags := []string{"--sandbox"}
 	if tab {
-		args = []string{"--prompt-interactive", l.Pointer, "--model", l.Model}
+		args = []string{"--sandbox", "--model", l.Model}
 		if l.Effort != "" {
 			args = append(args, "--effort", l.Effort)
 		}
-		flags = nil
+	}
+	if l.Access == "edit" {
+		flags = append(flags, "--mode", "accept-edits")
+		for _, dir := range l.Dirs {
+			flags = append(flags, "--add-dir", dir)
+		}
+	}
+	args = append(args, flags[1:]...)
+	if tab {
+		args = append(args, "--prompt-interactive", l.Pointer)
+	} else {
+		args = append(args, "-p", l.Pointer)
 	}
 	cmd := exec.Command(a.bin, args...)
 	cmd.Dir = l.Root
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Flags: flags, PromptStdin: false, ReportByText: !tab}, nil
+	return &Command{Cmd: cmd, Flags: flags}, nil
 }
 
 func (a *Agy) NewParser() Parser { return &agyParser{out: &Outcome{}} }

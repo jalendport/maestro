@@ -1,46 +1,8 @@
 package discovery
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
-
-	"github.com/jalendport/maestro/internal/harness"
 )
-
-func TestScanRecordsAgySettings(t *testing.T) {
-	for _, absent := range []bool{true, false} {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		if !absent {
-			path := filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, []byte(`{"permissions":{"allow":["command(rm)","read_file(*)"]}}`), 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}
-		bins := map[string]string{"claude": "/not-installed/claude", "codex": "/not-installed/codex", "grok": "/not-installed/grok", "agy": "/not-installed/agy"}
-		cache := Scan(harness.New(bins))
-		data, err := json.Marshal(cache)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var restored Cache
-		if err := json.Unmarshal(data, &restored); err != nil {
-			t.Fatal(err)
-		}
-		s := restored.Harness["agy"].Settings
-		if s == nil || s.Absent != absent || s.ReadAt.IsZero() {
-			t.Fatalf("settings: %+v", s)
-		}
-		if !absent && (len(s.Commands) != 1 || s.Commands[0] != "rm") {
-			t.Fatalf("commands: %v", s.Commands)
-		}
-	}
-}
 
 func TestSoloPresetDiscoveryKeepsAmbiguity(t *testing.T) {
 	cache := &Cache{Harness: map[string]Record{"claude": {SoloTool: 99}}}

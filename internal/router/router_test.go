@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jalendport/maestro/internal/adapter"
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/budget"
 	"github.com/jalendport/maestro/internal/config"
@@ -24,6 +24,7 @@ import (
 func testRouter(t *testing.T) *Router {
 	t.Helper()
 	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("TYPESAFE_API_KEY", "")
 	d, _, _ := config.ParseFile(roster.Defaults)
 	r := roster.Merge(d, &config.File{})
@@ -107,35 +108,36 @@ func TestRequestedLaneWarns(t *testing.T) {
 	}
 }
 
-func TestAgyRefusesEdit(t *testing.T) {
+func TestAgyAcceptsReadAndEdit(t *testing.T) {
 	rt := testRouter(t)
+	if result := adapter.Install("agy", os.Getenv("HOME"), "skill"); result.Err != nil {
+		t.Fatal(result.Err)
+	}
 	b := mustBrief(t, "---\ntitle: x\n---\n## Goal\ng\n## Done\nd\n")
-	if _, err := rt.Route(Request{Brief: b, Access: "edit", Lane: "agy-flash"}); err == nil {
-		t.Fatal("agy must refuse an edit task")
+	for _, access := range []string{"read", "edit"} {
+		for _, source := range []string{"flag", "seat"} {
+			req := Request{Brief: b, Access: access, Lane: "agy-flash"}
+			if source == "seat" {
+				req.Lane, req.Seat = "", "agy-flash"
+			}
+			route, err := rt.Route(req)
+			if err != nil || route.FamilyID != "agy-flash" || route.Enforcement != harness.Enforced {
+				t.Fatalf("%s/%s: route=%+v err=%v", access, source, route, err)
+			}
+		}
 	}
 }
 
-func TestRequestedLaneRefusesAccess(t *testing.T) {
+func TestRequestedLaneRefusesAccessOrMissingHook(t *testing.T) {
 	for _, tc := range []struct {
 		lane, access, reason string
 	}{
-		{"agy-flash", "read", "its read shape is best-effort"},
-		{"agy-flash:high", "edit", "has no edit shape"},
+		{"agy-flash", "read", "agy needs its Maestro hook: run maestro adapter install agy"},
+		{"agy-flash:high", "edit", "agy needs its Maestro hook: run maestro adapter install agy"},
 		{"codex-sol", "edit", "its edit shape is best-effort"},
 	} {
 		for _, source := range []string{"brief", "flag", "seat"} {
 			t.Run(tc.lane+"/"+tc.access+"/"+source, func(t *testing.T) {
-				// Antigravity's read enforcement is measured from its settings file;
-				// pin it to best-effort with a non-read-only command rule.
-				home := t.TempDir()
-				t.Setenv("HOME", home)
-				dir := filepath.Join(home, ".gemini", "antigravity-cli")
-				if err := os.MkdirAll(dir, 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"permissions":{"allow":["command(rm)"]}}`), 0o644); err != nil {
-					t.Fatal(err)
-				}
 				rt := testRouter(t)
 				req := Request{Brief: &brief.Brief{}, Access: tc.access}
 				id := strings.Split(tc.lane, ":")[0]
@@ -149,11 +151,43 @@ func TestRequestedLaneRefusesAccess(t *testing.T) {
 				}
 				route, err := rt.Route(req)
 				want := fmt.Sprintf("lane %s cannot take %s work: %s (see maestro roster)", id, tc.access, tc.reason)
+				if strings.HasPrefix(id, "agy-") {
+					want = fmt.Sprintf("family %s fails pre-flight: %s", id, tc.reason)
+				}
 				if route != nil || err == nil || err.Error() != want {
 					t.Fatalf("route=%+v err=%v, want %s", route, err, want)
 				}
 			})
 		}
+	}
+}
+
+func TestAgyPreflightRequiresHook(t *testing.T) {
+	for _, state := range []string{"missing", "wrong", "ok"} {
+		t.Run(state, func(t *testing.T) {
+			rt := testRouter(t)
+			home := os.Getenv("HOME")
+			if state != "missing" {
+				if result := adapter.Install("agy", home, "skill"); result.Err != nil {
+					t.Fatal(result.Err)
+				}
+				if state == "wrong" {
+					spec, _ := adapter.Paths("agy", home)
+					if err := os.WriteFile(spec.HookFile, []byte(`{"maestro":{"PreToolUse":[{"matcher":"invoke_subagent","hooks":[{"type":"command","command":"maestro hook","timeout":10}]}]}}`), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			for _, access := range []string{"read", "edit"} {
+				want := "agy needs its Maestro hook: run maestro adapter install agy"
+				if state == "ok" {
+					want = ""
+				}
+				if got := rt.Preflight(rt.Roster.Families["agy-flash"], access); got != want {
+					t.Fatalf("%s: %q, want %q", access, got, want)
+				}
+			}
+		})
 	}
 }
 

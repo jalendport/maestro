@@ -1,37 +1,37 @@
 package council
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
+	"github.com/jalendport/maestro/internal/adapter"
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/discovery"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/roster"
 )
 
-func TestRequestedSeatRefusesBestEffortRead(t *testing.T) {
-	// Antigravity's read enforcement is measured from its settings file;
-	// pin it to best-effort with a non-read-only command rule.
+func TestRequestedAgySeatRequiresHook(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	dir := filepath.Join(home, ".gemini", "antigravity-cli")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"permissions":{"allow":["command(rm)"]}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	defaults, _, err := config.ParseFile(roster.Defaults)
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := &dispatch.Env{Roster: roster.Merge(defaults, &config.File{}), Reg: harness.New(map[string]string{"agy": "/must-not-launch"})}
+	env := &dispatch.Env{Roster: roster.Merge(defaults, &config.File{}), Reg: harness.New(map[string]string{"agy": "/must-not-launch"}),
+		Disc: &discovery.Cache{Harness: map[string]discovery.Record{"agy": {Path: "/must-not-launch", Version: "1.3.4", Models: []harness.Model{{ID: "gemini-3.8-flash"}}}}}}
 	seats, _, err := pickSeats(env, &Council{Level: roster.LevelSome}, Opts{Lanes: []string{"agy-flash:high"}})
-	want := "lane agy-flash cannot take read work: its read shape is best-effort (see maestro roster)"
+	want := "family agy-flash fails pre-flight: agy needs its Maestro hook: run maestro adapter install agy"
 	if len(seats) != 0 || err == nil || err.Error() != want {
 		t.Fatalf("seats=%+v err=%v, want %s", seats, err, want)
+	}
+	if result := adapter.Install("agy", home, "skill"); result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	seats, _, err = pickSeats(env, &Council{Level: roster.LevelSome}, Opts{Lanes: []string{"agy-flash:high"}})
+	if err != nil || len(seats) != 1 || seats[0].Family != "agy-flash" || seats[0].Effort != "high" || seats[0].Model != "gemini-3.8-flash" {
+		t.Fatalf("seats=%+v err=%v", seats, err)
 	}
 }
 

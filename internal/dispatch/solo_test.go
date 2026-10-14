@@ -42,8 +42,8 @@ func TestTabArgsPerHarnessAndAccess(t *testing.T) {
 			"Bash(git diff *)", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git blame *)",
 			"Bash(ls *)", "Bash(cat *)", "Bash(ls)", "Bash(git status)")...), "--allow", "Write(//"+folder+"/**)", "--allow", "Edit(//"+folder+"/**)")},
 		{name: "grok", access: "edit", want: []string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--reasoning-effort", "high", "--permission-mode", "dontAsk", "--allow", "Bash(go test ./... *)", "--allow", "Bash(go test ./...)"}},
-		{name: "agy", access: "read", want: []string{"--prompt-interactive", pointer, "--model", "model", "--effort", "high"}},
-		{name: "agy", access: "edit", wantError: true},
+		{name: "agy", access: "read", want: []string{"--sandbox", "--model", "model", "--effort", "high", "--prompt-interactive", pointer}},
+		{name: "agy", access: "edit", want: []string{"--sandbox", "--model", "model", "--effort", "high", "--mode", "accept-edits", "--add-dir", "/extra", "--prompt-interactive", pointer}},
 	} {
 		t.Run(tt.name+"/"+tt.access, func(t *testing.T) {
 			reg := harness.New(map[string]string{tt.name: "/bin/lane"})
