@@ -117,11 +117,25 @@ func (a *app) adapterCmd() *cobra.Command {
 			fmt.Fprintln(os.Stdout, "maestro adapter prints the steps and writes nothing; maestro adapter install [harness] does them.")
 			for _, name := range names {
 				spec, _ := adapter.Paths(name, home)
-				entry := map[string]any{
-					"matcher": spec.Matcher,
-					"hooks":   []any{map[string]any{"type": "command", "command": adapter.Command, "timeout": spec.Timeout}},
+				hooks := map[string]any{}
+				for _, event := range spec.Events {
+					command, timeout := event.Command, event.Timeout
+					if command == "" {
+						command = adapter.Command
+					}
+					if timeout == 0 {
+						timeout = spec.Timeout
+					}
+					handler := map[string]any{"type": "command", "command": command, "timeout": timeout}
+					entry := map[string]any{"hooks": []any{handler}}
+					if event.Matcher {
+						entry["matcher"] = spec.Matcher
+					}
+					if event.Direct {
+						entry = handler
+					}
+					hooks[event.Name] = []any{entry}
 				}
-				hooks := map[string]any{"PreToolUse": []any{entry}}
 				key := "hooks"
 				if name == "agy" {
 					key = "maestro"
@@ -132,7 +146,11 @@ func (a *app) adapterCmd() *cobra.Command {
 				}
 				link := spec.Link
 				quote := func(path string) string { return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'" }
-				fmt.Fprintf(os.Stdout, "\n%s:\n  mkdir -p %s\n  ln -s %s %s\n  %s\n  %s\n  Next: %s\n", name, quote(filepath.Dir(link)), quote(adapter.SkillDir()), quote(link), spec.HookFile, b, spec.Next)
+				fmt.Fprintf(os.Stdout, "\n%s:\n  mkdir -p %s\n  ln -s %s %s\n  %s\n  %s\n", name, quote(filepath.Dir(link)), quote(adapter.SkillDir()), quote(link), spec.HookFile, b)
+				if name == "grok" {
+					fmt.Fprintf(os.Stdout, "  %s\n%s", adapter.ReminderFile(home), adapter.ReminderRule())
+				}
+				fmt.Fprintf(os.Stdout, "  Next: %s\n", spec.Next)
 			}
 			return nil
 		},

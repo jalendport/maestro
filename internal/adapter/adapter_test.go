@@ -45,7 +45,7 @@ func actions(t *testing.T, r Result, states ...string) {
 	if len(r.Actions) != len(states) {
 		t.Fatalf("Actions = %+v, want %v", r.Actions, states)
 	}
-	kinds := []string{"skill", "link", "hook"}
+	kinds := []string{"skill", "link", "hook", "reminder"}
 	hasError := false
 	for i, a := range r.Actions {
 		if a.Kind != kinds[i] || a.State != states[i] || a.Path == "" {
@@ -70,13 +70,13 @@ func TestSpecs(t *testing.T) {
 		t.Fatal(Harnesses)
 	}
 	want := []HarnessSpec{
-		{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "A new Claude Code session loads the hook."},
-		{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse hook."},
-		{".agents/skills/maestro", ".grok/hooks/maestro.json", "spawn_subagent|Task|solo__spawn_agent|solo__spawn_process", 10, "A new Grok session binds the hook."},
-		{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook."},
+		{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "A new Claude Code session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit"}}},
+		{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse and UserPromptSubmit hooks.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit"}}},
+		{".agents/skills/maestro", ".grok/hooks/maestro.json", "spawn_subagent|Task|solo__spawn_agent|solo__spawn_process", 10, "A new Grok session binds the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}}},
+		{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "PreInvocation", Direct: true, Command: "maestro hook agy", Timeout: 30}}},
 	}
 	for i, name := range Harnesses {
-		if got, ok := Spec(name); !ok || got != want[i] {
+		if got, ok := Spec(name); !ok || !reflect.DeepEqual(got, want[i]) {
 			t.Fatalf("Spec(%s) = %+v, %v", name, got, ok)
 		}
 	}
@@ -93,12 +93,12 @@ func TestInstallEachHarness(t *testing.T) {
 				t.Fatal(got)
 			}
 			r := Install(name, home, "shared skill\n")
-			actions(t, r, "created", "created", "created")
+			actions(t, r, "created", "created", "created", "created")
 			spec, _ := Spec(name)
 			if r.Harness != name || r.Next != spec.Next {
 				t.Fatal(r)
 			}
-			if got := State(name, home); got != (Status{name, "ok", "ok", "ok", "ok"}) {
+			if got := State(name, home); got != (Status{name, "ok", "ok", "ok", "ok", "ok"}) {
 				t.Fatal(got)
 			}
 			if string(read(t, SkillFile())) != "shared skill\n" {
@@ -134,7 +134,7 @@ func TestInstallEachHarness(t *testing.T) {
 			if len(entries) != 1 || e["matcher"] != spec.Matcher || handler["type"] != "command" || handler["command"] != "maestro hook" || handler["timeout"] != float64(spec.Timeout) {
 				t.Fatal(doc)
 			}
-			actions(t, Install(name, home, "shared skill\n"), "unchanged", "unchanged", "unchanged")
+			actions(t, Install(name, home, "shared skill\n"), "unchanged", "unchanged", "unchanged", "unchanged")
 			if !bytes.Equal(before, read(t, path)) {
 				t.Fatal("repeat rewrote hook")
 			}
@@ -147,16 +147,16 @@ func TestInstallUpdatesOlderAntigravityHook(t *testing.T) {
 	spec, _ := Spec("agy")
 	path := filepath.Join(home, spec.HookFile)
 	put(t, path, `{"maestro":{"PreToolUse":[{"matcher":"invoke_subagent","hooks":[{"type":"command","command":"maestro hook","timeout":30}]}]}}`)
-	actions(t, Install("agy", home, "skill"), "created", "created", "updated")
+	actions(t, Install("agy", home, "skill"), "created", "created", "updated", "created")
 	root, err := decode(read(t, path))
 	if err != nil {
 		t.Fatal(err)
 	}
 	entries := root.get("maestro").get("PreToolUse").array
-	if len(entries) != 1 || !equal(entries[0], entry(spec)) {
+	if len(entries) != 1 || !equal(entries[0], entry(spec, spec.Events[0])) {
 		t.Fatalf("updated hook: %s", read(t, path))
 	}
-	actions(t, Install("agy", home, "skill"), "unchanged", "unchanged", "unchanged")
+	actions(t, Install("agy", home, "skill"), "unchanged", "unchanged", "unchanged", "unchanged")
 }
 
 func TestEnsureSkill(t *testing.T) {
@@ -221,7 +221,7 @@ func TestExistingLink(t *testing.T) {
 			if kind == "correct" {
 				state = "unchanged"
 			}
-			actions(t, r, "created", state, "created")
+			actions(t, r, "created", state, "created", "created")
 			after, err := os.Lstat(path)
 			if err != nil {
 				t.Fatal(err)
@@ -271,7 +271,7 @@ func TestHookMergeOrderAndIndent(t *testing.T) {
 				if existing {
 					state = "updated"
 				}
-				actions(t, Install(name, home, "skill"), "created", "created", state)
+				actions(t, Install(name, home, "skill"), "created", "created", state, "created")
 				output := read(t, path)
 				if !bytes.HasPrefix(output, []byte("{\n    \"z\":")) {
 					t.Fatalf("indent changed: %s", output)
@@ -295,7 +295,7 @@ func TestHookMergeOrderAndIndent(t *testing.T) {
 					}
 					return keys
 				}
-				if !reflect.DeepEqual(keys(before), keys(after)) || !reflect.DeepEqual(keys(before.get("hooks")), keys(after.get("hooks"))) || !reflect.DeepEqual(keys(after.get("z")), []string{"b", "a"}) {
+				if !reflect.DeepEqual(keys(before), keys(after)) || !reflect.DeepEqual(append(keys(before.get("hooks")), "UserPromptSubmit"), keys(after.get("hooks"))) || !reflect.DeepEqual(keys(after.get("z")), []string{"b", "a"}) {
 					t.Fatalf("key order changed: %s", output)
 				}
 				for _, k := range []string{"z", "a"} {
@@ -321,13 +321,13 @@ func TestHookMergeOrderAndIndent(t *testing.T) {
 				if existing {
 					desiredIndex = 1
 				}
-				if !equal(newEntries[desiredIndex], entry(spec)) {
+				if !equal(newEntries[desiredIndex], entry(spec, spec.Events[0])) {
 					t.Fatal("wrong Maestro entry")
 				}
 				if State(name, home).Overall != "ok" {
 					t.Fatal(State(name, home))
 				}
-				actions(t, Install(name, home, "skill"), "unchanged", "unchanged", "unchanged")
+				actions(t, Install(name, home, "skill"), "unchanged", "unchanged", "unchanged", "unchanged")
 				if !bytes.Equal(output, read(t, path)) {
 					t.Fatal("unchanged file rewritten")
 				}
@@ -355,7 +355,7 @@ func TestHookMissingKeys(t *testing.T) {
 			if State("claude", home).Hook != "missing" {
 				t.Fatal(State("claude", home))
 			}
-			actions(t, Install("claude", home, "skill"), "created", "created", "created")
+			actions(t, Install("claude", home, "skill"), "created", "created", "created", "created")
 			if !strings.Contains(string(read(t, path)), `"other": true`) || State("claude", home).Hook != "ok" {
 				t.Fatal(string(read(t, path)))
 			}
@@ -375,7 +375,7 @@ func TestHookFileSymlinkAndEscapes(t *testing.T) {
 	if err := os.Symlink(real, path); err != nil {
 		t.Fatal(err)
 	}
-	actions(t, Install("claude", home, "skill"), "created", "created", "created")
+	actions(t, Install("claude", home, "skill"), "created", "created", "created", "created")
 	if target, err := os.Readlink(path); err != nil || target != real {
 		t.Fatal("hook symlink replaced", target, err)
 	}
@@ -396,7 +396,7 @@ func TestOwnedHookSets(t *testing.T) {
 			path := filepath.Join(home, spec.HookFile)
 			source := `{"before":{"z":1,"a":2},"maestro":{"PreToolUse":[]},"after":true}`
 			put(t, path, source)
-			actions(t, Install(name, home, "skill"), "created", "created", "created")
+			actions(t, Install(name, home, "skill"), "created", "created", "created", "created")
 			root, err := decode(read(t, path))
 			if err != nil {
 				t.Fatal(err)
@@ -414,7 +414,7 @@ func TestOwnedHookSets(t *testing.T) {
 					t.Fatal("other sets changed")
 				}
 			}
-			actions(t, Install(name, home, "skill"), "unchanged", "unchanged", "unchanged")
+			actions(t, Install(name, home, "skill"), "unchanged", "unchanged", "unchanged", "unchanged")
 		})
 	}
 }
@@ -435,7 +435,7 @@ func TestInstallKeepsForeignHandlersInMaestroEntry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			actions(t, Install(name, home, "skill"), "created", "created", "updated")
+			actions(t, Install(name, home, "skill"), "created", "created", "updated", "created")
 			after, err := decode(read(t, path))
 			if err != nil {
 				t.Fatal(err)
@@ -443,7 +443,7 @@ func TestInstallKeepsForeignHandlersInMaestroEntry(t *testing.T) {
 			oldEntry := before.get(key).get("PreToolUse").array[0]
 			newEntry := after.get(key).get("PreToolUse").array[0]
 			oldHooks, newHooks := oldEntry.get("hooks"), newEntry.get("hooks")
-			if len(newHooks.array) != 3 || !equal(oldHooks.array[0], newHooks.array[0]) || !equal(oldHooks.array[2], newHooks.array[2]) || !equal(newHooks.array[1], entry(spec).get("hooks").array[0]) {
+			if len(newHooks.array) != 3 || !equal(oldHooks.array[0], newHooks.array[0]) || !equal(oldHooks.array[2], newHooks.array[2]) || !equal(newHooks.array[1], entry(spec, spec.Events[0]).get("hooks").array[0]) {
 				t.Fatalf("handlers changed: %s", read(t, path))
 			}
 			if !equal(oldEntry.get("matcher"), newEntry.get("matcher")) || !equal(oldEntry.get("extra"), newEntry.get("extra")) {
@@ -452,7 +452,7 @@ func TestInstallKeepsForeignHandlersInMaestroEntry(t *testing.T) {
 			if got := State(name, home); got.Hook != "ok" {
 				t.Fatal(got)
 			}
-			actions(t, Install(name, home, "skill"), "unchanged", "unchanged", "unchanged")
+			actions(t, Install(name, home, "skill"), "unchanged", "unchanged", "unchanged", "unchanged")
 		})
 	}
 }
@@ -466,7 +466,11 @@ func TestInvalidJSON(t *testing.T) {
 				path := filepath.Join(home, spec.HookFile)
 				put(t, path, source)
 				r := Install(name, home, "skill")
-				actions(t, r, "created", "created", "error")
+				reminder := "error"
+				if name == "grok" {
+					reminder = "created"
+				}
+				actions(t, r, "created", "created", "error", reminder)
 				if !strings.Contains(r.Actions[2].Detail, "parse JSON") {
 					t.Fatal(r)
 				}
@@ -487,7 +491,7 @@ func TestStateAndContinueAfterSkillError(t *testing.T) {
 	if err := os.MkdirAll(SkillFile(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	actions(t, Install("claude", home, "skill"), "error", "created", "created")
+	actions(t, Install("claude", home, "skill"), "error", "created", "created", "created")
 	if err := os.Remove(SkillFile()); err != nil {
 		t.Fatal(err)
 	}
@@ -495,8 +499,8 @@ func TestStateAndContinueAfterSkillError(t *testing.T) {
 	if s.Skill != "missing" || s.Link != "ok" || s.Hook != "ok" || s.Overall != "partial" {
 		t.Fatal(s)
 	}
-	actions(t, Install("claude", home, "first"), "created", "unchanged", "unchanged")
-	actions(t, Install("claude", home, "second"), "updated", "unchanged", "unchanged")
+	actions(t, Install("claude", home, "first"), "created", "unchanged", "unchanged", "unchanged")
+	actions(t, Install("claude", home, "second"), "updated", "unchanged", "unchanged", "unchanged")
 	spec, _ := Spec("claude")
 	path := filepath.Join(home, spec.HookFile)
 	put(t, path, `{"hooks":{"PreToolUse":[{"matcher":"wrong","hooks":[{"command":"maestro hook"}]}]}}`)
@@ -512,7 +516,7 @@ func TestMalformedHookShape(t *testing.T) {
 			spec, _ := Spec("codex")
 			path := filepath.Join(home, spec.HookFile)
 			put(t, path, source)
-			actions(t, Install("codex", home, "skill"), "created", "created", "error")
+			actions(t, Install("codex", home, "skill"), "created", "created", "error", "error")
 			if string(read(t, path)) != source || State("codex", home).Hook != "wrong" {
 				t.Fatal(string(read(t, path)))
 			}

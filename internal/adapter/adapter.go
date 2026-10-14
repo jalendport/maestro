@@ -22,20 +22,33 @@ type HarnessSpec struct {
 	Matcher  string
 	Timeout  int
 	Next     string
+	Events   []HookEvent
+}
+
+type HookEvent struct {
+	Name    string
+	Matcher bool
+	Direct  bool
+	Command string
+	Timeout int
 }
 
 func Spec(harness string) (HarnessSpec, bool) {
 	switch harness {
 	case "claude":
-		return HarnessSpec{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "A new Claude Code session loads the hook."}, true
+		return HarnessSpec{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "A new Claude Code session loads the hook.", promptEvents()}, true
 	case "codex":
-		return HarnessSpec{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse hook."}, true
+		return HarnessSpec{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse and UserPromptSubmit hooks.", promptEvents()}, true
 	case "grok":
-		return HarnessSpec{".agents/skills/maestro", ".grok/hooks/maestro.json", "spawn_subagent|Task|solo__spawn_agent|solo__spawn_process", 10, "A new Grok session binds the hook."}, true
+		return HarnessSpec{".agents/skills/maestro", ".grok/hooks/maestro.json", "spawn_subagent|Task|solo__spawn_agent|solo__spawn_process", 10, "A new Grok session binds the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}}}, true
 	case "agy":
-		return HarnessSpec{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook."}, true
+		return HarnessSpec{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "PreInvocation", Direct: true, Command: "maestro hook agy", Timeout: 30}}}, true
 	}
 	return HarnessSpec{}, false
+}
+
+func promptEvents() []HookEvent {
+	return []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit"}}
 }
 
 // Paths resolves a Harness's files for install, status, and printed steps.
@@ -118,8 +131,15 @@ func Install(harness string, home string, skill string) Result {
 	state, err = ensureLink(link)
 	record("link", link, state, err)
 	path := spec.HookFile
-	state, err = ensureHook(harness, path, spec)
-	record("hook", path, state, err)
+	states, err := ensureHooks(harness, path, spec)
+	record("hook", path, states[0], err)
+	if harness == "grok" {
+		path = ReminderFile(home)
+		state, err = ensureReminder(path)
+	} else {
+		state = states[1]
+	}
+	record("reminder", path, state, err)
 	return r
 }
 
@@ -161,15 +181,16 @@ func ensureLink(path string) (string, error) {
 }
 
 type Status struct {
-	Harness string
-	Skill   string
-	Link    string
-	Hook    string
-	Overall string
+	Harness  string
+	Skill    string
+	Link     string
+	Hook     string
+	Reminder string
+	Overall  string
 }
 
 func State(harness string, home string) Status {
-	s := Status{Harness: harness, Skill: "missing", Link: "missing", Hook: "missing"}
+	s := Status{Harness: harness, Skill: "missing", Link: "missing", Hook: "missing", Reminder: "missing"}
 	if _, err := os.Stat(SkillFile()); err == nil {
 		s.Skill = "ok"
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -177,7 +198,7 @@ func State(harness string, home string) Status {
 	}
 	spec, ok := Paths(harness, home)
 	if !ok {
-		s.Link, s.Hook = "wrong", "wrong"
+		s.Link, s.Hook, s.Reminder = "wrong", "wrong", "wrong"
 	} else {
 		path := spec.Link
 		if _, err := os.Lstat(path); err == nil {
@@ -190,13 +211,19 @@ func State(harness string, home string) Status {
 		} else if !errors.Is(err, os.ErrNotExist) {
 			s.Link = "wrong"
 		}
-		s.Hook = hookState(harness, spec.HookFile, spec)
+		states := hookStates(harness, spec.HookFile, spec)
+		s.Hook = states[0]
+		if harness == "grok" {
+			s.Reminder = reminderState(ReminderFile(home))
+		} else {
+			s.Reminder = states[1]
+		}
 	}
 	s.Overall = "partial"
-	if s.Skill == "ok" && s.Link == "ok" && s.Hook == "ok" {
+	if s.Skill == "ok" && s.Link == "ok" && s.Hook == "ok" && s.Reminder == "ok" {
 		s.Overall = "ok"
 	}
-	if s.Skill == "missing" && s.Link == "missing" && s.Hook == "missing" {
+	if s.Skill == "missing" && s.Link == "missing" && s.Hook == "missing" && s.Reminder == "missing" {
 		s.Overall = "missing"
 	}
 	return s
