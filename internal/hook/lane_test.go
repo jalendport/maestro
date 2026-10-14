@@ -254,7 +254,8 @@ func TestFindLaneFolder(t *testing.T) {
 		{"Task transcript", "", "agy", "{\"message\":\"Read the file `/project/.agents/maestro/runs/r-test/abcd/brief.md` in full, then follow it.\"}\n", "/project/.agents/maestro/runs/r-test/abcd"},
 		{"Seat transcript", "", "agy", "{\"message\":\"Read the file `/project/.agents/maestro/councils/review/agy-flash/brief.md` in full, then follow it.\"}\n", "/project/.agents/maestro/councils/review/agy-flash"},
 		{"no Pointer", "", "agy", "{\"message\":\"Hello\"}\n", ""},
-		{"other Harness", "", "claude", "Read `/project/.agents/maestro/runs/r-test/abcd/brief.md`", ""},
+		{"other Harness", "", "claude", "Read `/project/.agents/maestro/runs/r-test/abcd/brief.md`", "/project/.agents/maestro/runs/r-test/abcd"},
+		{"empty transcript path", "", "claude", "", ""},
 		{"first Pointer", "", "agy", "`/project/.agents/maestro/runs/r-test/abcd/brief.md` `/project/.agents/maestro/runs/r-next/efgh/brief.md`", "/project/.agents/maestro/runs/r-test/abcd"},
 		{"past limit", "", "agy", strings.Repeat("x", 64*1024) + " `/project/.agents/maestro/runs/r-test/abcd/brief.md`", ""},
 	} {
@@ -263,6 +264,9 @@ func TestFindLaneFolder(t *testing.T) {
 			transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
 			if err := os.WriteFile(transcript, []byte(tc.text), 0o600); err != nil {
 				t.Fatal(err)
+			}
+			if tc.name == "empty transcript path" {
+				transcript = ""
 			}
 			got, ok := FindLaneFolder(&Call{Harness: tc.harness, TranscriptPath: transcript})
 			if got != tc.want || ok != (tc.want != "") {

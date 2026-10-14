@@ -36,7 +36,7 @@ func FindLaneFolder(c *Call) (string, bool) {
 	if folder := os.Getenv("MAESTRO_TASK_FOLDER"); folder != "" {
 		return folder, true
 	}
-	if c.Harness != "agy" || c.TranscriptPath == "" {
+	if c.TranscriptPath == "" {
 		return "", false
 	}
 	f, err := os.Open(c.TranscriptPath)

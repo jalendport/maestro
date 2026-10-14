@@ -1,4 +1,4 @@
-// Package hook reads each Harness's tool calls, applies the scoped spawn rule and Antigravity Lane permissions, and renders the Harness's answer.
+// Package hook reads each Harness's tool calls and Reminder events, applies the scoped spawn rule and Antigravity Lane permissions, and renders the Harness's answer or Reminder.
 package hook
 
 import (
@@ -25,9 +25,10 @@ func (d Decision) verdict() Verdict {
 	return Verdict{Kind: "deny", Reason: d.Reason}
 }
 
-// Call is the harness-neutral view of a tool call.
+// Call is the harness-neutral view of a tool call or Reminder event.
 type Call struct {
 	Harness        string
+	Event          string
 	CWD            string
 	Tool           string
 	Input          map[string]any
@@ -35,8 +36,8 @@ type Call struct {
 	WorkspacePaths []string
 }
 
-// readOnlySubagents are Claude agent types that only read.
-var readOnlySubagents = map[string]bool{"Explore": true, "explore": true, "Plan": true, "plan": true, "claude-code-guide": true}
+// readOnlyAgents are Claude agent types that only read.
+var readOnlyAgents = []string{"Explore", "Plan", "claude-code-guide"}
 
 // Parse reads a payload. harness selects the shape; "" detects it from the keys.
 func Parse(harness string, payload []byte) (*Call, error) {
@@ -45,8 +46,11 @@ func Parse(harness string, payload []byte) (*Call, error) {
 		return nil, fmt.Errorf("payload is not JSON: %w", err)
 	}
 	if harness == "" {
+		_, toolCall := raw["toolCall"]
+		_, workspacePaths := raw["workspacePaths"]
+		_, invocationNum := raw["invocationNum"]
 		switch {
-		case raw["toolCall"] != nil:
+		case toolCall || workspacePaths || invocationNum:
 			harness = "agy"
 		case raw["toolName"] != nil || raw["hookEventName"] != nil && raw["tool_name"] == nil:
 			harness = "grok"
@@ -58,6 +62,7 @@ func Parse(harness string, payload []byte) (*Call, error) {
 	c := &Call{Harness: harness, CWD: cwd, Input: map[string]any{}}
 	switch harness {
 	case "claude", "codex":
+		c.TranscriptPath, _ = raw["transcript_path"].(string)
 		c.Tool, _ = raw["tool_name"].(string)
 		if in, ok := raw["tool_input"].(map[string]any); ok {
 			c.Input = in
@@ -88,6 +93,15 @@ func Parse(harness string, payload []byte) (*Call, error) {
 	default:
 		return nil, fmt.Errorf("unknown harness %q", harness)
 	}
+	if isReminderEvent(c, raw) {
+		c.Event = "reminder"
+		if c.Harness == "agy" {
+			c.CWD = ""
+			if len(c.WorkspacePaths) > 0 {
+				c.CWD = c.WorkspacePaths[0]
+			}
+		}
+	}
 	return c, nil
 }
 
@@ -102,16 +116,18 @@ func Decide(c *Call, scope string) Decision {
 		if readOnlyArgs(c.Input) {
 			return Decision{Allow: true}
 		}
-		return Decision{Allow: false, Reason: "Code-writing Solo lanes go through Maestro: write a brief file and run `maestro dispatch <brief.md>` (or `maestro run <plan.md>`). A read-only spawn passes when extra_args carries a read shape (`--permission-mode dontAsk`, `-s read-only`)."}
+		return Decision{Allow: false, Reason: "Code-writing Solo lanes go through Maestro: write a Brief file and run `maestro dispatch <brief.md>`, or a Plan file and `maestro run <plan.md>`. A read-only spawn passes when its kind is terminal, or when extra_args carries a read token: `dontAsk`, `read-only`, or `--deny Write`."}
 	case tool == "Agent" || tool == "Task" || tool == "spawn_subagent" || tool == "invoke_subagent":
 		sub, _ := c.Input["subagent_type"].(string)
 		if sub == "" {
 			sub, _ = c.Input["agent"].(string)
 		}
-		if readOnlySubagents[sub] {
-			return Decision{Allow: true}
+		for _, agent := range readOnlyAgents {
+			if strings.EqualFold(sub, agent) {
+				return Decision{Allow: true}
+			}
 		}
-		return Decision{Allow: false, Reason: fmt.Sprintf("Sub-agent %q may write code; Maestro routes that work. Write a brief file and run `maestro dispatch <brief.md>`. Read-only legwork may stay on a read-only agent type (Explore, Plan).", nonEmpty(sub, tool))}
+		return Decision{Allow: false, Reason: fmt.Sprintf("Sub-agent %q may write code; Maestro routes that work. Write a Brief file and run `maestro dispatch <brief.md>`. Read-only legwork may stay on a read-only agent type: %s.", nonEmpty(sub, tool), strings.Join(readOnlyAgents, ", "))}
 	}
 	return Decision{Allow: true}
 }

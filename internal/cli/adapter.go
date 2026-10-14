@@ -21,8 +21,8 @@ import (
 func (a *app) hookCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "hook [claude|codex|grok|agy]",
-		Short:  "PreToolUse hook entry point (called by the Adapters)",
-		Long:   "Read the Harness's PreToolUse payload on stdin and write its answer on stdout after the scoped spawn rule and Antigravity Lane permissions are applied.",
+		Short:  "PreToolUse and Reminder hook entry point (called by the Adapters)",
+		Long:   "Read the Harness's PreToolUse or Reminder event payload on stdin. Apply the scoped spawn rule and Antigravity Lane permissions to tool calls, or write the Reminder for an Orchestrator in scope.",
 		Args:   cobra.MaximumNArgs(1),
 		Hidden: false,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -42,6 +42,16 @@ func (a *app) hookCmd() *cobra.Command {
 				// Never block a Harness on a payload Maestro cannot read.
 				if harness == "grok" || harness == "agy" {
 					fmt.Fprintln(os.Stdout, `{"decision":"allow"}`)
+				}
+				return nil
+			}
+			if call.Event == "reminder" {
+				scope := ""
+				if r, err := roster.Load(); err == nil {
+					scope = r.Hook.Scope
+				}
+				if out := hook.RenderReminder(call, scope); out != nil {
+					fmt.Fprintln(os.Stdout, string(out))
 				}
 				return nil
 			}

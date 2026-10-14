@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/jalendport/maestro/internal/adapter"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/hook"
 )
@@ -225,6 +227,201 @@ func TestHookCommandTranscriptLane(t *testing.T) {
 					}
 					if got != want {
 						t.Fatalf("%s: %s, want %s", tool, got, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestHookCommandReminder(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("MAESTRO_LANE", "")
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.ProjectFile(project), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	for _, harness := range []string{"", "claude", "codex", "agy", "agy detected"} {
+		for _, tc := range []struct {
+			name, scope, cwd string
+			inScope          bool
+		}{
+			{"project", "projects", project, true},
+			{"outside", "projects", outside, false},
+			{"all", "all", outside, true},
+			{"Roster failure", "invalid TOML = [", project, false},
+		} {
+			t.Run(harness+"/"+tc.name, func(t *testing.T) {
+				body := "[hook]\nscope = \"" + tc.scope + "\"\n"
+				if tc.name == "Roster failure" {
+					body = tc.scope
+					if _, _, err := config.ParseFile(body); err == nil {
+						t.Fatal("fixture must prevent the Roster from loading")
+					}
+				}
+				if err := os.WriteFile(config.UserFile(), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				payload := map[string]any{"hook_event_name": "UserPromptSubmit", "cwd": tc.cwd, "prompt": "x"}
+				arg := harness
+				want := ""
+				if harness == "agy" || harness == "agy detected" {
+					payload = map[string]any{"invocationNum": 1, "workspacePaths": []string{tc.cwd, outside}}
+					want = `{}`
+					if harness == "agy detected" {
+						arg = ""
+					}
+				}
+				if tc.inScope {
+					var answer any = map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "UserPromptSubmit", "additionalContext": adapter.Reminder}}
+					if harness == "agy" || harness == "agy detected" {
+						answer = map[string]any{"injectSteps": []any{map[string]any{"ephemeralMessage": adapter.Reminder}}}
+					}
+					b, err := json.Marshal(answer)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want = string(b)
+				}
+				b, err := json.Marshal(payload)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := runHookPayload(t, string(b), arg); got != want {
+					t.Fatalf("output = %q, want %q", got, want)
+				}
+			})
+		}
+	}
+}
+
+func TestHookCommandReminderInsideLane(t *testing.T) {
+	for _, harness := range []string{"", "claude", "codex", "agy", "agy detected"} {
+		for _, signal := range []string{"MAESTRO_LANE", "MAESTRO_TASK_FOLDER", "transcript"} {
+			for _, policy := range []string{"missing", "valid"} {
+				t.Run(harness+"/"+signal+"/"+policy, func(t *testing.T) {
+					t.Setenv("MAESTRO_HOME", t.TempDir())
+					t.Setenv("MAESTRO_LANE", "")
+					t.Setenv("MAESTRO_TASK_FOLDER", "")
+					if err := os.WriteFile(config.UserFile(), []byte("[hook]\nscope = \"all\"\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					folder := filepath.Join(t.TempDir(), ".agents", "maestro", "runs", "r-test", "task")
+					if policy == "valid" {
+						control := config.ControlDirForFolder(folder)
+						if err := os.MkdirAll(control, 0o700); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(`{"access":"read"}`), 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					payload := map[string]any{"hook_event_name": "UserPromptSubmit"}
+					arg, transcriptKey, want := harness, "transcript_path", ""
+					if harness == "agy" || harness == "agy detected" {
+						payload = map[string]any{"invocationNum": 1}
+						transcriptKey, want = "transcriptPath", `{}`
+						if harness == "agy detected" {
+							arg = ""
+						}
+					}
+					switch signal {
+					case "MAESTRO_LANE":
+						t.Setenv(signal, "1")
+					case "MAESTRO_TASK_FOLDER":
+						t.Setenv(signal, folder)
+					case "transcript":
+						transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
+						pointer := "Read the file `" + filepath.Join(folder, "brief.md") + "` in full, then follow it."
+						if err := os.WriteFile(transcript, []byte(pointer), 0o600); err != nil {
+							t.Fatal(err)
+						}
+						payload[transcriptKey] = transcript
+					}
+					b, err := json.Marshal(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got := runHookPayload(t, string(b), arg); got != want {
+						t.Fatalf("Reminder must be answered before the Lane policy: %q, want %q", got, want)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestHookCommandAntigravityInvocationOnly(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("MAESTRO_LANE", "")
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	root := t.TempDir()
+	t.Chdir(root)
+	for _, harness := range []string{"", "agy"} {
+		if got := runHookPayload(t, `{"invocationNum":1}`, harness); got != `{}` {
+			t.Fatalf("outside project: %s", got)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.ProjectFile(root), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, harness := range []string{"", "agy"} {
+		if got := runHookPayload(t, `{"invocationNum":1}`, harness); !strings.Contains(got, `"injectSteps"`) || !strings.Contains(got, adapter.Reminder) {
+			t.Fatalf("inside project: %s", got)
+		}
+	}
+}
+
+func TestHookCommandToolCallPrecedesReminder(t *testing.T) {
+	for _, harness := range []string{"", "agy"} {
+		for _, insideLane := range []bool{false, true} {
+			t.Run(harness+"/Lane="+strconv.FormatBool(insideLane), func(t *testing.T) {
+				t.Setenv("MAESTRO_HOME", t.TempDir())
+				t.Setenv("MAESTRO_TASK_FOLDER", "")
+				if err := os.WriteFile(config.UserFile(), []byte("[hook]\nscope = \"all\"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if insideLane {
+					folder := t.TempDir()
+					t.Setenv("MAESTRO_TASK_FOLDER", folder)
+					control := config.ControlDirForFolder(folder)
+					if err := os.MkdirAll(control, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(`{"access":"read","root":"/project"}`), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for _, tool := range []string{"invoke_subagent", "run_command", "write_to_file"} {
+					toolCall := map[string]any{"name": tool, "args": map[string]any{"agent": "coder", "Cwd": "/project", "CommandLine": "pwd", "TargetFile": "/project/file.go"}}
+					payload := map[string]any{"toolCall": toolCall, "workspacePaths": []string{"/project"}}
+					b, _ := json.Marshal(payload)
+					want := runHookPayload(t, string(b), harness)
+					var answer struct{ Decision string }
+					if err := json.Unmarshal([]byte(want), &answer); err != nil {
+						t.Fatal(err)
+					}
+					expected := "allow"
+					if tool == "invoke_subagent" || insideLane && tool == "write_to_file" {
+						expected = "deny"
+					} else if insideLane {
+						expected = "auto_approve"
+					}
+					if answer.Decision != expected {
+						t.Fatalf("tool %s: %s, want %s", tool, want, expected)
+					}
+					payload["invocationNum"] = 1
+					b, _ = json.Marshal(payload)
+					if got := runHookPayload(t, string(b), harness); got != want {
+						t.Fatalf("tool %s with invocationNum: %s, want %s", tool, got, want)
 					}
 				}
 			})
