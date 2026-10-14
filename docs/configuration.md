@@ -197,7 +197,7 @@ The hook is the `maestro hook` entry that each Adapter installs in a Harness.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `scope` | string | `"projects"` | Sets where the hook applies: `projects` applies the rule only in a folder that holds `.agents/maestro.toml`, and `all` applies it everywhere. |
+| `scope` | string | `"projects"` | Sets where the hook applies, for both the deny rule and the Reminder: `projects` applies them only in a folder that holds `.agents/maestro.toml`, and `all` applies them everywhere. The Grok rules file states the condition in words instead. |
 
 ### [router]
 
@@ -276,7 +276,7 @@ These keys set how many Lanes run at the same time.
 
 ## .agents/maestro.toml
 
-This file is in the root of a project, and it applies to that project only. A missing file is empty. The keys `forbid`, `checks`, `router`, `redact`, and `councils` tighten what the user file allows. The keys `allow`, `dirs`, and `claude_auto` widen it: they give edit Dispatches more permission rules, more writable directories, or the Claude Code auto permission mode.
+This file is in the root of a project, and it applies to that project only. `maestro init` writes the file. A missing file is empty. The keys `forbid`, `checks`, `router`, `redact`, and `councils` tighten what the user file allows. The keys `allow`, `dirs`, and `claude_auto` widen it: they give edit Dispatches more permission rules, more writable directories, or the Claude Code auto permission mode.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|

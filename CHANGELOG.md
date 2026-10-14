@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added Antigravity edit Lanes and Solo tabs, with command prompts relayed through the Maestro hook
+- Added the Reminder for the Orchestrator in every Harness: a `UserPromptSubmit` hook entry for Claude Code and Codex, a `PreInvocation` hook entry for Antigravity, and the rules file `~/.grok/rules/maestro.md` for Grok; run `maestro adapter install` again
+- Added `maestro init` to write the Project file `.agents/maestro.toml`
 
 ### Changed
 - Changed Antigravity read enforcement to the Maestro hook, so it no longer depends on the Antigravity settings file
 - Changed the Antigravity hook entry to cover commands and file writes; run `maestro adapter install agy` again
 - Changed the token-billed rule: a requested Lane on a `metered` Account now takes edit work with a warning instead of a refusal; automatic Routes still give it read work only
 - Changed where Lane control files live: the Lane policy, relay requests, and answer markers now sit in `~/.maestro/control`, outside the project tree
+- Changed the deny reasons to name every accepted read token and every read-only agent type
+- Changed the Council brief to tell a Seat what to say when nothing is wrong
+- Changed the skill to be shorter, to name three verbs, and to point at `maestro help` for the formats
 
 ### Fixed
 - Fixed the Homebrew cask so it no longer prints a deprecation warning for `postflight` on install

@@ -44,9 +44,14 @@ Then check the machine and connect the harnesses:
 maestro doctor           # harness versions, logins, the Jev key, Solo
 maestro key set          # store the Jev key in ~/.maestro/env (optional; the rules table works without it)
 maestro adapter install  # connect every harness found on this machine
+maestro init             # in each project: write .agents/maestro.toml
 ```
 
 `maestro adapter` prints the steps for each harness and writes nothing. `maestro adapter install` does the steps. Maestro touches nothing else in the configuration of a harness. To connect one harness only, give its name: `maestro adapter install claude`.
+
+`maestro init` writes the Project file `.agents/maestro.toml`. That file puts the project in hook scope.
+
+An install from before this version reports `partial` in `maestro doctor` until `maestro adapter install` runs again.
 
 ### Connect Claude Code
 
@@ -57,7 +62,7 @@ maestro adapter install claude
 It writes two paths:
 
 - `~/.claude/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
-- `~/.claude/settings.json` gets one `PreToolUse` hook entry for `maestro hook`; Maestro adds or replaces only its own entry and keeps all other settings.
+- `~/.claude/settings.json` gets one `PreToolUse` hook entry and one `UserPromptSubmit` hook entry for `maestro hook`; Maestro adds or replaces only its own entries and keeps all other settings.
 
 Manual step: start a new Claude Code session. It loads the hook.
 
@@ -82,9 +87,9 @@ maestro adapter install codex
 It writes two paths:
 
 - `~/.agents/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
-- `~/.codex/hooks.json` gets one `PreToolUse` hook entry for `maestro hook`; Maestro adds or replaces only its own entry and keeps all other hooks.
+- `~/.codex/hooks.json` gets one `PreToolUse` hook entry and one `UserPromptSubmit` hook entry for `maestro hook`; Maestro adds or replaces only its own entries and keeps all other hooks.
 
-Manual step: start Codex, open `/hooks`, and trust the Maestro `PreToolUse` hook. This review is a security boundary. Only you cross it. An agent must not trust the hook for you.
+Manual step: start Codex, open `/hooks`, and trust both the Maestro `PreToolUse` hook and the Maestro `UserPromptSubmit` hook. This review is a security boundary. Only you cross it. An agent must not trust the hooks for you.
 
 Maestro passes `-c 'projects={"<root>"={trust_level="trusted"}}'` to each Codex tab to trust the project root for that process.
 
@@ -104,10 +109,11 @@ The probe denies only where the hook is in scope: with the default `[hook] scope
 maestro adapter install grok
 ```
 
-It writes two paths:
+It writes three paths:
 
 - `~/.agents/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
 - `~/.grok/hooks/maestro.json` is a file that Maestro owns; Maestro writes the whole file.
+- `~/.grok/rules/maestro.md` is the rules file that Maestro owns; it carries the Reminder, because Grok hooks cannot add context.
 
 Manual step: start a new Grok session. It binds the hook.
 
@@ -138,7 +144,7 @@ maestro adapter install agy
 It writes two paths:
 
 - `~/.gemini/antigravity-cli/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
-- `~/.gemini/config/hooks.json` gets one `maestro` key; Maestro sets only that key and keeps all other keys.
+- `~/.gemini/config/hooks.json` gets one `maestro` key, which also holds a `PreInvocation` entry; Maestro sets only that key and keeps all other keys.
 
 Manual step: start a new Antigravity session. It loads the hook.
 
@@ -161,6 +167,8 @@ You install once and plan with your agent. The agent hands finished plans to Mae
 3. When the plan is finished, the agent writes the plan file and runs `maestro run` itself. Nobody asks you to type anything.
 4. Inside Solo, each task is a todo and each result is a comment, and a finished run wakes the agent. Outside Solo, the agent reports from `maestro wait`.
 5. Maestro needs you when a verb exits with code 2: a held breakdown, a paused run, a blocked task, or a single-opinion council. The agent reads the report and either answers or asks you one question.
+
+Inside hook scope, the Orchestrator gets a one-line Reminder on every prompt in Claude Code and Codex, and before every model call in Antigravity. In Grok, the rules file loads in every session and states the scope condition in words, so there the scope is best-effort.
 
 For example, you end a grilling session with a plan for a new probe feature. The agent writes `.agents/plans/probe-feature.md` and starts the run. Some minutes later it tells you that the three tasks are done and the checks pass. If a lane needs an answer, the agent asks you one question and passes your answer on.
 
