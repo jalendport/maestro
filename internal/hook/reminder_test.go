@@ -246,7 +246,7 @@ func TestDenyReasons(t *testing.T) {
 		t.Fatalf("Solo decision = %+v", solo)
 	}
 	sub := Decide(&Call{Tool: "Agent", Input: map[string]any{"subagent_type": "writer"}}, "all")
-	wantSub := `Sub-agent "writer" may write code; Maestro routes that work. Write a Brief file and run ` + "`maestro dispatch <brief.md>`. Read-only legwork may stay on a read-only agent type: Explore, Plan, claude-code-guide."
+	wantSub := `Sub-agent "writer" may write code; Maestro routes that work. Write a Brief file and run ` + "`maestro dispatch <brief.md>`. Read-only legwork may stay on a read-only agent type: Explore, Plan, claude-code-guide, or a custom agent whose definition file keeps Edit, Write, NotebookEdit out of its tools."
 	if sub.Allow || sub.Reason != wantSub {
 		t.Fatalf("sub-agent decision = %+v", sub)
 	}

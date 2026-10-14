@@ -37,8 +37,11 @@ type Call struct {
 	WorkspacePaths []string
 }
 
-// readOnlyAgents are Claude agent types that only read.
+// readOnlyAgents are the built-in Claude agent types that only read. A custom
+// agent counts as read-only when its definition file keeps writeTools out.
 var readOnlyAgents = []string{"Explore", "Plan", "claude-code-guide"}
+
+var writeTools = []string{"Edit", "Write", "NotebookEdit"}
 
 // Parse reads a payload. harness selects the shape; "" detects it from the keys.
 func Parse(harness string, payload []byte) (*Call, error) {
@@ -124,12 +127,10 @@ func Decide(c *Call, scope string) Decision {
 		if sub == "" {
 			sub, _ = c.Input["agent"].(string)
 		}
-		for _, agent := range readOnlyAgents {
-			if strings.EqualFold(sub, agent) {
-				return Decision{Allow: true}
-			}
+		if readOnlyAgent(sub, c.CWD) {
+			return Decision{Allow: true}
 		}
-		return Decision{Allow: false, Reason: fmt.Sprintf("Sub-agent %q may write code; Maestro routes that work. Write a Brief file and run `maestro dispatch <brief.md>`. Read-only legwork may stay on a read-only agent type: %s.", nonEmpty(sub, tool), strings.Join(readOnlyAgents, ", "))}
+		return Decision{Allow: false, Reason: fmt.Sprintf("Sub-agent %q may write code; Maestro routes that work. Write a Brief file and run `maestro dispatch <brief.md>`. Read-only legwork may stay on a read-only agent type: %s, or a custom agent whose definition file keeps %s out of its tools.", nonEmpty(sub, tool), strings.Join(readOnlyAgents, ", "), strings.Join(writeTools, ", "))}
 	}
 	return Decision{Allow: true}
 }
@@ -192,6 +193,120 @@ func Render(harness string, d interface{ verdict() Verdict }) []byte {
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(out)
 	return bytes.TrimSpace(buf.Bytes())
+}
+
+// readOnlyAgent reports whether a sub-agent type only reads: a built-in
+// read-only type, or a custom agent whose definition file either lists its
+// tools without any of writeTools or disallows every one of them.
+func readOnlyAgent(sub, cwd string) bool {
+	for _, agent := range readOnlyAgents {
+		if strings.EqualFold(sub, agent) {
+			return true
+		}
+	}
+	tools, disallowed, ok := agentTools(sub, cwd)
+	switch {
+	case !ok:
+		return false
+	case tools != nil:
+		return !hasAny(tools, writeTools)
+	case disallowed != nil:
+		return hasAll(disallowed, writeTools)
+	}
+	return false
+}
+
+// agentTools reads the `tools` and `disallowedTools` front matter of the
+// agent definition `<name>.md`, looked up under `.claude/agents` from cwd
+// upward and then in the Claude home. A missing list stays nil.
+func agentTools(name, cwd string) (tools, disallowed []string, ok bool) {
+	if name == "" || strings.ContainsAny(name, `/\`) {
+		return nil, nil, false
+	}
+	var raw []byte
+	for _, dir := range agentDirs(cwd) {
+		b, err := os.ReadFile(filepath.Join(dir, name+".md"))
+		if err == nil {
+			raw = b
+			break
+		}
+	}
+	if raw == nil {
+		return nil, nil, false
+	}
+	lines := strings.Split(string(raw), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return nil, nil, false
+	}
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			break
+		}
+		key, value, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "tools":
+			tools = toolList(value)
+		case "disallowedTools":
+			disallowed = toolList(value)
+		}
+	}
+	return tools, disallowed, true
+}
+
+func agentDirs(cwd string) []string {
+	var dirs []string
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	if dir, err := filepath.Abs(cwd); err == nil {
+		for {
+			dirs = append(dirs, filepath.Join(dir, ".claude", "agents"))
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(config.ClaudeHome(home), "agents"))
+	}
+	return dirs
+}
+
+// toolList splits a front matter value: comma-separated, with or without brackets.
+func toolList(value string) []string {
+	value = strings.Trim(strings.TrimSpace(value), "[]")
+	out := []string{}
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.Trim(strings.TrimSpace(item), `"'`); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func hasAny(list, wanted []string) bool {
+	for _, w := range wanted {
+		for _, item := range list {
+			if strings.EqualFold(item, w) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasAll(list, wanted []string) bool {
+	for _, w := range wanted {
+		if !hasAny(list, []string{w}) {
+			return false
+		}
+	}
+	return true
 }
 
 func nonEmpty(a, b string) string {

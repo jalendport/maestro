@@ -108,6 +108,60 @@ func TestClaudeExploreAllowed(t *testing.T) {
 	}
 }
 
+func TestCustomReadOnlyAgents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	project := t.TempDir()
+	write := func(dir, name, front string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte("---\nname: "+name+"\n"+front+"---\n\nBody.\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	userAgents := filepath.Join(home, ".claude", "agents")
+	projectAgents := filepath.Join(project, ".claude", "agents")
+	write(userAgents, "scout", "disallowedTools: Edit, Write, NotebookEdit, Agent\nmodel: haiku\n")
+	write(userAgents, "grunt", "disallowedTools: Agent\nmodel: sonnet\n")
+	write(userAgents, "reader", "tools: Read, Grep, Glob, Bash\n")
+	write(userAgents, "quoted", "tools: [\"Read\", \"Grep\"]\n")
+	write(userAgents, "editor", "tools: Read, Edit\n")
+	write(userAgents, "partial", "disallowedTools: Edit, Write\n")
+	write(userAgents, "plain", "model: sonnet\n")
+	write(projectAgents, "local", "tools: Read\n")
+	write(userAgents, "shadowed", "tools: Read\n")
+	write(projectAgents, "shadowed", "tools: Read, Write\n")
+	if err := os.WriteFile(filepath.Join(userAgents, "nofront.md"), []byte("tools: Read\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		allow bool
+	}{
+		{"scout", true}, {"SCOUT", true}, {"grunt", false}, {"reader", true}, {"quoted", true}, {"editor", false},
+		{"partial", false}, {"plain", false}, {"local", true}, {"shadowed", false}, {"nofront", false},
+		{"missing", false}, {"../scout", false}, {"", false},
+	} {
+		for _, cwd := range []string{project, filepath.Join(project, "sub", "dir")} {
+			call := &Call{Tool: "Agent", CWD: cwd, Input: map[string]any{"subagent_type": tc.name}}
+			if d := Decide(call, "all"); d.Allow != tc.allow {
+				t.Fatalf("%q from %s: %+v, want allow=%v", tc.name, cwd, d, tc.allow)
+			}
+		}
+	}
+	// The project file wins over the Claude home for the same name; outside the project only the home counts.
+	if d := Decide(&Call{Tool: "Agent", CWD: t.TempDir(), Input: map[string]any{"subagent_type": "shadowed"}}, "all"); !d.Allow {
+		t.Fatalf("home definition outside the project: %+v", d)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, "other"))
+	if d := Decide(&Call{Tool: "Agent", CWD: project, Input: map[string]any{"subagent_type": "scout"}}, "all"); d.Allow {
+		t.Fatalf("CLAUDE_CONFIG_DIR must move the lookup: %+v", d)
+	}
+}
+
 func TestSoloSpawnShapes(t *testing.T) {
 	c, _ := Parse("claude", []byte(`{"tool_name":"mcp__solo__spawn_agent","tool_input":{"agent_tool_id":5,"extra_args":["--model","opus"]}}`))
 	if Decide(c, "all").Allow {
