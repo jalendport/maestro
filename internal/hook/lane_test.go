@@ -1,11 +1,14 @@
 package hook
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jalendport/maestro/internal/brief"
 )
 
 func TestParseAntigravityCwdAndArgs(t *testing.T) {
@@ -254,7 +257,7 @@ func TestFindLaneFolder(t *testing.T) {
 		{"Task transcript", "", "agy", "{\"message\":\"Read the file `/project/.agents/maestro/runs/r-test/abcd/brief.md` in full, then follow it.\"}\n", "/project/.agents/maestro/runs/r-test/abcd"},
 		{"Seat transcript", "", "agy", "{\"message\":\"Read the file `/project/.agents/maestro/councils/review/agy-flash/brief.md` in full, then follow it.\"}\n", "/project/.agents/maestro/councils/review/agy-flash"},
 		{"no Pointer", "", "agy", "{\"message\":\"Hello\"}\n", ""},
-		{"other Harness", "", "claude", "Read `/project/.agents/maestro/runs/r-test/abcd/brief.md`", "/project/.agents/maestro/runs/r-test/abcd"},
+		{"Claude path only", "", "claude", "Read `/project/.agents/maestro/runs/r-test/abcd/brief.md`", ""},
 		{"empty transcript path", "", "claude", "", ""},
 		{"first Pointer", "", "agy", "`/project/.agents/maestro/runs/r-test/abcd/brief.md` `/project/.agents/maestro/runs/r-next/efgh/brief.md`", "/project/.agents/maestro/runs/r-test/abcd"},
 		{"past limit", "", "agy", strings.Repeat("x", 64*1024) + " `/project/.agents/maestro/runs/r-test/abcd/brief.md`", ""},
@@ -273,6 +276,52 @@ func TestFindLaneFolder(t *testing.T) {
 				t.Fatalf("folder = %q, %v; want %q", got, ok, tc.want)
 			}
 		})
+	}
+}
+
+func TestFindLaneFolderPointerSentence(t *testing.T) {
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	for _, harness := range []string{"claude", "codex", "agy"} {
+		for _, folder := range []string{
+			"/project/.agents/maestro/runs/r-test/abcd",
+			"/project/.agents/maestro/councils/review/agy-flash",
+			"/project/.agents/maestro/councils/review/round-2/agy-flash",
+		} {
+			path := folder + "/brief.md"
+			for _, tc := range []struct {
+				name, text string
+				pointer    bool
+			}{
+				{"path only", path, false},
+				{"cat", "cat " + path, false},
+				{"partial sentence", "Read the file `" + path + "` in full", false},
+				{"missing period", "Read the file `" + path + "` in full, then follow it", false},
+				{"Pointer", brief.Pointer(path), true},
+				{"earlier path", "/other/.agents/maestro/runs/r-other/task/brief.md\n" + brief.Pointer(path), true},
+			} {
+				t.Run(harness+"/"+folder+"/"+tc.name, func(t *testing.T) {
+					body, err := json.Marshal(map[string]string{"message": tc.text})
+					if err != nil {
+						t.Fatal(err)
+					}
+					transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
+					if err := os.WriteFile(transcript, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					want := ""
+					if tc.pointer || harness == "agy" {
+						want = folder
+					}
+					if harness == "agy" && tc.name == "earlier path" {
+						want = "/other/.agents/maestro/runs/r-other/task"
+					}
+					got, ok := FindLaneFolder(&Call{Harness: harness, TranscriptPath: transcript})
+					if got != want || ok != (want != "") {
+						t.Fatalf("folder = %q, %v; want %q", got, ok, want)
+					}
+				})
+			}
+		}
 	}
 }
 

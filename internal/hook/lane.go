@@ -31,6 +31,7 @@ type Verdict struct {
 func (v Verdict) verdict() Verdict { return v }
 
 var lanePointer = regexp.MustCompile("([^\\s`\"']+/\\.agents/maestro/(?:runs/[^/\\s`\"']+|councils/[^/\\s`\"']+(?:/round-[0-9]+)?)/[^/\\s`\"']+)/brief\\.md")
+var lanePointerSentence = regexp.MustCompile("Read the file `" + lanePointer.String() + "` in full, then follow it\\.")
 
 func FindLaneFolder(c *Call) (string, bool) {
 	if folder := os.Getenv("MAESTRO_TASK_FOLDER"); folder != "" {
@@ -48,7 +49,11 @@ func FindLaneFolder(c *Call) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	match := lanePointer.FindSubmatch(b)
+	pointer := lanePointer
+	if c.Harness == "claude" || c.Harness == "codex" {
+		pointer = lanePointerSentence
+	}
+	match := pointer.FindSubmatch(b)
 	if len(match) == 0 {
 		return "", false
 	}
