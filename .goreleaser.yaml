@@ -35,9 +35,12 @@ homebrew_casks:
     description: Routes, dispatches, checks, and reviews agent work across Claude Code, Codex, Grok, and Antigravity
     binaries:
       - maestro
-    hooks:
-      post:
-        install: |
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/maestro"]
-          end
+    # Homebrew deprecated the postflight stanza for postflight_steps. GoReleaser
+    # renders postflight_steps from hooks.post.install_steps only from 2.19, so
+    # until that release the stanza goes in through custom_block.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/maestro"]
+        end
+      end

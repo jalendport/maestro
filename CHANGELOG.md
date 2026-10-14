@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Fixed
+- Fixed the Homebrew cask so it no longer prints a deprecation warning for `postflight` on install
 - Fixed the README so the Homebrew upgrade command uses the full tap path
 
 ## 1.1.0 - 2026-10-13
