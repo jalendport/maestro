@@ -175,7 +175,7 @@ func runSeat(env *dispatch.Env, c *Council, s *Seat, round int, roundDir string,
 func councilBrief(c *Council, s *Seat, round int, priors []string) *brief.Brief {
 	var goal strings.Builder
 	goal.WriteString(strings.TrimSpace(c.Question))
-	goal.WriteString("\n\nFind what is wrong. Answer PASS only when nothing real is wrong.")
+	goal.WriteString("\n\nFind what is wrong. When nothing real is wrong, say so under `## Answer` and leave `## Findings` empty.")
 	if s.Author {
 		goal.WriteString("\nA Lane of your family wrote this. Argue against it.")
 	}

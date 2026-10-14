@@ -134,7 +134,7 @@ func CouncilShape(reportPath string, byMessage bool) string {
 	} else {
 		fmt.Fprintf(&w, "## Report\n\nWhen you finish, write the file `%s` with exactly these headings, in this order, and end with the position line.\n\n", reportPath)
 	}
-	w.WriteString("```markdown\n## Answer\n(your answer; PASS when nothing real is wrong)\n\n## Findings\n- `file:line` — one finding, with a confidence word (high, medium, low)\n\n## Concerns\n- (anything the answer rests on that you could not verify)\n\nPOSITION: confirmed\n```\n")
+	w.WriteString("```markdown\n## Answer\n(your answer; when nothing real is wrong, say so)\n\n## Findings\n- `file:line` — one finding, with a confidence word (high, medium, low)\n\n## Concerns\n- (anything the answer rests on that you could not verify)\n\nPOSITION: confirmed\n```\n")
 	w.WriteString("\nThe position line is one of `POSITION: confirmed` (you stand by your answer), `POSITION: changed` (you refined it after reading the other answers), or `POSITION: withdrawn` (you no longer hold it).\n")
 	return w.String()
 }
