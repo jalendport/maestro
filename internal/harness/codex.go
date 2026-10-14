@@ -49,12 +49,12 @@ func (c *Codex) Catalog() ([]Model, string, error) {
 	return models, "", nil
 }
 
+// Enforcement: the sandbox holds both shapes. read-only blocks every write,
+// and workspace-write confines writes to the project, the Run folder, and
+// the extra directories.
 func (c *Codex) Enforcement(access string) string {
-	switch access {
-	case "read":
+	if access == "read" || access == "edit" {
 		return Enforced
-	case "edit":
-		return BestEffort
 	}
 	return NoShape
 }

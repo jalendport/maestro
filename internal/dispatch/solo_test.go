@@ -25,7 +25,7 @@ func TestTabArgsPerHarnessAndAccess(t *testing.T) {
 		"Bash(ls *)", "Bash(cat *)", "Bash(ls)", "Bash(git status)",
 		"Write(//" + folder + "/**)", "Edit(//" + folder + "/**)",
 		"mcp__solo__whoami", "mcp__solo__get_process_status", "mcp__solo__get_process_output", "mcp__solo__todo_comment_create"}
-	editClaude := []string{"--permission-mode", "acceptEdits", "--allowedTools",
+	editClaude := []string{"--setting-sources", "", "--permission-mode", "acceptEdits", "--allowedTools",
 		"Bash(git diff *)", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git blame *)", "Bash(git status)", "Bash(git diff)", "Bash(ls *)", "Bash(cat *)", "WebFetch", "WebSearch",
 		"Bash(go test ./...)", "Bash(go test ./... *)", "mcp__solo__*", "--add-dir", "/extra"}
 	for _, tt := range []struct {

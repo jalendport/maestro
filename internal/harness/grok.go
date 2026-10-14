@@ -40,12 +40,10 @@ func (g *Grok) Catalog() ([]Model, string, error) {
 	return models, hint, nil
 }
 
+// Enforcement: the Maestro hook holds both shapes, as it does for Antigravity.
 func (g *Grok) Enforcement(access string) string {
-	switch access {
-	case "read":
+	if access == "read" || access == "edit" {
 		return Enforced
-	case "edit":
-		return BestEffort
 	}
 	return NoShape
 }

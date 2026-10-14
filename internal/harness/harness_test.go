@@ -93,6 +93,26 @@ func TestClaudeReadShapeIsolatesSettingsAndSoloTools(t *testing.T) {
 	}
 }
 
+// Every Harness holds both Access values with no help from the model, so a
+// named Lane on any of them takes read and edit work alike.
+func TestEveryHarnessEnforcesBothShapes(t *testing.T) {
+	reg := New(map[string]string{"claude": "/bin/claude", "codex": "/bin/codex", "grok": "/bin/grok", "agy": "/bin/agy"})
+	for _, name := range []string{"claude", "codex", "grok", "agy"} {
+		h, ok := reg.Get(name)
+		if !ok {
+			t.Fatal(name)
+		}
+		for _, access := range []string{"read", "edit"} {
+			if got := h.Enforcement(access); got != Enforced {
+				t.Fatalf("%s %s: %q, want %q", name, access, got, Enforced)
+			}
+		}
+		if got := h.Enforcement("other"); got != NoShape {
+			t.Fatalf("%s other: %q", name, got)
+		}
+	}
+}
+
 func TestGrokReadAllowsOnlyReadTools(t *testing.T) {
 	g := &Grok{bin: "/bin/grok"}
 	for i, build := range []func(Launch) (*Command, error){g.Build, g.BuildTab} {

@@ -168,7 +168,8 @@ func TestRequestedLaneRefusesAccessOrMissingHook(t *testing.T) {
 	}{
 		{"agy-flash", "read", "agy needs its Maestro hook: run maestro adapter install agy"},
 		{"agy-flash:high", "edit", "agy needs its Maestro hook: run maestro adapter install agy"},
-		{"codex-sol", "edit", "its edit shape is best-effort"},
+		{"grok", "read", "grok needs its Maestro hook: run maestro adapter install grok"},
+		{"grok:high", "edit", "grok needs its Maestro hook: run maestro adapter install grok"},
 	} {
 		for _, source := range []string{"brief", "flag", "seat"} {
 			t.Run(tc.lane+"/"+tc.access+"/"+source, func(t *testing.T) {
@@ -185,7 +186,7 @@ func TestRequestedLaneRefusesAccessOrMissingHook(t *testing.T) {
 				}
 				route, err := rt.Route(req)
 				want := fmt.Sprintf("lane %s cannot take %s work: %s (see maestro roster)", id, tc.access, tc.reason)
-				if strings.HasPrefix(id, "agy-") {
+				if strings.Contains(tc.reason, "needs its Maestro hook") {
 					want = fmt.Sprintf("family %s fails pre-flight: %s", id, tc.reason)
 				}
 				if route != nil || err == nil || err.Error() != want {

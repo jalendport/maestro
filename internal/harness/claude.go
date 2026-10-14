@@ -39,12 +39,13 @@ var claudeModelID = regexp.MustCompile(`^claude-[a-z][a-z0-9]*-[0-9]+-[0-9]+(?:-
 // ClaudeModelID reports whether an id has the CLI's full model-id shape.
 func ClaudeModelID(id string) bool { return claudeModelID.MatchString(id) }
 
+// Enforcement: both shapes ignore the user's settings, so only the allowlist
+// and the permission mode decide. A read Lane writes only in its Run folder;
+// an edit Lane writes only in the project and the extra directories, and any
+// other call prompts, which a tab relays and a one-shot denies.
 func (c *Claude) Enforcement(access string) string {
-	switch access {
-	case "read":
+	if access == "read" || access == "edit" {
 		return Enforced
-	case "edit":
-		return BestEffort
 	}
 	return NoShape
 }
@@ -103,7 +104,9 @@ func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 		if l.InSolo {
 			tools = append(tools, "mcp__solo__*")
 		}
-		flags = append(flags, "--permission-mode", mode, "--allowedTools")
+		// The user's own settings could widen the allowlist with write-capable
+		// commands, so the edit shape ignores them like the read shape does.
+		flags = append(flags, "--setting-sources", "", "--permission-mode", mode, "--allowedTools")
 		flags = append(flags, tools...)
 		for _, d := range l.Dirs {
 			flags = append(flags, "--add-dir", d)
