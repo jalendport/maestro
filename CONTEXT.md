@@ -58,6 +58,10 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Ledger** — the one global file (`~/.maestro/ledger.jsonl`) where Maestro records every finished Dispatch, Council, and Run. Append only; rows are never updated.
 - **Run state** — the file (`run.json` in the Run folder) the per-Run supervisor rewrites while a Run is live. `maestro status` reads it.
 - **Run report** — the short text (`report.md` in the Run folder) the Orchestrator gets when a Run ends or pauses: a header, one line per Task, then the items that need the Orchestrator.
+- **Reminder** — the one-line text that tells the Orchestrator, on every prompt, that Maestro owns the work after the thinking is done. One constant; every Carrier delivers the same text.
+- **Reminder event** — a Harness hook event that fires before the model sees a prompt: Claude Code and Codex `UserPromptSubmit`, Antigravity `PreInvocation`. The hook answers it with the Reminder when the project is in hook scope.
+- **Carrier** — the per-Harness path that delivers the Reminder: a hook entry for a Reminder event, or a rules file where a Harness's hooks cannot add context (Grok).
+- **Project file** — `.agents/maestro.toml` at the project root. Its presence puts the project in hook scope; `maestro init` writes it.
 
 ## Words to avoid
 
