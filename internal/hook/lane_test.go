@@ -296,6 +296,30 @@ func transcriptPromptLine(t *testing.T, harness string, content any) string {
 	return string(body) + "\n"
 }
 
+// codexContextLine is a Codex user message that carries injected context of
+// the given kinds. For Claude, whose transcripts have no kinds, it is an
+// ordinary user prompt, which stops the scan.
+func codexContextLine(t *testing.T, harness string, kinds ...string) string {
+	t.Helper()
+	if harness != "codex" {
+		return transcriptPromptLine(t, harness, "Explain this code.")
+	}
+	var list []any
+	for _, kind := range kinds {
+		list = append(list, kind)
+	}
+	entry := map[string]any{"type": "response_item", "payload": map[string]any{
+		"type": "message", "role": "user",
+		"content": []any{map[string]any{"type": "input_text", "text": "Explain this code."}},
+		"internal_chat_message_metadata_passthrough": map[string]any{"content_item_kinds": list},
+	}}
+	body, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body) + "\n"
+}
+
 func TestFindLaneFolderRealTranscriptShapes(t *testing.T) {
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	folder := "/project/.agents/maestro/runs/r-test/abcd"
@@ -348,6 +372,8 @@ func TestFindLaneFolderFirstUserPromptAndLimits(t *testing.T) {
 			{"tool result before prompt", toolResult + textBlocks, true},
 			{"tool result only", toolResult, false},
 			{"non-text user message", transcriptPromptLine(t, harness, []any{map[string]any{"type": "image"}}) + pointer, true},
+			{"context kinds before prompt", codexContextLine(t, harness, "host_skills.instructions") + codexContextLine(t, harness, "agents_md.instructions", "environments.environment_context") + pointer, harness == "codex"},
+			{"context kind beside user text", codexContextLine(t, harness, "agents_md.instructions", "user.text") + pointer, false},
 			{"invalid JSON before prompt", "not JSON\n" + pointer, true},
 			{"unreadable transcript", "", false},
 		} {
@@ -379,6 +405,7 @@ func TestFindLaneFolderPointerSentence(t *testing.T) {
 			"/project/.agents/maestro/runs/r-test/abcd",
 			"/project/.agents/maestro/councils/review/agy-flash",
 			"/project/.agents/maestro/councils/review/round-2/agy-flash",
+			".agents/maestro/runs/r-test/abcd", // a headless Lane's Pointer is project-relative
 		} {
 			path := folder + "/brief.md"
 			for _, tc := range []struct {

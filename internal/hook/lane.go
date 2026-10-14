@@ -31,7 +31,9 @@ type Verdict struct {
 
 func (v Verdict) verdict() Verdict { return v }
 
-var lanePointer = regexp.MustCompile("([^\\s`\"']+/\\.agents/maestro/(?:runs/[^/\\s`\"']+|councils/[^/\\s`\"']+(?:/round-[0-9]+)?)/[^/\\s`\"']+)/brief\\.md")
+// lanePointer matches a Brief path; the prefix before `.agents/` is optional
+// because a headless Lane gets a project-relative Pointer.
+var lanePointer = regexp.MustCompile("((?:[^\\s`\"']+/)?\\.agents/maestro/(?:runs/[^/\\s`\"']+|councils/[^/\\s`\"']+(?:/round-[0-9]+)?)/[^/\\s`\"']+)/brief\\.md")
 var lanePointerSentence = regexp.MustCompile("^\\s*Read the file `" + lanePointer.String() + "` in full, then follow it\\.")
 
 func FindLaneFolder(c *Call) (string, bool) {
@@ -98,11 +100,12 @@ func transcriptUserPrompt(harness string, line []byte) (string, bool) {
 		if entry.Type != "response_item" || m.Type != "message" || m.Role != "user" {
 			return "", false
 		}
-		// Codex stores injected project rules and environment context as user messages.
+		// Codex stores injected project rules and environment context as user
+		// messages; only a `user.*` kind is something the user typed.
 		if len(m.Meta.Kinds) > 0 {
 			contextOnly := true
 			for _, kind := range m.Meta.Kinds {
-				if kind != "agents_md.instructions" && kind != "environments.environment_context" {
+				if strings.HasPrefix(kind, "user.") {
 					contextOnly = false
 				}
 			}

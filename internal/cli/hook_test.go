@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jalendport/maestro/internal/adapter"
+	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/hook"
 )
@@ -428,18 +429,58 @@ func TestHookCommandClaudeAndCodexToolCallsSkipTranscript(t *testing.T) {
 	if err := os.WriteFile(config.UserFile(), []byte("[hook]\nscope = \"all\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The transcript names a real Lane whose policy would answer differently
+	// from the plain spawn rule: a read Lane denies this command, and a Lane
+	// without a policy denies everything. Either answer means the transcript was read.
 	for _, harness := range []string{"claude", "codex"} {
-		t.Run(harness, func(t *testing.T) {
-			transcript := filepath.Join(t.TempDir(), "missing.jsonl")
-			payload, err := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "transcript_path": transcript, "tool_name": "Agent", "tool_input": map[string]any{"subagent_type": "writer"}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := string(hook.Render(harness, hook.Decide(&hook.Call{Tool: "Agent", Input: map[string]any{"subagent_type": "writer"}}, "all")))
-			if got := runHookPayload(t, string(payload), harness); got != want || !strings.Contains(got, `"permissionDecision":"deny"`) {
-				t.Fatalf("output = %q, want %q", got, want)
-			}
-		})
+		for _, tc := range []struct {
+			name, tool string
+			input      map[string]any
+			policy     bool
+		}{
+			{"read Lane policy", "run_command", map[string]any{"CommandLine": "go test ./..."}, true},
+			{"no Lane policy", "Agent", map[string]any{"subagent_type": "writer"}, false},
+		} {
+			t.Run(harness+"/"+tc.name, func(t *testing.T) {
+				folder := filepath.Join(t.TempDir(), ".agents", "maestro", "runs", "r-test", "task")
+				if err := os.MkdirAll(folder, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if tc.policy {
+					control := config.ControlDirForFolder(folder)
+					if err := os.MkdirAll(control, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(`{"access":"read","root":"/project","run_folder":"`+folder+`"}`), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
+				line := map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": brief.Pointer(filepath.Join(folder, "brief.md"))}}
+				if harness == "codex" {
+					line = map[string]any{"type": "response_item", "payload": map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": brief.Pointer(filepath.Join(folder, "brief.md"))}}}}
+				}
+				body, err := json.Marshal(line)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(transcript, append(body, '\n'), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				call := &hook.Call{Harness: harness, TranscriptPath: transcript}
+				if got, found := hook.FindLaneFolder(call); !found || got != folder {
+					t.Fatalf("the fixture must name a Lane: %q, %v", got, found)
+				}
+				payload, err := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "transcript_path": transcript, "tool_name": tc.tool, "tool_input": tc.input})
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := string(hook.Render(harness, hook.Decide(&hook.Call{Harness: harness, Tool: tc.tool, Input: tc.input}, "all")))
+				if got := runHookPayload(t, string(payload), harness); got != want || strings.Contains(got, "Lane") {
+					t.Fatalf("output = %q, want %q", got, want)
+				}
+			})
+		}
 	}
 }
 

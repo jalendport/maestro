@@ -54,6 +54,7 @@ func TestReminderPromptPointer(t *testing.T) {
 			"/project/.agents/maestro/runs/r-test/task",
 			"/project/.agents/maestro/councils/review/seat",
 			"/project/.agents/maestro/councils/review/round-2/seat",
+			".agents/maestro/runs/r-test/task", // a headless Lane's Pointer is project-relative
 		} {
 			path := folder + "/brief.md"
 			pointer := "Read the file `" + path + "` in full, then follow it."

@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Changed the skill to be shorter, to name three verbs, and to point at `maestro help` for the formats
 
 ### Fixed
+- Fixed the Lane signal for a project-relative Pointer and for Codex context messages of a kind Maestro has not seen
 - Fixed the diff a retried or resumed Task is judged on: it now covers the work of every attempt, so the gate and the end-of-run Council see the whole Task and not the last attempt's slice
 - Fixed the Homebrew cask so it no longer prints a deprecation warning for `postflight` on install
 - Fixed the README so the Homebrew upgrade command uses the full tap path
