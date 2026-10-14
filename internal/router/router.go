@@ -336,8 +336,9 @@ func (rt *Router) candidates(req Request, level roster.Level) ([]*roster.Family,
 		subscription = append(subscription, f)
 	}
 	out = subscription
-	// Rule 8: a token-billed Lane joins only when the Task is read-only and
-	// no subscription Lane serves the level.
+	// Rule 8: a token-billed Lane joins an automatic Route only when the Task
+	// is read-only and no subscription Lane serves the level. For edit work,
+	// request it by lane; the Route then carries a warning.
 	servesLevel := false
 	for _, f := range subscription {
 		if f.Serves(level) {
@@ -349,7 +350,7 @@ func (rt *Router) candidates(req Request, level roster.Level) ([]*roster.Family,
 		if req.Access == brief.AccessRead && !servesLevel {
 			out = append(out, f)
 		} else {
-			excluded = append(excluded, Exclusion{f.ID, "token-billed: tasks go to subscriptions"})
+			excluded = append(excluded, Exclusion{f.ID, "token-billed: subscriptions first; request it by lane"})
 		}
 	}
 	return out, excluded
@@ -472,8 +473,10 @@ func (rt *Router) requested(req Request, level, estimate roster.Level, category 
 	if f.RequestOnly {
 		warnings = append(warnings, "request-only family")
 	}
+	// A token-billed Account takes edit work only on request: the Route goes
+	// ahead with a warning, so the orchestrator spends tokens on purpose.
 	if rt.Roster.Accounts[f.Account].Billing == "metered" && req.Access == brief.AccessEdit {
-		return nil, fmt.Errorf("family %s takes read work only: its account is token-billed, and edit work goes to subscriptions", id)
+		warnings = append(warnings, "token-billed account on edit work; subscriptions are preferred")
 	}
 	if req.Project != nil {
 		for _, x := range req.Project.Forbid {

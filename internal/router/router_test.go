@@ -128,6 +128,37 @@ func TestAgyAcceptsReadAndEdit(t *testing.T) {
 	}
 }
 
+func TestTokenBilledLaneTakesEditOnRequestOnly(t *testing.T) {
+	rt := testRouter(t)
+	if result := adapter.Install("agy", os.Getenv("HOME"), "skill"); result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	account := rt.Roster.Accounts["agy"]
+	account.Billing = "metered"
+	rt.Roster.Accounts["agy"] = account
+	b := mustBrief(t, "---\ntitle: x\n---\n## Goal\ng\n## Done\nd\n")
+	route, err := rt.Route(Request{Brief: b, Access: "edit", Lane: "agy-flash"})
+	if err != nil || route.FamilyID != "agy-flash" || !route.Requested {
+		t.Fatalf("route=%+v err=%v", route, err)
+	}
+	if !strings.Contains(route.OverrideWarning, "token-billed") || !strings.Contains(route.ReasonLine, "warning: token-billed") {
+		t.Fatalf("warning missing: %q / %q", route.OverrideWarning, route.ReasonLine)
+	}
+	route, err = rt.Route(Request{Brief: b, Access: "edit"})
+	if err != nil || route.FamilyID == "agy-flash" {
+		t.Fatalf("automatic route=%+v err=%v", route, err)
+	}
+	found := false
+	for _, x := range route.Excluded {
+		if x.Family == "agy-flash" && strings.HasPrefix(x.Rule, "token-billed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("agy-flash not excluded as token-billed: %+v", route.Excluded)
+	}
+}
+
 func TestRequestedLaneRefusesAccessOrMissingHook(t *testing.T) {
 	for _, tc := range []struct {
 		lane, access, reason string

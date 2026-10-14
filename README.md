@@ -7,7 +7,7 @@ Maestro is a local command-line tool that owns agent work after the thinking is 
 ## Features
 
 - **Routing with a reason** — every task goes to one harness, model, and effort, picked by [Jev](https://typesafe.ai) with a deterministic rules table as the fallback, and every route prints one reason line
-- **Subscriptions first** — day-to-day work spreads across the subscriptions you already pay for; token-billed lanes take only read-only work, and the orchestrator's own model is never spent automatically once you set `[router] orchestrator = "<family>"` in `~/.maestro/config.toml`
+- **Subscriptions first** — day-to-day work spreads across the subscriptions you already pay for; token-billed lanes take read-only work automatically and edit work only when you request them by lane, and the orchestrator's own model is never spent automatically once you set `[router] orchestrator = "<family>"` in `~/.maestro/config.toml`
 - **Budgets that bind** — usage windows are harvested from every dispatch and probed when stale, with a block point, a warning, and a reserve for the orchestrator
 - **A permission contract** — a lane gets `read` or `edit` access through each harness's own sandbox or allowlist; Maestro never passes a bypass flag
 - **Checks and a gate** — the project's verification commands run after every edit, a `touch:` list guards the scope, and Jev judges the diff against the brief before a task closes
