@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/ui"
 )
 
@@ -65,15 +66,32 @@ func Relay(folder string, input io.Reader, output io.Writer) error {
 }
 
 func RelayWait(folder string, request RelayRequest) (string, error) {
+	timer := time.NewTimer(relayDeadline)
+	defer timer.Stop()
+	ticker := time.NewTicker(relayPollInterval)
+	defer ticker.Stop()
+	lockPath := filepath.Join(folder, "relay.lock")
+	for {
+		lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			lock.Close()
+			break
+		}
+		if !os.IsExist(err) {
+			return "", err
+		}
+		select {
+		case <-timer.C:
+			return "denied: no answer", nil
+		case <-ticker.C:
+		}
+	}
+	defer os.Remove(lockPath)
 	request.AskedAt = time.Now()
 	if err := writeRelayJSON(folder, "relay.json", request); err != nil {
 		return "", err
 	}
 	defer os.Remove(filepath.Join(folder, "relay.json"))
-	timer := time.NewTimer(relayDeadline)
-	defer timer.Stop()
-	ticker := time.NewTicker(relayPollInterval)
-	defer ticker.Stop()
 	answer := ""
 wait:
 	for {
@@ -133,17 +151,18 @@ func (r *relayTracker) finish(rec *Record, answer string, now time.Time) {
 }
 
 func (r *relayTracker) poll(env *Env, t *Task, rec *Record, name string, now time.Time) {
+	folder := config.ControlDirForFolder(t.Folder)
 	var request RelayRequest
-	b, err := os.ReadFile(filepath.Join(t.Folder, "relay.json"))
+	b, err := os.ReadFile(filepath.Join(folder, "relay.json"))
 	present := err == nil && json.Unmarshal(b, &request) == nil
 	var answer relayAnswer
-	b, err = os.ReadFile(filepath.Join(t.Folder, "relay-answer.json"))
+	b, err = os.ReadFile(filepath.Join(folder, "relay-answer.json"))
 	if err == nil && json.Unmarshal(b, &answer) == nil && (!present || request.AskedAt != answer.Request.AskedAt) {
 		if !r.open() {
 			r.start(env, t, rec, name, answer.Request)
 		}
 		r.finish(rec, answer.Answer, answer.AnsweredAt)
-		_ = os.Remove(filepath.Join(t.Folder, "relay-answer.json"))
+		_ = os.Remove(filepath.Join(folder, "relay-answer.json"))
 	}
 	if present && !r.open() {
 		r.start(env, t, rec, name, request)

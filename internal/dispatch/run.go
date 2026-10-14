@@ -298,7 +298,6 @@ func Execute(env *Env, t *Task) (*Record, error) {
 	}
 attempts:
 	for attempt := first; attempt <= t.MaxAttempt; attempt++ {
-		clearAnswers(t.Folder)
 		rec = runOnce(env, t, b, attempt, retry)
 		wait, again := retryWait(rec.Outcome)
 		// The Run supervisor records its final attempt after the escalation decision.
@@ -362,8 +361,17 @@ func retryWait(outcome Outcome) (time.Duration, bool) {
 func archiveAttempt(folder string, n int) {
 	dst := filepath.Join(folder, FileAttempts, strconv.Itoa(n))
 	_ = os.MkdirAll(dst, 0o755)
-	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, FileBaseline, "tab.log", "answer-allow", "answer-deny", "relay.json", "relay-answer.json", "lane.json"} {
+	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, FileBaseline, "tab.log"} {
 		_ = os.Rename(filepath.Join(folder, f), filepath.Join(dst, f))
+	}
+	control := config.ControlDirForFolder(folder)
+	for _, name := range []string{"lane.json", "answer-allow", "answer-deny", "relay.json", "relay-answer.json"} {
+		src := filepath.Join(control, name)
+		if b, err := os.ReadFile(src); err == nil {
+			if err := os.WriteFile(filepath.Join(dst, name), b, 0o600); err == nil {
+				_ = os.Remove(src)
+			}
+		}
 	}
 }
 
@@ -489,7 +497,12 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	if err != nil {
 		return fail(FailLane, err.Error())
 	}
-	if err := os.WriteFile(filepath.Join(t.Folder, "lane.json"), lane, 0o644); err != nil {
+	control := config.ControlDirForFolder(t.Folder)
+	if err := os.MkdirAll(control, 0o700); err != nil {
+		return fail(FailLane, err.Error())
+	}
+	clearAnswers(control)
+	if err := os.WriteFile(filepath.Join(control, "lane.json"), lane, 0o600); err != nil {
 		return fail(FailLane, err.Error())
 	}
 	if useTab {

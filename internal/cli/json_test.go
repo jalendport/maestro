@@ -8,16 +8,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/council"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/ui"
 )
 
 func TestJSONCommandsPrintOneObject(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	project := t.TempDir()
 	t.Chdir(project)
 	folder := filepath.Join(project, ".agents", "maestro", "runs", "r-0001", "abcd")
 	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.ControlDirForFolder(folder), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	oldQuiet := ui.Quiet
@@ -36,6 +41,9 @@ func TestJSONCommandsPrintOneObject(t *testing.T) {
 				t.Fatalf("extra stdout after result: %q, %v", out, err)
 			}
 		})
+	}
+	if _, err := os.Stat(filepath.Join(config.ControlDirForFolder(folder), "answer-deny")); err != nil {
+		t.Fatalf("answer marker is not in the control folder: %v", err)
 	}
 }
 

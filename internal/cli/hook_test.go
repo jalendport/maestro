@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/hook"
 )
 
@@ -52,14 +53,19 @@ func TestHookCommandAntigravityLane(t *testing.T) {
 		{"other tool", "read", "view_file", map[string]any{}, "allow"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
 			folder := t.TempDir()
 			t.Setenv("MAESTRO_TASK_FOLDER", folder)
+			control := config.ControlDirForFolder(folder)
+			if err := os.MkdirAll(control, 0o700); err != nil {
+				t.Fatal(err)
+			}
 			lane := hook.Lane{Access: tc.access, Root: "/project", RunFolder: "/run", Checks: []string{"go test ./..."}}
 			b, err := json.Marshal(lane)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(folder, "lane.json"), b, 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(control, "lane.json"), b, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			payload, err := json.Marshal(map[string]any{"toolCall": map[string]any{"name": tc.tool, "args": tc.input}})
@@ -83,12 +89,17 @@ func TestHookCommandAntigravityLane(t *testing.T) {
 func TestHookCommandAntigravityRelay(t *testing.T) {
 	for _, answer := range []string{"allow", "deny"} {
 		t.Run(answer, func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
 			folder := t.TempDir()
 			t.Setenv("MAESTRO_TASK_FOLDER", folder)
-			if err := os.WriteFile(filepath.Join(folder, "lane.json"), []byte(`{"access":"edit","tab":true}`), 0o644); err != nil {
+			control := config.ControlDirForFolder(folder)
+			if err := os.MkdirAll(control, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(folder, "answer-"+answer), nil, 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(`{"access":"edit","root":"/project","tab":true}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(control, "answer-"+answer), nil, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			payload := `{"toolCall":{"name":"run_command","args":{"CommandLine":"go run main.go","Cwd":"/project","Blocking":true}}}`
@@ -100,7 +111,7 @@ func TestHookCommandAntigravityRelay(t *testing.T) {
 			if output != want {
 				t.Fatalf("answer: %s, want %s", output, want)
 			}
-			b, err := os.ReadFile(filepath.Join(folder, "relay-answer.json"))
+			b, err := os.ReadFile(filepath.Join(control, "relay-answer.json"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -127,7 +138,8 @@ func TestHookCommandLaneFallback(t *testing.T) {
 		name, lane, harness, payload, want string
 	}{
 		{"outside Lane", "", "agy", `{"toolCall":{"name":"run_command","args":{"CommandLine":"go run main.go"}}}`, `{"decision":"allow"}`},
-		{"invalid Lane", "not JSON", "agy", `{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/outside"}}}`, `{"decision":"allow"}`},
+		{"missing Lane", "", "agy", `{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/outside"}}}`, `{"decision":"deny","reason":"no readable Lane policy"}`},
+		{"invalid Lane", "not JSON", "agy", `{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/outside"}}}`, `{"decision":"deny","reason":"no readable Lane policy"}`},
 		{"Grok", `{"access":"read"}`, "grok", `{"toolName":"run_command","toolInput":{"CommandLine":"go run main.go"}}`, `{"decision":"allow"}`},
 		{"Claude", `{"access":"read"}`, "claude", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"}}`, ""},
 		{"Codex", `{"access":"read"}`, "codex", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"}}`, ""},
@@ -137,8 +149,15 @@ func TestHookCommandLaneFallback(t *testing.T) {
 			folder := t.TempDir()
 			t.Setenv("MAESTRO_HOME", t.TempDir())
 			t.Setenv("MAESTRO_TASK_FOLDER", folder)
+			if tc.name == "outside Lane" {
+				t.Setenv("MAESTRO_TASK_FOLDER", "")
+			}
+			control := config.ControlDirForFolder(folder)
 			if tc.lane != "" {
-				if err := os.WriteFile(filepath.Join(folder, "lane.json"), []byte(tc.lane), 0o644); err != nil {
+				if err := os.MkdirAll(control, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(tc.lane), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -164,5 +183,51 @@ func TestHookCommandUnreadableAntigravityPayload(t *testing.T) {
 	command.SetArgs([]string{"agy"})
 	if got := strings.TrimSpace(captureStdout(t, command.Execute)); got != `{"decision":"allow"}` {
 		t.Fatalf("answer: %s", got)
+	}
+}
+
+func TestHookCommandTranscriptLane(t *testing.T) {
+	for _, kind := range []string{"runs", "councils"} {
+		for _, policy := range []string{"missing", "invalid", "valid"} {
+			t.Run(kind+"/"+policy, func(t *testing.T) {
+				t.Setenv("MAESTRO_HOME", t.TempDir())
+				t.Setenv("MAESTRO_TASK_FOLDER", "")
+				root := t.TempDir()
+				folder := filepath.Join(root, ".agents", "maestro", kind, "review", "seat")
+				transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
+				pointer := "Read the file `" + filepath.Join(folder, "brief.md") + "` in full, then follow it."
+				if err := os.WriteFile(transcript, []byte(pointer), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if policy != "missing" {
+					control := config.ControlDirForFolder(folder)
+					if err := os.MkdirAll(control, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					body := []byte("not JSON")
+					if policy == "valid" {
+						body, _ = json.Marshal(hook.Lane{Access: "read", Root: root, RunFolder: folder})
+					}
+					if err := os.WriteFile(filepath.Join(control, "lane.json"), body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for _, tool := range []string{"run_command", "write_to_file", "replace_file_content", "multi_replace_file_content", "invoke_subagent", "define_subagent", "manage_subagents"} {
+					input := map[string]any{"CommandLine": "pwd", "Cwd": root, "TargetFile": filepath.Join(folder, "result.md"), "agent": "Explore"}
+					payload, _ := json.Marshal(map[string]any{"transcriptPath": transcript, "workspacePaths": []string{root}, "toolCall": map[string]any{"name": tool, "args": input}})
+					got := runHookPayload(t, string(payload), "")
+					want := `{"decision":"deny","reason":"no readable Lane policy"}`
+					if policy == "valid" {
+						want = `{"decision":"auto_approve"}`
+						if strings.Contains(tool, "subagent") {
+							want = `{"decision":"allow"}`
+						}
+					}
+					if got != want {
+						t.Fatalf("%s: %s, want %s", tool, got, want)
+					}
+				}
+			})
+		}
 	}
 }

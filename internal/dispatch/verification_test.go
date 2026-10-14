@@ -117,6 +117,7 @@ func TestNoChecksReasonAppearsInPrintedStatus(t *testing.T) {
 }
 
 func TestRunOnceDrainsFinalStreamBeforeWait(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	root, folder := t.TempDir(), t.TempDir()
 	bin := filepath.Join(t.TempDir(), "claude")
 	payload := filepath.Join(t.TempDir(), "stream")

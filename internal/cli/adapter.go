@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jalendport/maestro/internal/adapter"
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/hook"
 	"github.com/jalendport/maestro/internal/proc"
@@ -44,7 +45,8 @@ func (a *app) hookCmd() *cobra.Command {
 				}
 				return nil
 			}
-			if folder := os.Getenv("MAESTRO_TASK_FOLDER"); folder != "" && call.Harness == "agy" {
+			if taskFolder, found := hook.FindLaneFolder(call); found && call.Harness == "agy" {
+				folder := config.ControlDirForFolder(taskFolder)
 				if lane, ok := hook.LoadLane(folder); ok {
 					verdict := hook.DecideLane(call, lane)
 					if verdict.Kind == "relay" {
@@ -63,6 +65,8 @@ func (a *app) hookCmd() *cobra.Command {
 					fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, verdict)))
 					return nil
 				}
+				fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, hook.Verdict{Kind: "deny", Reason: "no readable Lane policy"})))
+				return nil
 			}
 			decision := hook.Decision{Allow: true}
 			if r, err := roster.Load(); err == nil {

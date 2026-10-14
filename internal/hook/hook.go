@@ -27,10 +27,12 @@ func (d Decision) verdict() Verdict {
 
 // Call is the harness-neutral view of a tool call.
 type Call struct {
-	Harness string
-	CWD     string
-	Tool    string
-	Input   map[string]any
+	Harness        string
+	CWD            string
+	Tool           string
+	Input          map[string]any
+	TranscriptPath string
+	WorkspacePaths []string
 }
 
 // readOnlySubagents are Claude agent types that only read.
@@ -66,6 +68,14 @@ func Parse(harness string, payload []byte) (*Call, error) {
 			c.Input = in
 		}
 	case "agy":
+		c.TranscriptPath, _ = raw["transcriptPath"].(string)
+		if paths, ok := raw["workspacePaths"].([]any); ok {
+			for _, path := range paths {
+				if path, ok := path.(string); ok {
+					c.WorkspacePaths = append(c.WorkspacePaths, path)
+				}
+			}
+		}
 		if tc, ok := raw["toolCall"].(map[string]any); ok {
 			c.Tool, _ = tc["name"].(string)
 			if in, ok := tc["args"].(map[string]any); ok {
@@ -131,6 +141,14 @@ func readOnlyArgs(in map[string]any) bool {
 // explicitly for Grok, whose hooks fail open on silence.
 func Render(harness string, d interface{ verdict() Verdict }) []byte {
 	v := d.verdict()
+	if harness != "agy" {
+		switch v.Kind {
+		case "auto_approve":
+			v.Kind = "allow"
+		case "relay":
+			v = Verdict{Kind: "deny", Reason: "relay is only for Antigravity"}
+		}
+	}
 	var out any
 	switch harness {
 	case "claude", "codex":

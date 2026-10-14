@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Changed Antigravity read enforcement to the Maestro hook, so it no longer depends on the Antigravity settings file
 - Changed the Antigravity hook entry to cover commands and file writes; run `maestro adapter install agy` again
+- Changed where Lane control files live: the Lane policy, relay requests, and answer markers now sit in `~/.maestro/control`, outside the project tree
 
 ### Fixed
 - Fixed the Homebrew cask so it no longer prints a deprecation warning for `postflight` on install

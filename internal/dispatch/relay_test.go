@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jalendport/maestro/internal/config"
 )
 
 func TestRelayDecisionsAndCleanup(t *testing.T) {
@@ -108,7 +110,12 @@ func TestRelayWaitAnswersAndCleanup(t *testing.T) {
 }
 
 func TestRelayTrackerRecordsRepeatedRequestsAndAnswers(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	folder := t.TempDir()
+	control := config.ControlDirForFolder(folder)
+	if err := os.MkdirAll(control, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	task := &Task{Task: "abcd", Folder: folder}
 	rec := &Record{Path: folder, Task: "abcd"}
 	env := &Env{}
@@ -116,7 +123,7 @@ func TestRelayTrackerRecordsRepeatedRequestsAndAnswers(t *testing.T) {
 	start := time.Now().UTC()
 	for i, answer := range []string{"allow", "deny", "denied: no answer"} {
 		request := RelayRequest{ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"pwd"}`), AskedAt: start.Add(time.Duration(i) * 10 * time.Second)}
-		if err := writeRelayJSON(folder, "relay.json", request); err != nil {
+		if err := writeRelayJSON(control, "relay.json", request); err != nil {
 			t.Fatal(err)
 		}
 		tracker.poll(env, task, rec, "claude", request.AskedAt)
@@ -124,10 +131,10 @@ func TestRelayTrackerRecordsRepeatedRequestsAndAnswers(t *testing.T) {
 		if !tracker.open() || len(rec.Events) != i*2+1 {
 			t.Fatalf("open Relay: %+v", rec.Events)
 		}
-		if err := writeRelayJSON(folder, "relay-answer.json", relayAnswer{request, answer, request.AskedAt.Add(5 * time.Second)}); err != nil {
+		if err := writeRelayJSON(control, "relay-answer.json", relayAnswer{request, answer, request.AskedAt.Add(5 * time.Second)}); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Remove(filepath.Join(folder, "relay.json")); err != nil {
+		if err := os.Remove(filepath.Join(control, "relay.json")); err != nil {
 			t.Fatal(err)
 		}
 		tracker.poll(env, task, rec, "claude", request.AskedAt.Add(6*time.Second))
@@ -158,29 +165,120 @@ func TestRelayTrackerRecordsRepeatedRequestsAndAnswers(t *testing.T) {
 }
 
 func TestRelayTrackerHandlesMissingAndFastRequests(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	for _, fast := range []bool{false, true} {
 		folder := t.TempDir()
+		control := config.ControlDirForFolder(folder)
+		if err := os.MkdirAll(control, 0o700); err != nil {
+			t.Fatal(err)
+		}
 		task := &Task{Task: "abcd", Folder: folder}
 		rec := &Record{Path: folder, Task: "abcd"}
 		tracker := &relayTracker{}
 		env := &Env{}
 		request := RelayRequest{ToolName: "Bash", ToolInput: json.RawMessage(`{}`), AskedAt: time.Now().UTC()}
 		if fast {
-			if err := writeRelayJSON(folder, "relay-answer.json", relayAnswer{request, "allow", request.AskedAt.Add(time.Second)}); err != nil {
+			if err := writeRelayJSON(control, "relay-answer.json", relayAnswer{request, "allow", request.AskedAt.Add(time.Second)}); err != nil {
 				t.Fatal(err)
 			}
 		} else {
-			if err := writeRelayJSON(folder, "relay.json", request); err != nil {
+			if err := writeRelayJSON(control, "relay.json", request); err != nil {
 				t.Fatal(err)
 			}
 			tracker.poll(env, task, rec, "claude", request.AskedAt)
-			if err := os.Remove(filepath.Join(folder, "relay.json")); err != nil {
+			if err := os.Remove(filepath.Join(control, "relay.json")); err != nil {
 				t.Fatal(err)
 			}
 		}
 		tracker.poll(env, task, rec, "claude", request.AskedAt.Add(time.Second))
 		if len(rec.Events) != 2 || len(rec.Permission.Relays) != 1 || tracker.open() {
 			t.Fatalf("events: %+v", rec.Events)
+		}
+	}
+}
+
+func TestRelayWaitSerializesAnswers(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	folder := config.ControlDir("r-test", "abcd")
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldDeadline, oldInterval := relayDeadline, relayPollInterval
+	relayDeadline, relayPollInterval = 3*time.Second, time.Millisecond
+	t.Cleanup(func() { relayDeadline, relayPollInterval = oldDeadline, oldInterval })
+	type result struct {
+		answer string
+		err    error
+	}
+	first, second := make(chan result, 1), make(chan result, 1)
+	go func() {
+		answer, err := RelayWait(folder, RelayRequest{ToolName: "run_command", ToolUseID: "first"})
+		first <- result{answer, err}
+	}()
+	waitForRequest := func(id string) {
+		t.Helper()
+		until := time.Now().Add(time.Second)
+		for time.Now().Before(until) {
+			b, err := os.ReadFile(filepath.Join(folder, "relay.json"))
+			var request RelayRequest
+			if err == nil && json.Unmarshal(b, &request) == nil && request.ToolUseID == id {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("Relay %s did not open", id)
+	}
+	waitForRequest("first")
+	go func() {
+		answer, err := RelayWait(folder, RelayRequest{ToolName: "run_command", ToolUseID: "second"})
+		second <- result{answer, err}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	b, err := os.ReadFile(filepath.Join(folder, "relay.json"))
+	if err != nil || !strings.Contains(string(b), `"tool_use_id":"first"`) {
+		t.Fatalf("second caller replaced first request: %s, %v", b, err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "answer-allow"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-first; got.err != nil || got.answer != "allow" {
+		t.Fatalf("first answer: %+v", got)
+	}
+	waitForRequest("second")
+	select {
+	case got := <-second:
+		t.Fatalf("second caller consumed first answer: %+v", got)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if err := os.WriteFile(filepath.Join(folder, "answer-deny"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-second; got.err != nil || got.answer != "deny" {
+		t.Fatalf("second answer: %+v", got)
+	}
+	for _, name := range []string{"relay.lock", "relay.json", "answer-allow", "answer-deny"} {
+		if _, err := os.Stat(filepath.Join(folder, name)); !os.IsNotExist(err) {
+			t.Fatalf("control file %s remains: %v", name, err)
+		}
+	}
+}
+
+func TestRelayWaitLockDeadlineDoesNotConsumeAnswer(t *testing.T) {
+	folder := t.TempDir()
+	for _, name := range []string{"relay.lock", "answer-allow"} {
+		if err := os.WriteFile(filepath.Join(folder, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldDeadline, oldInterval := relayDeadline, relayPollInterval
+	relayDeadline, relayPollInterval = 20*time.Millisecond, time.Millisecond
+	t.Cleanup(func() { relayDeadline, relayPollInterval = oldDeadline, oldInterval })
+	if answer, err := RelayWait(folder, RelayRequest{}); err != nil || answer != "denied: no answer" {
+		t.Fatalf("lock wait answer = %q, %v", answer, err)
+	}
+	for _, name := range []string{"relay.lock", "answer-allow"} {
+		if _, err := os.Stat(filepath.Join(folder, name)); err != nil {
+			t.Fatalf("waiting caller removed %s: %v", name, err)
 		}
 	}
 }

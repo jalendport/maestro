@@ -192,6 +192,7 @@ func TestTabOutputFirstScreenIsNotWork(t *testing.T) {
 }
 
 func TestCouncilSeatUsesCodexReadTabAndCloseTabs(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	for _, closeTabs := range []string{"always", "never"} {
 		t.Run(closeTabs, func(t *testing.T) {
 			root := t.TempDir()
@@ -268,6 +269,7 @@ func TestCouncilSeatUsesCodexReadTabAndCloseTabs(t *testing.T) {
 }
 
 func TestMissingSoloPresetFallsBackWithoutChangingEnv(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	root := t.TempDir()
 	if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
@@ -289,6 +291,7 @@ func TestMissingSoloPresetFallsBackWithoutChangingEnv(t *testing.T) {
 }
 
 func TestTabLimitBeforeEarlyExitIsClassified(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	root, folder := t.TempDir(), t.TempDir()
 	t.Setenv("CODEX_HOME", t.TempDir())
 	t.Setenv("MAESTRO_TEST_SOLO_HELPER", "1")

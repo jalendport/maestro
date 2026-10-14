@@ -319,10 +319,10 @@ func (l *SoloLink) saveTabLog(pid int, folder string) {
 	}
 }
 
-// readAnswer consumes an answer marker written by maestro answer.
-func readAnswer(folder string) string {
+// Only the Relay lock holder may consume a control folder's answer marker.
+func readAnswer(controlFolder string) string {
 	for _, ans := range []string{"allow", "deny"} {
-		p := filepath.Join(folder, "answer-"+ans)
+		p := filepath.Join(controlFolder, "answer-"+ans)
 		if _, err := os.Stat(p); err == nil {
 			_ = os.Remove(p)
 			return ans

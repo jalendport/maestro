@@ -5,6 +5,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 )
 
 // Home is the global state directory, ~/.maestro by default. MAESTRO_HOME
@@ -27,6 +28,21 @@ func LedgerFile() string    { return filepath.Join(Home(), "ledger.jsonl") }
 func BudgetFile() string    { return filepath.Join(Home(), "budget.json") }
 func DiscoveryFile() string { return filepath.Join(Home(), "cache", "discovery.json") }
 func RunsIndexDir() string  { return filepath.Join(Home(), "runs") }
+
+func ControlDir(run, task string) string { return filepath.Join(Home(), "control", run, task) }
+
+// ControlDirForFolder maps a task folder (<run>/<task>) or a Seat folder
+// (<slug>/<seat> or <slug>/round-N/<seat>) to its control folder.
+func ControlDirForFolder(folder string) string {
+	folder = filepath.Clean(folder)
+	parent := filepath.Dir(folder)
+	if roundDir.MatchString(filepath.Base(parent)) {
+		return filepath.Join(ControlDir(filepath.Base(filepath.Dir(parent)), filepath.Base(parent)), filepath.Base(folder))
+	}
+	return ControlDir(filepath.Base(parent), filepath.Base(folder))
+}
+
+var roundDir = regexp.MustCompile(`^round-[0-9]+$`)
 
 // Per-project locations relative to the project root.
 func ProjectFile(root string) string { return filepath.Join(root, ".agents", "maestro.toml") }

@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -512,7 +513,24 @@ func (a *app) cleanCmd() *cobra.Command {
 					if err != nil || !st.IsDir() || live[p] || dispatch.HasRunningRecord(p) || time.Since(st.ModTime()) < d {
 						continue
 					}
+					controls := []string{config.ControlDir(e.Name(), "")}
+					if err := filepath.WalkDir(p, func(path string, entry fs.DirEntry, err error) error {
+						if err != nil {
+							return err
+						}
+						if !entry.IsDir() && entry.Name() == dispatch.FileTask {
+							controls = append(controls, config.ControlDirForFolder(filepath.Dir(path)))
+						}
+						return nil
+					}); err != nil {
+						return err
+					}
 					if err := os.RemoveAll(p); err == nil {
+						for _, control := range controls {
+							if err := os.RemoveAll(control); err != nil {
+								return err
+							}
+						}
 						removed++
 					}
 				}
@@ -606,7 +624,8 @@ func (a *app) answerCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("no task %q under %s", args[0], root)
 			}
-			if err := os.WriteFile(filepath.Join(folder, "answer-"+args[1]), nil, 0o644); err != nil {
+			control := config.ControlDirForFolder(folder)
+			if err := os.WriteFile(filepath.Join(control, "answer-"+args[1]), nil, 0o600); err != nil {
 				return err
 			}
 			return a.result(map[string]any{"task": args[0], "answer": args[1]}, "task %s: %s", args[0], args[1])

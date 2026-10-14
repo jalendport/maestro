@@ -6,6 +6,19 @@ import (
 	"testing"
 )
 
+func TestControlDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MAESTRO_HOME", home)
+	if got, want := ControlDir("r-test", "abcd"), filepath.Join(home, "control", "r-test", "abcd"); got != want {
+		t.Fatalf("ControlDir = %q, want %q", got, want)
+	}
+	for _, folder := range []string{"/project/.agents/maestro/runs/r-test/abcd", "/project/.agents/maestro/councils/r-test/abcd/"} {
+		if got, want := ControlDirForFolder(folder), ControlDir("r-test", "abcd"); got != want {
+			t.Fatalf("control folder = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestFindProjectRoot(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -107,5 +120,15 @@ func TestEnsureIgnoredDir(t *testing.T) {
 	}
 	if got, err := os.ReadFile(path); err != nil || string(got) != "custom\n" {
 		t.Fatalf("existing ignore rules = %q, error = %v", got, err)
+	}
+}
+
+func TestControlDirForFolderRounds(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", "/m")
+	if got := ControlDirForFolder("/p/.agents/maestro/councils/slug/round-2/grok"); got != "/m/control/slug/round-2/grok" {
+		t.Fatalf("round folder mapped to %s", got)
+	}
+	if got := ControlDirForFolder("/p/.agents/maestro/runs/r-0001/abcd"); got != "/m/control/r-0001/abcd" {
+		t.Fatalf("task folder mapped to %s", got)
 	}
 }
