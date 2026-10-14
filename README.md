@@ -4,8 +4,6 @@
 
 Maestro is a local command-line tool that owns agent work after the thinking is done. An orchestrating session writes a brief or a plan; Maestro routes each task to a lane that is strong enough for it across Claude Code, Codex, Grok, and Antigravity, dispatches it, checks the result, and runs councils for second opinions, with one ledger of what ran and why.
 
-Claude Code, Codex, and Grok take automatic Routes and Council Seats, because each holds read Access with its own sandbox or allowlist. Maestro refuses a requested Lane whose Access shape is `best-effort` or missing; see `maestro roster`. Antigravity takes read Routes and Council Seats when its settings hold read Access; it has no edit shape.
-
 ## Features
 
 - **Routing with a reason** — every task goes to one harness, model, and effort, picked by [Jev](https://typesafe.ai) with a deterministic rules table as the fallback, and every route prints one reason line
@@ -26,6 +24,12 @@ Install with [Homebrew](https://brew.sh) (macOS), by the full tap path:
 
 ```sh
 brew install jalendport/tap/maestro
+```
+
+Upgrade by the full tap path too; the bare name `maestro` resolves to a different cask:
+
+```sh
+brew upgrade --cask jalendport/tap/maestro
 ```
 
 Or with the install script (macOS and Linux):
@@ -119,7 +123,7 @@ The probe denies only where the hook is in scope: with the default `[hook] scope
 
 ### Connect Antigravity
 
-Antigravity read work is enforced only while its settings grant no command permission beyond the fixed read-only list; Maestro reads `~/.gemini/antigravity-cli/settings.json` to decide.
+Antigravity takes read work only; it has no edit shape. Its read work is enforced only while its settings grant no command permission beyond the fixed read-only list; Maestro reads `~/.gemini/antigravity-cli/settings.json` to decide.
 
 ```sh
 maestro adapter install agy
