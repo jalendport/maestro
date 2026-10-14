@@ -1,9 +1,4 @@
-// Package hook is the PreToolUse entry point the Adapters call: it reads the
-// Harness's payload shape, applies one rule, and writes the Harness's answer
-// shape. The rule: read-only sub-agent spawns pass; code-writing sub-agent
-// and Solo spawns are denied with "use maestro dispatch". The rule applies
-// only in projects with .agents/maestro.toml, unless the user sets scope = "all".
-// Inside a Lane (MAESTRO_LANE=1) the same scope and rule apply.
+// Package hook reads each Harness's tool calls, applies the scoped spawn rule and Antigravity Lane permissions, and renders the Harness's answer.
 package hook
 
 import (
@@ -21,6 +16,13 @@ import (
 type Decision struct {
 	Allow  bool
 	Reason string
+}
+
+func (d Decision) verdict() Verdict {
+	if d.Allow {
+		return Verdict{Kind: "allow"}
+	}
+	return Verdict{Kind: "deny", Reason: d.Reason}
 }
 
 // Call is the harness-neutral view of a tool call.
@@ -68,6 +70,9 @@ func Parse(harness string, payload []byte) (*Call, error) {
 			c.Tool, _ = tc["name"].(string)
 			if in, ok := tc["args"].(map[string]any); ok {
 				c.Input = in
+				if cwd, ok := in["Cwd"].(string); ok {
+					c.CWD = cwd
+				}
 			}
 		}
 	default:
@@ -124,19 +129,26 @@ func readOnlyArgs(in map[string]any) bool {
 
 // Render writes the answer in the Harness's shape. An allow is written
 // explicitly for Grok, whose hooks fail open on silence.
-func Render(harness string, d Decision) []byte {
+func Render(harness string, d interface{ verdict() Verdict }) []byte {
+	v := d.verdict()
 	var out any
 	switch harness {
 	case "claude", "codex":
-		if d.Allow {
+		if v.Kind == "allow" {
 			return nil // silence = allow; the Harness's own permission flow continues
 		}
-		out = map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": d.Reason}}
-	case "grok", "agy":
-		if d.Allow {
+		out = map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": v.Reason}}
+	case "grok":
+		if v.Kind == "allow" {
 			out = map[string]any{"decision": "allow"}
 		} else {
-			out = map[string]any{"decision": "deny", "reason": d.Reason}
+			out = map[string]any{"decision": "deny", "reason": v.Reason}
+		}
+	case "agy":
+		if v.Kind == "deny" {
+			out = map[string]any{"decision": "deny", "reason": v.Reason}
+		} else {
+			out = map[string]any{"decision": v.Kind}
 		}
 	}
 	var buf bytes.Buffer

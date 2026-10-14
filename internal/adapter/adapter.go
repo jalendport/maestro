@@ -33,7 +33,7 @@ func Spec(harness string) (HarnessSpec, bool) {
 	case "grok":
 		return HarnessSpec{".agents/skills/maestro", ".grok/hooks/maestro.json", "spawn_subagent|Task|solo__spawn_agent|solo__spawn_process", 10, "A new Grok session binds the hook."}, true
 	case "agy":
-		return HarnessSpec{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "invoke_subagent", 30, "A new Antigravity session loads the hook."}, true
+		return HarnessSpec{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook."}, true
 	}
 	return HarnessSpec{}, false
 }

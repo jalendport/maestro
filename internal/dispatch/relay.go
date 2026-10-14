@@ -51,9 +51,23 @@ func Relay(folder string, input io.Reader, output io.Writer) error {
 	if err := json.NewDecoder(input).Decode(&request); err != nil {
 		return err
 	}
+	answer, err := RelayWait(folder, request)
+	if err != nil {
+		return err
+	}
+	behavior := "deny"
+	if answer == "allow" {
+		behavior = "allow"
+	}
+	return json.NewEncoder(output).Encode(map[string]any{"hookSpecificOutput": map[string]any{
+		"hookEventName": "PermissionRequest", "decision": map[string]string{"behavior": behavior},
+	}})
+}
+
+func RelayWait(folder string, request RelayRequest) (string, error) {
 	request.AskedAt = time.Now()
 	if err := writeRelayJSON(folder, "relay.json", request); err != nil {
-		return err
+		return "", err
 	}
 	defer os.Remove(filepath.Join(folder, "relay.json"))
 	timer := time.NewTimer(relayDeadline)
@@ -76,15 +90,9 @@ wait:
 	}
 	// The polling loop must retain the decision after the answer marker is consumed.
 	if err := writeRelayJSON(folder, "relay-answer.json", relayAnswer{request, answer, time.Now()}); err != nil {
-		return err
+		return "", err
 	}
-	behavior := "deny"
-	if answer == "allow" {
-		behavior = "allow"
-	}
-	return json.NewEncoder(output).Encode(map[string]any{"hookSpecificOutput": map[string]any{
-		"hookEventName": "PermissionRequest", "decision": map[string]string{"behavior": behavior},
-	}})
+	return answer, nil
 }
 
 type relayTracker struct {

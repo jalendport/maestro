@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jalendport/maestro/internal/adapter"
+	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/hook"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
@@ -20,7 +21,7 @@ func (a *app) hookCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "hook [claude|codex|grok|agy]",
 		Short:  "PreToolUse hook entry point (called by the Adapters)",
-		Long:   "Read the Harness's PreToolUse payload on stdin and write its answer on stdout: read-only sub-agent spawns pass; code-writing sub-agent and Solo spawns are denied with \"use maestro dispatch\".",
+		Long:   "Read the Harness's PreToolUse payload on stdin and write its answer on stdout after the scoped spawn rule and Antigravity Lane permissions are applied.",
 		Args:   cobra.MaximumNArgs(1),
 		Hidden: false,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -30,6 +31,9 @@ func (a *app) hookCmd() *cobra.Command {
 			}
 			payload, err := io.ReadAll(os.Stdin)
 			if err != nil {
+				if harness == "agy" {
+					fmt.Fprintln(os.Stdout, `{"decision":"allow"}`)
+				}
 				return nil
 			}
 			call, err := hook.Parse(harness, payload)
@@ -39,6 +43,26 @@ func (a *app) hookCmd() *cobra.Command {
 					fmt.Fprintln(os.Stdout, `{"decision":"allow"}`)
 				}
 				return nil
+			}
+			if folder := os.Getenv("MAESTRO_TASK_FOLDER"); folder != "" && call.Harness == "agy" {
+				if lane, ok := hook.LoadLane(folder); ok {
+					verdict := hook.DecideLane(call, lane)
+					if verdict.Kind == "relay" {
+						input, err := json.Marshal(call.Input)
+						answer := ""
+						if err == nil {
+							answer, err = dispatch.RelayWait(folder, dispatch.RelayRequest{ToolName: "run_command", ToolInput: input})
+						}
+						verdict = hook.Verdict{Kind: "deny", Reason: answer}
+						if err != nil {
+							verdict.Reason = err.Error()
+						} else if answer == "allow" {
+							verdict = hook.Verdict{Kind: "auto_approve"}
+						}
+					}
+					fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, verdict)))
+					return nil
+				}
 			}
 			decision := hook.Decision{Allow: true}
 			if r, err := roster.Load(); err == nil {

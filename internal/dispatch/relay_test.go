@@ -75,6 +75,38 @@ func TestRelayDecisionsAndCleanup(t *testing.T) {
 	}
 }
 
+func TestRelayWaitAnswersAndCleanup(t *testing.T) {
+	for _, answer := range []string{"allow", "deny"} {
+		t.Run(answer, func(t *testing.T) {
+			folder := t.TempDir()
+			request := RelayRequest{ToolName: "run_command", ToolInput: json.RawMessage(`{"CommandLine":"go test ./...","Cwd":"/project"}`)}
+			if err := os.WriteFile(filepath.Join(folder, "answer-"+answer), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got, err := RelayWait(folder, request)
+			if err != nil || got != answer {
+				t.Fatalf("answer: %q, %v; want %q", got, err, answer)
+			}
+			for _, name := range []string{"relay.json", "answer-allow", "answer-deny"} {
+				if _, err := os.Stat(filepath.Join(folder, name)); !os.IsNotExist(err) {
+					t.Fatalf("%s remains: %v", name, err)
+				}
+			}
+			var saved relayAnswer
+			b, err := os.ReadFile(filepath.Join(folder, "relay-answer.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(b, &saved); err != nil {
+				t.Fatal(err)
+			}
+			if saved.Answer != answer || saved.Request.ToolName != request.ToolName || !bytes.Equal(saved.Request.ToolInput, request.ToolInput) || saved.Request.AskedAt.IsZero() || saved.AnsweredAt.Before(saved.Request.AskedAt) {
+				t.Fatalf("saved answer: %+v", saved)
+			}
+		})
+	}
+}
+
 func TestRelayTrackerRecordsRepeatedRequestsAndAnswers(t *testing.T) {
 	folder := t.TempDir()
 	task := &Task{Task: "abcd", Folder: folder}

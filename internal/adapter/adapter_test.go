@@ -73,7 +73,7 @@ func TestSpecs(t *testing.T) {
 		{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "A new Claude Code session loads the hook."},
 		{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse hook."},
 		{".agents/skills/maestro", ".grok/hooks/maestro.json", "spawn_subagent|Task|solo__spawn_agent|solo__spawn_process", 10, "A new Grok session binds the hook."},
-		{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "invoke_subagent", 30, "A new Antigravity session loads the hook."},
+		{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook."},
 	}
 	for i, name := range Harnesses {
 		if got, ok := Spec(name); !ok || got != want[i] {
@@ -140,6 +140,23 @@ func TestInstallEachHarness(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInstallUpdatesOlderAntigravityHook(t *testing.T) {
+	home := testHome(t)
+	spec, _ := Spec("agy")
+	path := filepath.Join(home, spec.HookFile)
+	put(t, path, `{"maestro":{"PreToolUse":[{"matcher":"invoke_subagent","hooks":[{"type":"command","command":"maestro hook","timeout":30}]}]}}`)
+	actions(t, Install("agy", home, "skill"), "created", "created", "updated")
+	root, err := decode(read(t, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := root.get("maestro").get("PreToolUse").array
+	if len(entries) != 1 || !equal(entries[0], entry(spec)) {
+		t.Fatalf("updated hook: %s", read(t, path))
+	}
+	actions(t, Install("agy", home, "skill"), "unchanged", "unchanged", "unchanged")
 }
 
 func TestEnsureSkill(t *testing.T) {
