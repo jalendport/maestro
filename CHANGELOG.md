@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Added Antigravity edit Lanes and Solo tabs, with command prompts relayed through the Maestro hook
-- Added the Reminder for the Orchestrator in every Harness: a `UserPromptSubmit` hook entry for Claude Code and Codex, a `PreInvocation` hook entry for Antigravity, and the rules file `~/.grok/rules/maestro.md` for Grok; run `maestro adapter install` again
+- Added the Reminder for the Orchestrator in every Harness: a `UserPromptSubmit` hook entry for Claude Code and Codex, a `PreInvocation` hook entry for Antigravity, and the rules file `~/.grok/rules/maestro.md` for Grok; run `maestro adapter install` again, trust the new Codex hook in `/hooks`, and until then `maestro doctor` reports the Adapter as `partial`
 - Added `maestro init` to write the Project file `.agents/maestro.toml`
 
 ### Changed

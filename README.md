@@ -14,7 +14,7 @@ Maestro is a small command-line tool that takes over once you and your coding ag
 - **Budgets that bind** — usage windows are read from every dispatch (and probed when stale), with a block point, a warning, and a reserve kept back for the session you are in
 - **A permission contract** — a lane gets `read` or `edit` access through its harness's own sandbox or allowlist, and Maestro never passes a bypass flag
 - **Solo integration** — inside [Solo](https://soloterm.com), tasks are todos, lanes are tabs, results are comments, and your session is woken when a run ends
-- **Single static binary** — Go, no runtime dependencies, and each harness needs only a skill file and a couple of hook entries
+- **Single static binary** — Go, no runtime dependencies, and each harness needs only a skill file, a hook entry or two, and for Grok one rules file
 
 ## Installation
 
@@ -144,7 +144,7 @@ maestro adapter install agy
 It writes two paths:
 
 - `~/.gemini/antigravity-cli/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
-- `~/.gemini/config/hooks.json` gets one `maestro` key, which also holds a `PreInvocation` entry; Maestro sets only that key and keeps all other keys.
+- `~/.gemini/config/hooks.json` gets one `maestro` key that holds a `PreToolUse` entry and a `PreInvocation` entry; Maestro sets only that key and keeps all other keys.
 
 Manual step: start a new Antigravity session. It loads the hook.
 

@@ -193,11 +193,11 @@ Default entries:
 
 ### [hook]
 
-The hook is the `maestro hook` entry that each Adapter installs in a Harness.
+The hook is the set of `maestro hook` entries that each Adapter installs in a Harness: a `PreToolUse` entry, and for Claude Code, Codex, and Antigravity a second entry for the Reminder event (Antigravity's runs `maestro hook agy`).
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `scope` | string | `"projects"` | Sets where the hook applies, for both the deny rule and the Reminder: `projects` applies them only in a folder that holds `.agents/maestro.toml`, and `all` applies them everywhere. The Grok rules file states the condition in words instead. |
+| `scope` | string | `"projects"` | Sets where the hook applies, for both the deny rule and the Reminder: `projects` applies them only inside a project that holds `.agents/maestro.toml` (any folder under it), and `all` applies them everywhere. The Grok rules file states the condition in words instead. |
 
 ### [router]
 
