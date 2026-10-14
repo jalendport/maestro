@@ -1,6 +1,8 @@
 package council
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jalendport/maestro/internal/config"
@@ -10,6 +12,17 @@ import (
 )
 
 func TestRequestedSeatRefusesBestEffortRead(t *testing.T) {
+	// Antigravity's read enforcement is measured from its settings file;
+	// pin it to best-effort with a non-read-only command rule.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".gemini", "antigravity-cli")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"permissions":{"allow":["command(rm)"]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	defaults, _, err := config.ParseFile(roster.Defaults)
 	if err != nil {
 		t.Fatal(err)
