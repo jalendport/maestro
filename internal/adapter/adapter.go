@@ -40,7 +40,9 @@ func Spec(harness string) (HarnessSpec, bool) {
 	case "codex":
 		return HarnessSpec{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse and UserPromptSubmit hooks.", promptEvents()}, true
 	case "grok":
-		return HarnessSpec{".agents/skills/maestro", ".grok/hooks/maestro.json", "spawn_subagent|Task|solo__spawn_agent|solo__spawn_process", 10, "A new Grok session binds the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}}}, true
+		// The Grok hook also carries each Lane's permissions, so it matches the
+		// file, shell, and spawn tools under both of Grok's tool name sets.
+		return HarnessSpec{".agents/skills/maestro", ".grok/hooks/maestro.json", "run_terminal_command|run_terminal_cmd|Bash|write|search_replace|Write|Edit|MultiEdit|spawn_subagent|Task|solo__spawn_agent|solo__spawn_process", 660, "A new Grok session binds the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}}}, true
 	case "agy":
 		return HarnessSpec{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "PreInvocation", Direct: true, Command: "maestro hook agy", Timeout: 30}}}, true
 	}

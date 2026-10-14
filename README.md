@@ -105,6 +105,14 @@ The probe denies only where the hook is in scope: with the default `[hook] scope
 
 ### Connect Grok
 
+Grok takes read and edit work, like the other harnesses. Grok's own permission rules cannot hold a Lane's access on their own: a deny rule beats every allow rule, and an `always-approve` mode in `~/.grok/config.toml` beats the mode on the command line. So the Maestro hook entry carries each Lane's permissions:
+
+- Read-only commands, the checks, and the `allow` list run
+- Other commands are relayed in a tab or denied one-shot
+- Writes stay inside the project and the run folder
+
+The hook entry changed, so an existing install must run `maestro adapter install grok` again.
+
 ```sh
 maestro adapter install grok
 ```

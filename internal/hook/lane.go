@@ -57,11 +57,32 @@ func FindLaneFolder(c *Call) (string, bool) {
 		}
 		return "", false
 	}
-	if c.Harness != "claude" && c.Harness != "codex" {
+	if c.Harness != "claude" && c.Harness != "codex" && c.Harness != "grok" {
 		return "", false
 	}
 	scanner := bufio.NewScanner(io.LimitReader(f, 16*1024*1024))
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	if c.Harness == "grok" {
+		// Grok stores a prompt as one or more user_message_chunk updates
+		// that share a prompt index; the first index is the first prompt.
+		var texts []string
+		first := -1
+		for scanner.Scan() {
+			text, index, ok := grokUserChunk(scanner.Bytes())
+			if ok && (first < 0 || index == first) {
+				first = index
+				texts = append(texts, text)
+				continue
+			}
+			if first >= 0 {
+				break
+			}
+		}
+		if match := lanePointerSentence.FindStringSubmatch(strings.Join(texts, "")); len(match) > 0 {
+			return match[1], true
+		}
+		return "", false
+	}
 	for scanner.Scan() {
 		if prompt, ok := transcriptUserPrompt(c.Harness, scanner.Bytes()); ok {
 			if match := lanePointerSentence.FindStringSubmatch(prompt); len(match) > 0 {
@@ -71,6 +92,29 @@ func FindLaneFolder(c *Call) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// grokUserChunk reads one line of a Grok session's updates.jsonl and returns
+// the text and prompt index of a user_message_chunk update.
+func grokUserChunk(line []byte) (string, int, bool) {
+	var entry struct {
+		Params struct {
+			Update struct {
+				Kind    string `json:"sessionUpdate"`
+				Content struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+				Meta struct {
+					PromptIndex int `json:"promptIndex"`
+				} `json:"_meta"`
+			} `json:"update"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(line, &entry) != nil || entry.Params.Update.Kind != "user_message_chunk" {
+		return "", 0, false
+	}
+	return entry.Params.Update.Content.Text, entry.Params.Update.Meta.PromptIndex, true
 }
 
 func transcriptUserPrompt(harness string, line []byte) (string, bool) {
@@ -146,17 +190,52 @@ func LoadLane(folder string) (*Lane, bool) {
 	return lane, true
 }
 
-func DecideLane(c *Call, lane *Lane) Verdict {
+// laneAction is the harness-neutral view of a tool call the Lane policy judges.
+type laneAction struct {
+	kind    string // spawn, write, command, or "" for a tool the policy lets through
+	target  string // write: the file path as the tool got it
+	command string // command: the command line
+	cwd     string // the directory the tool call names, "" when it names none
+}
+
+// actionOf maps Antigravity and Grok tool names to one laneAction.
+func actionOf(c *Call) laneAction {
 	switch c.Tool {
-	case "invoke_subagent", "define_subagent", "manage_subagents":
-		spawn := *c
-		spawn.Tool = "invoke_subagent"
-		return Decide(&spawn, "all").verdict()
+	case "invoke_subagent", "define_subagent", "manage_subagents", "spawn_subagent", "task", "Task":
+		return laneAction{kind: "spawn"}
 	case "write_to_file", "replace_file_content", "multi_replace_file_content":
 		target, _ := c.Input["TargetFile"].(string)
 		cwd, _ := c.Input["Cwd"].(string)
+		return laneAction{kind: "write", target: target, cwd: cwd}
+	case "write", "search_replace", "Write", "Edit", "MultiEdit":
+		target, _ := c.Input["file_path"].(string)
+		if target == "" {
+			target, _ = c.Input["target_file"].(string)
+		}
+		return laneAction{kind: "write", target: target, cwd: c.CWD}
+	case "run_command":
+		command, _ := c.Input["CommandLine"].(string)
+		cwd, _ := c.Input["Cwd"].(string)
+		return laneAction{kind: "command", command: command, cwd: cwd}
+	case "run_terminal_command", "run_terminal_cmd", "Bash":
+		command, _ := c.Input["command"].(string)
+		cwd, _ := c.Input["cwd"].(string)
+		return laneAction{kind: "command", command: command, cwd: nonEmpty(cwd, c.CWD)}
+	}
+	return laneAction{}
+}
+
+func DecideLane(c *Call, lane *Lane) Verdict {
+	action := actionOf(c)
+	switch action.kind {
+	case "spawn":
+		spawn := *c
+		spawn.Tool = "invoke_subagent"
+		return Decide(&spawn, "all").verdict()
+	case "write":
+		target := action.target
 		if !filepath.IsAbs(target) {
-			target = filepath.Join(nonEmpty(cwd, lane.Root), target)
+			target = filepath.Join(nonEmpty(action.cwd, lane.Root), target)
 		}
 		path, err := filepath.Abs(target)
 		if err == nil && inside(path, lane.RunFolder) {
@@ -173,13 +252,12 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 			}
 		}
 		return Verdict{Kind: "deny", Reason: fmt.Sprintf("outside the Lane's writable directories: %s", target)}
-	case "run_command":
-		command, _ := c.Input["CommandLine"].(string)
+	case "command":
+		command := action.command
 		if reason := unsafeShell(command); reason != "" {
 			return Verdict{Kind: "deny", Reason: reason}
 		}
-		cwd, _ := c.Input["Cwd"].(string)
-		cwd = nonEmpty(cwd, nonEmpty(c.CWD, lane.Root))
+		cwd := nonEmpty(action.cwd, nonEmpty(c.CWD, lane.Root))
 		allowedCwd := false
 		for _, dir := range append([]string{lane.Root, lane.RunFolder}, lane.Dirs...) {
 			if inside(cwd, dir) {
@@ -207,6 +285,10 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 		}
 		return Verdict{Kind: "auto_approve"}
 	default:
+		// A Solo spawn inside a Lane still meets the spawn rule.
+		if isSoloSpawn(c.Tool) {
+			return Decide(c, "all").verdict()
+		}
 		return Verdict{Kind: "allow"}
 	}
 }

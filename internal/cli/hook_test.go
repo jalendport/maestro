@@ -143,7 +143,7 @@ func TestHookCommandLaneFallback(t *testing.T) {
 		{"outside Lane", "", "agy", `{"toolCall":{"name":"run_command","args":{"CommandLine":"go run main.go"}}}`, `{"decision":"allow"}`},
 		{"missing Lane", "", "agy", `{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/outside"}}}`, `{"decision":"deny","reason":"no readable Lane policy"}`},
 		{"invalid Lane", "not JSON", "agy", `{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/outside"}}}`, `{"decision":"deny","reason":"no readable Lane policy"}`},
-		{"Grok", `{"access":"read"}`, "grok", `{"toolName":"run_command","toolInput":{"CommandLine":"go run main.go"}}`, `{"decision":"allow"}`},
+		{"Grok", `{"access":"read","root":"/project"}`, "grok", `{"toolName":"run_terminal_command","toolInput":{"command":"go run main.go"},"cwd":"/project"}`, `{"decision":"deny","reason":"read Lane: command not on the read-only list"}`},
 		{"Claude", `{"access":"read"}`, "claude", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"}}`, ""},
 		{"Codex", `{"access":"read"}`, "codex", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"}}`, ""},
 		{"bad payload", `{"access":"read"}`, "agy", "not JSON", `{"decision":"allow"}`},
@@ -420,6 +420,96 @@ func TestHookCommandReminderFirstUserPrompt(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestHookCommandGrokLane(t *testing.T) {
+	for _, tc := range []struct {
+		name, signal, tool string
+		policy             bool
+		input              map[string]any
+		want               string
+	}{
+		{"environment report write", "env", "write", true, map[string]any{"file_path": "<run>/result.md", "content": "x"}, "allow"},
+		{"environment project write", "env", "write", true, map[string]any{"file_path": "<project>/main.go", "content": "x"}, "deny"},
+		{"transcript report write", "transcript", "search_replace", true, map[string]any{"file_path": "<run>/result.md"}, "allow"},
+		{"transcript project write", "transcript", "search_replace", true, map[string]any{"file_path": "<project>/main.go"}, "deny"},
+		{"transcript read command", "transcript", "run_terminal_command", true, map[string]any{"command": "ls <project>"}, "allow"},
+		{"transcript write command", "transcript", "run_terminal_command", true, map[string]any{"command": "touch <project>/x"}, "deny"},
+		{"transcript spawn", "transcript", "spawn_subagent", true, map[string]any{"subagent_type": "writer"}, "deny"},
+		{"transcript no policy", "transcript", "read_file", false, map[string]any{"target_file": "<project>/main.go"}, "deny"},
+		{"orchestrator write", "none", "write", true, map[string]any{"file_path": "<project>/main.go"}, "allow"},
+		{"orchestrator spawn", "none", "spawn_subagent", true, map[string]any{"subagent_type": "writer"}, "deny"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The control dir is named after the run folder's last two parts,
+			// so each case gets its own Maestro home.
+			t.Setenv("MAESTRO_HOME", t.TempDir())
+			if err := os.WriteFile(config.UserFile(), []byte("[hook]\nscope = \"all\"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			project := t.TempDir()
+			run := filepath.Join(project, ".agents", "maestro", "runs", "r-test", "task")
+			if err := os.MkdirAll(run, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("MAESTRO_TASK_FOLDER", "")
+			if tc.signal == "env" {
+				t.Setenv("MAESTRO_TASK_FOLDER", run)
+			}
+			if tc.policy {
+				control := config.ControlDirForFolder(run)
+				if err := os.MkdirAll(control, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				lane := hook.Lane{Access: "read", Harness: "grok", Root: project, RunFolder: run}
+				b, err := json.Marshal(lane)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(control, "lane.json"), b, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			prompt := "Explain this code."
+			if tc.signal == "transcript" {
+				prompt = brief.Pointer(filepath.Join(run, "brief.md"))
+			}
+			transcript := filepath.Join(t.TempDir(), "updates.jsonl")
+			line, err := json.Marshal(map[string]any{"method": "session/update", "params": map[string]any{"update": map[string]any{
+				"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": prompt}, "_meta": map[string]any{"promptIndex": 0},
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(transcript, append(line, '\n'), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			input := map[string]any{}
+			for key, value := range tc.input {
+				if text, ok := value.(string); ok {
+					value = strings.NewReplacer("<run>", run, "<project>", project).Replace(text)
+				}
+				input[key] = value
+			}
+			payload, err := json.Marshal(map[string]any{"hookEventName": "pre_tool_use", "cwd": project, "transcriptPath": transcript, "toolName": tc.tool, "toolInput": input})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, harness := range []string{"grok", ""} {
+				var answer struct{ Decision, Reason string }
+				output := runHookPayload(t, string(payload), harness)
+				if err := json.Unmarshal([]byte(output), &answer); err != nil {
+					t.Fatalf("output %q: %v", output, err)
+				}
+				if answer.Decision != tc.want {
+					t.Fatalf("harness %q: %s, want %s", harness, output, tc.want)
+				}
+				if tc.name == "transcript no policy" && answer.Reason != "no readable Lane policy" {
+					t.Fatal(output)
+				}
+			}
+		})
 	}
 }
 

@@ -109,8 +109,14 @@ func TestGrokReadAllowsOnlyReadTools(t *testing.T) {
 				deny[command.Flags[i+1]] = true
 			}
 		}
-		if len(allow) != len(readTools)+2 || !deny["Write"] || !deny["Edit"] || !deny["Bash"] || command.ReportByText != (i == 0) {
+		// Grok lets a deny rule win over every allow rule, so a deny for Write
+		// would cancel the Run folder rule and the Lane could never write its
+		// Report; the Maestro hook holds the Access instead.
+		if len(allow) != len(readTools)+2 || len(deny) != 0 || command.ReportByText != (i == 0) {
 			t.Fatal(command)
+		}
+		if flags := strings.Join(command.Flags, " "); !strings.Contains(flags, "--permission-mode dontAsk") {
+			t.Fatal("read must run under dontAsk", command.Flags)
 		}
 		for _, rule := range readTools {
 			if !allow[rule] {

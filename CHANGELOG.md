@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Changed Antigravity read enforcement to the Maestro hook, so it no longer depends on the Antigravity settings file
 - Changed the Antigravity hook entry to cover commands and file writes; run `maestro adapter install agy` again
+- Changed Grok Lane enforcement to the Maestro hook: the `PreToolUse` entry now covers commands, file writes, and spawns, and the read shape no longer passes deny rules; run `maestro adapter install grok` again
 - Changed the token-billed rule: a requested Lane on a `metered` Account now takes edit work with a warning instead of a refusal; automatic Routes still give it read work only
 - Changed where Lane control files live: the Lane policy, relay requests, and answer markers now sit in `~/.maestro/control`, outside the project tree
 - Changed the deny reasons to name every accepted read token and every read-only agent type
@@ -23,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Changed the skill to be shorter, to name three verbs, and to point at `maestro help` for the formats
 
 ### Fixed
+- Fixed Grok Seats and read Lanes in Solo tabs, which could never write their Report because Grok lets a deny rule beat the Run folder allow rule, and so were dropped as a stall
 - Fixed the Lane signal for a project-relative Pointer and for Codex context messages of a kind Maestro has not seen
 - Fixed the diff a retried or resumed Task is judged on: it now covers the work of every attempt, so the gate and the end-of-run Council see the whole Task and not the last attempt's slice
 - Fixed the Homebrew cask so it no longer prints a deprecation warning for `postflight` on install

@@ -323,7 +323,7 @@ func codexContextLine(t *testing.T, harness string, kinds ...string) string {
 func TestFindLaneFolderRealTranscriptShapes(t *testing.T) {
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	folder := "/project/.agents/maestro/runs/r-test/abcd"
-	for _, harness := range []string{"claude", "codex"} {
+	for _, harness := range []string{"claude", "codex", "grok"} {
 		body, err := os.ReadFile(filepath.Join("testdata", harness+"-lane.jsonl"))
 		if err != nil {
 			t.Fatal(err)
@@ -345,6 +345,87 @@ func TestFindLaneFolderRealTranscriptShapes(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func grokChunk(t *testing.T, index int, text string) string {
+	t.Helper()
+	entry := map[string]any{"method": "session/update", "params": map[string]any{"update": map[string]any{
+		"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": text}, "_meta": map[string]any{"promptIndex": index},
+	}}}
+	body, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body) + "\n"
+}
+
+func TestFindLaneFolderGrokPrompts(t *testing.T) {
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	folder := "/project/.agents/maestro/runs/r-test/abcd"
+	pointer := brief.Pointer(folder + "/brief.md")
+	other := `{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + pointer + `"}}}}` + "\n"
+	for _, tc := range []struct {
+		name, text string
+		found      bool
+	}{
+		{"one chunk", grokChunk(t, 0, pointer), true},
+		{"two chunks", grokChunk(t, 0, pointer[:20]) + grokChunk(t, 0, pointer[20:]), true},
+		{"after other updates", other + grokChunk(t, 0, pointer), true},
+		{"ordinary first prompt", grokChunk(t, 0, "Explain this code.") + other + grokChunk(t, 1, pointer), false},
+		{"second prompt chunks do not join", grokChunk(t, 0, pointer[:20]) + grokChunk(t, 1, pointer[20:]), false},
+		{"agent text only", other, false},
+		{"empty", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transcript := filepath.Join(t.TempDir(), "updates.jsonl")
+			if err := os.WriteFile(transcript, []byte(tc.text), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			want := ""
+			if tc.found {
+				want = folder
+			}
+			got, found := FindLaneFolder(&Call{Harness: "grok", TranscriptPath: transcript})
+			if got != want || found != tc.found {
+				t.Fatalf("folder = %q, %v; want %q, %v", got, found, want, tc.found)
+			}
+		})
+	}
+}
+
+func TestDecideLaneGrokTools(t *testing.T) {
+	run := "/project/.agents/maestro/runs/r-test/abcd"
+	read := &Lane{Access: "read", Root: "/project", RunFolder: run}
+	edit := &Lane{Access: "edit", Root: "/project", RunFolder: run, Checks: []string{"go test ./..."}}
+	for _, tc := range []struct {
+		name, tool string
+		lane       *Lane
+		input      map[string]any
+		cwd, want  string
+	}{
+		{"report write", "write", read, map[string]any{"file_path": run + "/result.md", "content": "x"}, "/project", "auto_approve"},
+		{"project write", "write", read, map[string]any{"file_path": "/project/main.go", "content": "x"}, "/project", "deny"},
+		{"relative report edit", "search_replace", read, map[string]any{"file_path": "result.md", "old_string": "a", "new_string": "b"}, run, "auto_approve"},
+		{"relative project edit", "Edit", read, map[string]any{"file_path": "main.go"}, "/project", "deny"},
+		{"read-only command", "run_terminal_command", read, map[string]any{"command": "ls /project"}, "/project", "auto_approve"},
+		{"write command", "run_terminal_command", read, map[string]any{"command": "touch /project/x"}, "/project", "deny"},
+		{"command outside the Lane", "Bash", read, map[string]any{"command": "ls", "cwd": "/elsewhere"}, "/project", "deny"},
+		{"writer spawn", "spawn_subagent", read, map[string]any{"subagent_type": "writer"}, "/project", "deny"},
+		{"read-only spawn", "spawn_subagent", read, map[string]any{"subagent_type": "Explore"}, "/project", "allow"},
+		{"solo spawn", "solo__spawn_agent", read, map[string]any{"extra_args": []any{"-s", "workspace-write"}}, "/project", "deny"},
+		{"solo read spawn", "solo__spawn_agent", read, map[string]any{"extra_args": []any{"dontAsk"}}, "/project", "allow"},
+		{"file read", "read_file", read, map[string]any{"target_file": "/etc/hosts"}, "/project", "allow"},
+		{"edit project write", "write", edit, map[string]any{"file_path": "/project/main.go"}, "/project", "auto_approve"},
+		{"edit check", "run_terminal_cmd", edit, map[string]any{"command": "go test ./..."}, "/project", "auto_approve"},
+		{"edit other command", "run_terminal_cmd", edit, map[string]any{"command": "go build ./..."}, "/project", "deny"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call := &Call{Harness: "grok", Tool: tc.tool, CWD: tc.cwd, Input: tc.input}
+			if got := DecideLane(call, tc.lane); got.Kind != tc.want {
+				t.Fatalf("%+v, want %s", got, tc.want)
+			}
+		})
 	}
 }
 

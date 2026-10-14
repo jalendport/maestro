@@ -74,6 +74,7 @@ func Parse(harness string, payload []byte) (*Call, error) {
 		}
 	case "grok":
 		c.Tool, _ = raw["toolName"].(string)
+		c.TranscriptPath, _ = raw["transcriptPath"].(string)
 		if in, ok := raw["toolInput"].(map[string]any); ok {
 			c.Input = in
 		}

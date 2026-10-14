@@ -79,7 +79,10 @@ func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	var flags []string
 	switch l.Access {
 	case "read":
-		flags = append(flags, "--permission-mode", "dontAsk", "--deny", "Write", "--deny", "Edit", "--deny", "Bash")
+		// The Maestro hook holds the Access: a deny rule here would win over
+		// the Run folder allow rule below (Grok lets deny beat every allow),
+		// and the Lane could never write its Report.
+		flags = append(flags, "--permission-mode", "dontAsk")
 		for _, rule := range readTools {
 			flags = append(flags, "--allow", rule)
 		}

@@ -19,7 +19,7 @@ func TestAdapterPrintsExactHookSet(t *testing.T) {
 	for _, tc := range []struct{ harness, want string }{
 		{"claude", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}],"matcher":"Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process"}],"UserPromptSubmit":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}]}]}}`},
 		{"codex", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}],"matcher":"Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process"}],"UserPromptSubmit":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}]}]}}`},
-		{"grok", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}],"matcher":"spawn_subagent|Task|solo__spawn_agent|solo__spawn_process"}]}}`},
+		{"grok", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":660,"type":"command"}],"matcher":"run_terminal_command|run_terminal_cmd|Bash|write|search_replace|Write|Edit|MultiEdit|spawn_subagent|Task|solo__spawn_agent|solo__spawn_process"}]}}`},
 		{"agy", `{"maestro":{"PreInvocation":[{"command":"maestro hook agy","timeout":30,"type":"command"}],"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":660,"type":"command"}],"matcher":"run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents"}]}}`},
 	} {
 		t.Run(tc.harness, func(t *testing.T) {
