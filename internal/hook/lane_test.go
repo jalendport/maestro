@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -260,7 +261,8 @@ func TestFindLaneFolder(t *testing.T) {
 		{"Claude path only", "", "claude", "Read `/project/.agents/maestro/runs/r-test/abcd/brief.md`", ""},
 		{"empty transcript path", "", "claude", "", ""},
 		{"first Pointer", "", "agy", "`/project/.agents/maestro/runs/r-test/abcd/brief.md` `/project/.agents/maestro/runs/r-next/efgh/brief.md`", "/project/.agents/maestro/runs/r-test/abcd"},
-		{"past old limit", "", "agy", strings.Repeat("x", 64*1024) + " `/project/.agents/maestro/runs/r-test/abcd/brief.md`", "/project/.agents/maestro/runs/r-test/abcd"},
+		{"within 64 KB", "", "agy", strings.Repeat("x", 63*1024) + " `/project/.agents/maestro/runs/r-test/abcd/brief.md`", "/project/.agents/maestro/runs/r-test/abcd"},
+		{"after 64 KB", "", "agy", strings.Repeat("x", 64*1024) + " `/project/.agents/maestro/runs/r-test/abcd/brief.md`", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("MAESTRO_TASK_FOLDER", tc.env)
@@ -279,34 +281,83 @@ func TestFindLaneFolder(t *testing.T) {
 	}
 }
 
-func TestFindLaneFolderWholeTranscript(t *testing.T) {
+func transcriptPromptLine(t *testing.T, harness string, content any) string {
+	t.Helper()
+	message := map[string]any{"role": "user", "content": content}
+	entry := map[string]any{"type": "user", "message": message}
+	if harness == "codex" {
+		message["type"] = "message"
+		entry = map[string]any{"type": "response_item", "payload": message}
+	}
+	body, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body) + "\n"
+}
+
+func TestFindLaneFolderRealTranscriptShapes(t *testing.T) {
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	folder := "/project/.agents/maestro/runs/r-test/abcd"
-	pointer, err := json.Marshal(map[string]string{"message": brief.Pointer(folder + "/brief.md")})
-	if err != nil {
-		t.Fatal(err)
+	for _, harness := range []string{"claude", "codex"} {
+		body, err := os.ReadFile(filepath.Join("testdata", harness+"-lane.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, lane := range []bool{true, false} {
+			t.Run(harness+"/Lane="+strconv.FormatBool(lane), func(t *testing.T) {
+				text, want := string(body), folder
+				if !lane {
+					text = strings.Replace(text, brief.Pointer(folder+"/brief.md"), "Explain this code.", 1)
+					want = ""
+				}
+				transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
+				if err := os.WriteFile(transcript, []byte(text), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				got, found := FindLaneFolder(&Call{Harness: harness, TranscriptPath: transcript})
+				if got != want || found != lane {
+					t.Fatalf("folder = %q, %v; want %q, %v", got, found, want, lane)
+				}
+			})
+		}
 	}
-	pathOnly, err := json.Marshal(map[string]string{"message": folder + "/brief.md"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	line := "{\"message\":\"" + strings.Repeat("x", 1024) + "\"}\n"
-	for _, harness := range []string{"claude", "codex", "agy"} {
+}
+
+func TestFindLaneFolderFirstUserPromptAndLimits(t *testing.T) {
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	folder := "/project/.agents/maestro/runs/r-test/abcd"
+	line := "{\"type\":\"system\",\"text\":\"" + strings.Repeat("x", 1024) + "\"}\n"
+	for _, harness := range []string{"claude", "codex"} {
+		pointer := transcriptPromptLine(t, harness, brief.Pointer(folder+"/brief.md"))
+		toolResult := transcriptPromptLine(t, harness, []any{map[string]any{"type": "tool_result", "content": brief.Pointer(folder + "/brief.md")}})
+		textBlocks := transcriptPromptLine(t, harness, []any{map[string]any{"type": "text", "text": brief.Pointer(folder + "/brief.md")}})
 		for _, tc := range []struct {
 			name, text string
 			found      bool
 		}{
-			{"after 100 KB", strings.Repeat(line, 101) + string(pointer), true},
-			{"path only after 100 KB", strings.Repeat(line, 101) + string(pathOnly), harness == "agy"},
-			{"long JSONL line", "{\"message\":\"" + strings.Repeat("x", 512*1024) + "\"}\n" + string(pointer), true},
-			{"after 16 MB", strings.Repeat(line, 16*1024*1024/len(line)+1) + string(pointer), false},
-			{"path only after 16 MB", strings.Repeat(line, 16*1024*1024/len(line)+1) + string(pathOnly), false},
-			{"first match before long line", string(pointer) + "\n" + strings.Repeat("x", 2*1024*1024), true},
+			{"after 100 KB of system entries", strings.Repeat(line, 101) + pointer, true},
+			{"3 MB JSONL line", "{\"type\":\"system\",\"text\":\"" + strings.Repeat("x", 3*1024*1024) + "\"}\n" + pointer, true},
+			{"over 4 MB before prompt", strings.Repeat("x", 4*1024*1024) + "\n" + pointer, false},
+			{"over 4 MB prompt", transcriptPromptLine(t, harness, brief.Pointer(folder+"/brief.md")+strings.Repeat("x", 4*1024*1024)), false},
+			{"after 16 MB", strings.Repeat(line, 16*1024*1024/len(line)+1) + pointer, false},
+			{"stop before oversized later line", pointer + strings.Repeat("x", 4*1024*1024), true},
+			{"ordinary first prompt", transcriptPromptLine(t, harness, "Explain this code.") + toolResult + pointer, false},
+			{"empty first prompt", transcriptPromptLine(t, harness, "") + pointer, false},
+			{"text blocks", textBlocks, true},
+			{"tool result before prompt", toolResult + textBlocks, true},
+			{"tool result only", toolResult, false},
+			{"non-text user message", transcriptPromptLine(t, harness, []any{map[string]any{"type": "image"}}) + pointer, true},
+			{"invalid JSON before prompt", "not JSON\n" + pointer, true},
+			{"unreadable transcript", "", false},
 		} {
 			t.Run(harness+"/"+tc.name, func(t *testing.T) {
 				transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
 				if err := os.WriteFile(transcript, []byte(tc.text), 0o600); err != nil {
 					t.Fatal(err)
+				}
+				if tc.name == "unreadable transcript" {
+					transcript = t.TempDir()
 				}
 				want := ""
 				if tc.found {
@@ -339,15 +390,14 @@ func TestFindLaneFolderPointerSentence(t *testing.T) {
 				{"partial sentence", "Read the file `" + path + "` in full", false},
 				{"missing period", "Read the file `" + path + "` in full, then follow it", false},
 				{"Pointer", brief.Pointer(path), true},
-				{"earlier path", "/other/.agents/maestro/runs/r-other/task/brief.md\n" + brief.Pointer(path), true},
+				{"leading whitespace", " \t\n" + brief.Pointer(path), true},
+				{"quoted Pointer", "Explain this prompt: " + brief.Pointer(path), false},
+				{"earlier path", "/other/.agents/maestro/runs/r-other/task/brief.md\n" + brief.Pointer(path), false},
 			} {
 				t.Run(harness+"/"+folder+"/"+tc.name, func(t *testing.T) {
-					body, err := json.Marshal(map[string]string{"message": tc.text})
-					if err != nil {
-						t.Fatal(err)
-					}
+					body := transcriptPromptLine(t, harness, tc.text)
 					transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
-					if err := os.WriteFile(transcript, body, 0o600); err != nil {
+					if err := os.WriteFile(transcript, []byte(body), 0o600); err != nil {
 						t.Fatal(err)
 					}
 					want := ""

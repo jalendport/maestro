@@ -348,7 +348,18 @@ func TestHookCommandReminderInsideLane(t *testing.T) {
 					case "transcript":
 						transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
 						pointer := "Read the file `" + filepath.Join(folder, "brief.md") + "` in full, then follow it."
-						if err := os.WriteFile(transcript, []byte(pointer), 0o600); err != nil {
+						body := []byte(pointer)
+						if harness != "agy" && harness != "agy detected" {
+							message := map[string]any{"role": "user", "content": pointer}
+							entry := map[string]any{"type": "user", "message": message}
+							if harness == "codex" {
+								message["type"] = "message"
+								message["content"] = []any{map[string]any{"type": "input_text", "text": pointer}}
+								entry = map[string]any{"type": "response_item", "payload": message}
+							}
+							body, _ = json.Marshal(entry)
+						}
+						if err := os.WriteFile(transcript, body, 0o600); err != nil {
 							t.Fatal(err)
 						}
 						payload[transcriptKey] = transcript
@@ -363,6 +374,97 @@ func TestHookCommandReminderInsideLane(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestHookCommandReminderFirstUserPrompt(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("MAESTRO_LANE", "")
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	if err := os.WriteFile(config.UserFile(), []byte("[hook]\nscope = \"all\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pointer := "Read the file `/project/.agents/maestro/runs/r-test/abcd/brief.md` in full, then follow it. Write your report as the file says."
+	for _, harness := range []string{"claude", "codex"} {
+		fixture, err := os.ReadFile(filepath.Join("..", "hook", "testdata", harness+"-lane.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		orchestrator := strings.Replace(string(fixture), pointer, "Explain this code.", 1)
+		for _, tc := range []struct {
+			name, prompt, transcript string
+			lane                     bool
+		}{
+			{"submitted Pointer with empty transcript", pointer, "", true},
+			{"leading whitespace", " \t\n" + pointer, "", true},
+			{"quoted Pointer", "Explain this prompt: " + pointer, orchestrator, false},
+			{"tool result Pointer", "Continue.", orchestrator, false},
+			{"Lane first prompt", "Continue.", string(fixture), true},
+		} {
+			t.Run(harness+"/"+tc.name, func(t *testing.T) {
+				transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
+				if err := os.WriteFile(transcript, []byte(tc.transcript), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				payload, err := json.Marshal(map[string]any{"hook_event_name": "UserPromptSubmit", "prompt": tc.prompt, "transcript_path": transcript})
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := string(hook.RenderReminder(&hook.Call{Harness: harness}, "all"))
+				if tc.lane {
+					want = ""
+				}
+				if got := runHookPayload(t, string(payload), harness); got != want {
+					t.Fatalf("output = %q, want %q", got, want)
+				}
+			})
+		}
+	}
+}
+
+func TestHookCommandClaudeAndCodexToolCallsSkipTranscript(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	if err := os.WriteFile(config.UserFile(), []byte("[hook]\nscope = \"all\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, harness := range []string{"claude", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			transcript := filepath.Join(t.TempDir(), "missing.jsonl")
+			payload, err := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "transcript_path": transcript, "tool_name": "Agent", "tool_input": map[string]any{"subagent_type": "writer"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := string(hook.Render(harness, hook.Decide(&hook.Call{Tool: "Agent", Input: map[string]any{"subagent_type": "writer"}}, "all")))
+			if got := runHookPayload(t, string(payload), harness); got != want || !strings.Contains(got, `"permissionDecision":"deny"`) {
+				t.Fatalf("output = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestHookCommandAntigravityTranscriptLimit(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	for _, offset := range []int{63 * 1024, 64 * 1024} {
+		t.Run(strconv.Itoa(offset), func(t *testing.T) {
+			transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
+			body := strings.Repeat("x", offset) + " `/project/.agents/maestro/runs/r-test/abcd/brief.md`"
+			if err := os.WriteFile(transcript, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			payload, err := json.Marshal(map[string]any{"transcriptPath": transcript, "toolCall": map[string]any{"name": "run_command", "args": map[string]any{"CommandLine": "pwd"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := `{"decision":"allow"}`
+			if offset < 64*1024 {
+				want = `{"decision":"deny","reason":"no readable Lane policy"}`
+			}
+			if got := runHookPayload(t, string(payload), "agy"); got != want {
+				t.Fatalf("output = %q, want %q", got, want)
+			}
+		})
 	}
 }
 

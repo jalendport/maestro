@@ -55,28 +55,30 @@ func (a *app) hookCmd() *cobra.Command {
 				}
 				return nil
 			}
-			if taskFolder, found := hook.FindLaneFolder(call); found && call.Harness == "agy" {
-				folder := config.ControlDirForFolder(taskFolder)
-				if lane, ok := hook.LoadLane(folder); ok {
-					verdict := hook.DecideLane(call, lane)
-					if verdict.Kind == "relay" {
-						input, err := json.Marshal(call.Input)
-						answer := ""
-						if err == nil {
-							answer, err = dispatch.RelayWait(folder, dispatch.RelayRequest{ToolName: "run_command", ToolInput: input})
+			if call.Harness == "agy" {
+				if taskFolder, found := hook.FindLaneFolder(call); found {
+					folder := config.ControlDirForFolder(taskFolder)
+					if lane, ok := hook.LoadLane(folder); ok {
+						verdict := hook.DecideLane(call, lane)
+						if verdict.Kind == "relay" {
+							input, err := json.Marshal(call.Input)
+							answer := ""
+							if err == nil {
+								answer, err = dispatch.RelayWait(folder, dispatch.RelayRequest{ToolName: "run_command", ToolInput: input})
+							}
+							verdict = hook.Verdict{Kind: "deny", Reason: answer}
+							if err != nil {
+								verdict.Reason = err.Error()
+							} else if answer == "allow" {
+								verdict = hook.Verdict{Kind: "auto_approve"}
+							}
 						}
-						verdict = hook.Verdict{Kind: "deny", Reason: answer}
-						if err != nil {
-							verdict.Reason = err.Error()
-						} else if answer == "allow" {
-							verdict = hook.Verdict{Kind: "auto_approve"}
-						}
+						fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, verdict)))
+						return nil
 					}
-					fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, verdict)))
+					fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, hook.Verdict{Kind: "deny", Reason: "no readable Lane policy"})))
 					return nil
 				}
-				fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, hook.Verdict{Kind: "deny", Reason: "no readable Lane policy"})))
-				return nil
 			}
 			decision := hook.Decision{Allow: true}
 			if r, err := roster.Load(); err == nil {

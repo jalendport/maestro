@@ -24,7 +24,10 @@ func isReminderEvent(c *Call, raw map[string]any) bool {
 // RenderReminder writes the Reminder in the Harness's shape. An empty scope
 // keeps a Reminder event out of scope when the Roster cannot load.
 func RenderReminder(c *Call, scope string) []byte {
-	lane := os.Getenv("MAESTRO_TASK_FOLDER") != "" || os.Getenv("MAESTRO_LANE") != "" || lanePointerSentence.MatchString(c.Prompt)
+	lane := os.Getenv("MAESTRO_TASK_FOLDER") != "" || os.Getenv("MAESTRO_LANE") != ""
+	if !lane && (c.Harness == "claude" || c.Harness == "codex") {
+		lane = lanePointerSentence.MatchString(c.Prompt)
+	}
 	if !lane {
 		_, lane = FindLaneFolder(c)
 	}

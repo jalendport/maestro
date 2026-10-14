@@ -68,6 +68,8 @@ func TestReminderPromptPointer(t *testing.T) {
 				{"partial sentence", "Read the file `" + path + "` in full", false},
 				{"missing period", strings.TrimSuffix(pointer, "."), false},
 				{"Pointer", pointer, true},
+				{"leading whitespace", " \t\n" + pointer, true},
+				{"quoted Pointer", "Explain this prompt: " + pointer, false},
 				{"Pointer with Report instruction", pointer + " Write your report as the file says.", true},
 			} {
 				t.Run(harness+"/"+folder+"/"+tc.name, func(t *testing.T) {
@@ -217,7 +219,8 @@ func TestFindLaneFolderClaudeAndCodexTranscript(t *testing.T) {
 			t.Setenv("MAESTRO_TASK_FOLDER", "")
 			folder := filepath.Join(t.TempDir(), ".agents", "maestro", "runs", "r-test", "task")
 			transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
-			if err := os.WriteFile(transcript, []byte("Read the file `"+filepath.Join(folder, "brief.md")+"` in full, then follow it."), 0o600); err != nil {
+			body := transcriptPromptLine(t, harness, "Read the file `"+filepath.Join(folder, "brief.md")+"` in full, then follow it.")
+			if err := os.WriteFile(transcript, []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			payload, _ := json.Marshal(map[string]any{"hook_event_name": "UserPromptSubmit", "transcript_path": transcript})

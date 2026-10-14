@@ -32,7 +32,7 @@ type Verdict struct {
 func (v Verdict) verdict() Verdict { return v }
 
 var lanePointer = regexp.MustCompile("([^\\s`\"']+/\\.agents/maestro/(?:runs/[^/\\s`\"']+|councils/[^/\\s`\"']+(?:/round-[0-9]+)?)/[^/\\s`\"']+)/brief\\.md")
-var lanePointerSentence = regexp.MustCompile("Read the file `" + lanePointer.String() + "` in full, then follow it\\.")
+var lanePointerSentence = regexp.MustCompile("^\\s*Read the file `" + lanePointer.String() + "` in full, then follow it\\.")
 
 func FindLaneFolder(c *Call) (string, bool) {
 	if folder := os.Getenv("MAESTRO_TASK_FOLDER"); folder != "" {
@@ -46,18 +46,89 @@ func FindLaneFolder(c *Call) (string, bool) {
 		return "", false
 	}
 	defer f.Close()
-	pointer := lanePointer
-	if c.Harness == "claude" || c.Harness == "codex" {
-		pointer = lanePointerSentence
+	if c.Harness == "agy" {
+		b, err := io.ReadAll(io.LimitReader(f, 64*1024))
+		if err == nil {
+			if match := lanePointer.FindSubmatch(b); len(match) > 0 {
+				return string(match[1]), true
+			}
+		}
+		return "", false
+	}
+	if c.Harness != "claude" && c.Harness != "codex" {
+		return "", false
 	}
 	scanner := bufio.NewScanner(io.LimitReader(f, 16*1024*1024))
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
-		if match := pointer.FindSubmatch(scanner.Bytes()); len(match) > 0 {
-			return string(match[1]), true
+		if prompt, ok := transcriptUserPrompt(c.Harness, scanner.Bytes()); ok {
+			if match := lanePointerSentence.FindStringSubmatch(prompt); len(match) > 0 {
+				return match[1], true
+			}
+			return "", false
 		}
 	}
 	return "", false
+}
+
+func transcriptUserPrompt(harness string, line []byte) (string, bool) {
+	type message struct {
+		Type    string          `json:"type"`
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+		Meta    struct {
+			Kinds []string `json:"content_item_kinds"`
+		} `json:"internal_chat_message_metadata_passthrough"`
+	}
+	var entry struct {
+		Type    string  `json:"type"`
+		Message message `json:"message"`
+		Payload message `json:"payload"`
+	}
+	if json.Unmarshal(line, &entry) != nil {
+		return "", false
+	}
+	m := entry.Message
+	if harness == "claude" {
+		if entry.Type != "user" || m.Role != "user" {
+			return "", false
+		}
+	} else {
+		m = entry.Payload
+		if entry.Type != "response_item" || m.Type != "message" || m.Role != "user" {
+			return "", false
+		}
+		// Codex stores injected project rules and environment context as user messages.
+		if len(m.Meta.Kinds) > 0 {
+			contextOnly := true
+			for _, kind := range m.Meta.Kinds {
+				if kind != "agents_md.instructions" && kind != "environments.environment_context" {
+					contextOnly = false
+				}
+			}
+			if contextOnly {
+				return "", false
+			}
+		}
+	}
+	var prompt string
+	if json.Unmarshal(m.Content, &prompt) == nil && string(m.Content) != "null" {
+		return prompt, true
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(m.Content, &blocks) != nil {
+		return "", false
+	}
+	var texts []string
+	for _, block := range blocks {
+		if block.Type == "text" || block.Type == "input_text" {
+			texts = append(texts, block.Text)
+		}
+	}
+	return strings.Join(texts, "\n"), len(texts) > 0
 }
 
 func LoadLane(folder string) (*Lane, bool) {
