@@ -123,7 +123,13 @@ The probe denies only where the hook is in scope: with the default `[hook] scope
 
 ### Connect Antigravity
 
-Antigravity takes read work only; it has no edit shape. Its read work is enforced only while its settings grant no command permission beyond the fixed read-only list; Maestro reads `~/.gemini/antigravity-cli/settings.json` to decide.
+Antigravity takes read and edit work, like the other harnesses. The Maestro hook entry carries each Lane's permissions:
+
+- Commands on the checks and `allow` lists run
+- Other commands are relayed in a tab or denied one-shot
+- Writes stay inside the project and the run folder
+
+The hook entry changed, so an existing install must run `maestro adapter install agy` again.
 
 ```sh
 maestro adapter install agy

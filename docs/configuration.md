@@ -60,7 +60,7 @@ Default entries:
 | `grok` | `"1.0.50"` | `["GROK_SANDBOX"]` |
 | `agy` | `"1.2.9"` | `[]` |
 
-Antigravity read work is enforced only while its settings grant no command permission beyond the fixed read-only list; Maestro reads `~/.gemini/antigravity-cli/settings.json` to decide.
+The Maestro hook installed by `maestro adapter install agy` enforces Antigravity Lanes.
 
 ### [aliases]
 

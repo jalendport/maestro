@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+- Added Antigravity edit Lanes and Solo tabs, with command prompts relayed through the Maestro hook
+
+### Changed
+- Changed Antigravity read enforcement to the Maestro hook, so it no longer depends on the Antigravity settings file
+- Changed the Antigravity hook entry to cover commands and file writes; run `maestro adapter install agy` again
+
 ### Fixed
 - Fixed the Homebrew cask so it no longer prints a deprecation warning for `postflight` on install
 - Fixed the README so the Homebrew upgrade command uses the full tap path
