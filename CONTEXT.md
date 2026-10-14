@@ -16,7 +16,7 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Router** — the part of Maestro that makes Routes: Jev, with a rules fallback.
 - **Dispatch** — starting a Lane on a Task and collecting its result.
 - **Council** — several Lanes answering the same question in parallel. The Orchestrator synthesizes; Maestro returns a Merge.
-- **Adapter** — the small per-Harness piece that connects an Orchestrator to Maestro: one shared skill file plus one hook file. Maestro itself works without any Adapter. `maestro adapter install` writes it.
+- **Adapter** — the small per-Harness piece that connects an Orchestrator to Maestro: one shared skill file, one hook file, and the Carrier of the Reminder. Maestro itself works without any Adapter. `maestro adapter install` writes it.
 - **Run** — one invocation of Maestro on a plan: its Tasks, their Routes and Dispatches, the checks, and the report back to the Orchestrator.
 - **Brief** — the text a Lane receives for one Task: the goal, the definition of done, the files, the checks, and the permission mode.
 - **Tier** — a rung on the strength ladder that Lane families sit on: Light, Daily, Heavy, Frontier. "One Tier up" means the next rung.
