@@ -74,22 +74,42 @@ func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	if l.Effort != "" {
 		args = append(args, "--reasoning-effort", l.Effort)
 	}
+	// Grok runs a call under dontAsk only when an allow rule or its built-in
+	// read-only list approves it; the Maestro hook can deny but never
+	// approve. A deny rule here would win over every allow rule, so the
+	// shapes pass allow rules only. Grok path rules take the absolute path
+	// as written: a leading `//` is literal glob text there, not an anchor.
+	// The workspace sandbox confines every subprocess write to the project
+	// at the kernel level; it fits only when every writable directory is
+	// inside the project root.
 	var flags []string
+	writable := append([]string{l.RunFolder}, l.Dirs...)
+	sandboxed := l.Root != ""
+	for _, dir := range writable {
+		if dir != "" && !within(dir, l.Root) {
+			sandboxed = false
+		}
+	}
+	if sandboxed {
+		flags = append(flags, "--sandbox", "workspace")
+	}
 	switch l.Access {
 	case "read":
-		// The Maestro hook holds the Access: a deny rule here would win over
-		// the Run folder allow rule below (Grok lets deny beat every allow),
-		// and the Lane could never write its Report.
 		flags = append(flags, "--permission-mode", "dontAsk")
 		for _, rule := range readTools {
 			flags = append(flags, "--allow", rule)
 		}
 		// Like Claude, a read Lane can write its Report in its Run folder.
 		if l.RunFolder != "" {
-			flags = append(flags, "--allow", fmt.Sprintf("Write(//%s/**)", l.RunFolder), "--allow", fmt.Sprintf("Edit(//%s/**)", l.RunFolder))
+			flags = append(flags, grokWriteRules(l.RunFolder)...)
 		}
 	case "edit":
 		flags = append(flags, "--permission-mode", "dontAsk")
+		for _, dir := range append([]string{l.Root}, writable...) {
+			if dir != "" {
+				flags = append(flags, grokWriteRules(dir)...)
+			}
+		}
 		for _, cmd := range l.AllowedCommands {
 			flags = append(flags, "--allow", "Bash("+cmd+" *)", "--allow", "Bash("+cmd+")")
 		}
@@ -109,6 +129,28 @@ func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	cmd.Dir = l.Root
 	cmd.Env = l.Env
 	return &Command{Cmd: cmd, Flags: flags, PromptStdin: false, ReportByText: l.Access == "read" && !tab}, nil
+}
+
+// grokWriteRules grants file writes under dir, as an absolute path.
+func grokWriteRules(dir string) []string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	return []string{"--allow", fmt.Sprintf("Write(%s/**)", dir), "--allow", fmt.Sprintf("Edit(%s/**)", dir)}
+}
+
+// within reports whether path sits inside root, by path text alone.
+func within(path, root string) bool {
+	if root == "" {
+		return false
+	}
+	absPath, err1 := filepath.Abs(path)
+	absRoot, err2 := filepath.Abs(root)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
 func (g *Grok) NewParser() Parser { return &grokParser{out: &Outcome{}} }

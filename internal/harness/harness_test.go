@@ -116,7 +116,7 @@ func TestEveryHarnessEnforcesBothShapes(t *testing.T) {
 func TestGrokReadAllowsOnlyReadTools(t *testing.T) {
 	g := &Grok{bin: "/bin/grok"}
 	for i, build := range []func(Launch) (*Command, error){g.Build, g.BuildTab} {
-		command, err := build(Launch{Access: "read", Root: ".", RunFolder: "/project/run", AllowRules: []string{"Bash"}, AllowedCommands: []string{"touch file"}, AllowCommit: true})
+		command, err := build(Launch{Access: "read", Root: "/project", RunFolder: "/project/run", AllowRules: []string{"Bash"}, AllowedCommands: []string{"touch file"}, AllowCommit: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,12 +143,47 @@ func TestGrokReadAllowsOnlyReadTools(t *testing.T) {
 				t.Fatal("missing", rule)
 			}
 		}
-		if !allow["Write(///project/run/**)"] || !allow["Edit(///project/run/**)"] {
+		// Grok takes the absolute path as written; `//` would be literal glob text.
+		if !allow["Write(/project/run/**)"] || !allow["Edit(/project/run/**)"] {
 			t.Fatal("Report writes must stay in the Run folder", allow)
+		}
+		if flags := strings.Join(command.Flags, " "); !strings.Contains(flags, "--sandbox workspace") {
+			t.Fatal("read must run in the workspace sandbox", command.Flags)
 		}
 		if g.Enforcement("read") != Enforced {
 			t.Fatal("read must be enforced")
 		}
+	}
+}
+
+func TestGrokEditGrantsWritesAndSandbox(t *testing.T) {
+	g := &Grok{bin: "/bin/grok"}
+	command, err := g.Build(Launch{Access: "edit", Root: "/project", RunFolder: "/project/.agents/maestro/runs/r-1/t1", Dirs: []string{"/project/vendor"}, AllowedCommands: []string{"go test ./..."}, AllowCommit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags := strings.Join(command.Flags, " ")
+	for _, want := range []string{
+		"--sandbox workspace", "--permission-mode dontAsk",
+		"--allow Write(/project/**) --allow Edit(/project/**)",
+		"--allow Write(/project/.agents/maestro/runs/r-1/t1/**)",
+		"--allow Write(/project/vendor/**)",
+		"--allow Bash(go test ./... *)", "--allow Bash(git commit *)",
+	} {
+		if !strings.Contains(flags, want) {
+			t.Fatalf("missing %q in %s", want, flags)
+		}
+	}
+	if strings.Contains(flags, "--deny") || strings.Contains(flags, "//") {
+		t.Fatal(flags)
+	}
+	// An extra directory outside the project does not fit the workspace sandbox.
+	command, err = g.Build(Launch{Access: "edit", Root: "/project", RunFolder: "/project/run", Dirs: []string{"/elsewhere"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags := strings.Join(command.Flags, " "); strings.Contains(flags, "--sandbox") || !strings.Contains(flags, "--allow Write(/elsewhere/**)") {
+		t.Fatal(flags)
 	}
 }
 
