@@ -84,6 +84,9 @@ func TestLightNeverEdits(t *testing.T) {
 
 func TestReadRoutesToGrok(t *testing.T) {
 	rt := testRouter(t)
+	if result := adapter.Install("grok", os.Getenv("HOME"), "skill"); result.Err != nil {
+		t.Fatal(result.Err)
+	}
 	b := mustBrief(t, "---\ntitle: x\ncategory: research\nlevel: some\n---\n## Goal\ng\n## Done\nd\n")
 	r, err := rt.Route(Request{Brief: b, Access: "read"})
 	if err != nil {
@@ -193,32 +196,38 @@ func TestRequestedLaneRefusesAccessOrMissingHook(t *testing.T) {
 	}
 }
 
-func TestAgyPreflightRequiresHook(t *testing.T) {
-	for _, state := range []string{"missing", "wrong", "ok"} {
-		t.Run(state, func(t *testing.T) {
-			rt := testRouter(t)
-			home := os.Getenv("HOME")
-			if state != "missing" {
-				if result := adapter.Install("agy", home, "skill"); result.Err != nil {
-					t.Fatal(result.Err)
-				}
-				if state == "wrong" {
-					spec, _ := adapter.Paths("agy", home)
-					if err := os.WriteFile(spec.HookFile, []byte(`{"maestro":{"PreToolUse":[{"matcher":"invoke_subagent","hooks":[{"type":"command","command":"maestro hook","timeout":10}]}]}}`), 0o644); err != nil {
-						t.Fatal(err)
+func TestHookHeldHarnessPreflightRequiresHook(t *testing.T) {
+	wrong := map[string]string{
+		"agy":  `{"maestro":{"PreToolUse":[{"matcher":"invoke_subagent","hooks":[{"type":"command","command":"maestro hook","timeout":10}]}]}}`,
+		"grok": `{"hooks":{"PreToolUse":[{"matcher":"spawn_subagent","hooks":[{"type":"command","command":"maestro hook","timeout":10}]}]}}`,
+	}
+	for _, tc := range []struct{ harness, family string }{{"agy", "agy-flash"}, {"grok", "grok"}} {
+		for _, state := range []string{"missing", "wrong", "ok"} {
+			t.Run(tc.harness+"/"+state, func(t *testing.T) {
+				rt := testRouter(t)
+				home := os.Getenv("HOME")
+				if state != "missing" {
+					if result := adapter.Install(tc.harness, home, "skill"); result.Err != nil {
+						t.Fatal(result.Err)
+					}
+					if state == "wrong" {
+						spec, _ := adapter.Paths(tc.harness, home)
+						if err := os.WriteFile(spec.HookFile, []byte(wrong[tc.harness]), 0o644); err != nil {
+							t.Fatal(err)
+						}
 					}
 				}
-			}
-			for _, access := range []string{"read", "edit"} {
-				want := "agy needs its Maestro hook: run maestro adapter install agy"
-				if state == "ok" {
-					want = ""
+				for _, access := range []string{"read", "edit"} {
+					want := fmt.Sprintf("%s needs its Maestro hook: run maestro adapter install %s", tc.harness, tc.harness)
+					if state == "ok" {
+						want = ""
+					}
+					if got := rt.Preflight(rt.Roster.Families[tc.family], access); got != want {
+						t.Fatalf("%s: %q, want %q", access, got, want)
+					}
 				}
-				if got := rt.Preflight(rt.Roster.Families["agy-flash"], access); got != want {
-					t.Fatalf("%s: %q, want %q", access, got, want)
-				}
-			}
-		})
+			})
+		}
 	}
 }
 
@@ -295,6 +304,9 @@ func TestMeteredCapBindsRouterViewAndRequestedRoute(t *testing.T) {
 	}{{0, "ok"}, {16, "ok"}, {17, "warning"}, {19, "warning"}, {20, "blocked"}, {21, "blocked"}} {
 		t.Run(tc.state+fmt.Sprint(tc.spent), func(t *testing.T) {
 			rt := testRouter(t)
+			if result := adapter.Install("grok", os.Getenv("HOME"), "skill"); result.Err != nil {
+				t.Fatal(result.Err)
+			}
 			rt.Roster.Budget.WarnAt = .8
 			account := rt.Roster.Accounts["grok"]
 			account.Billing = "metered"

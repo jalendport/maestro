@@ -373,10 +373,12 @@ func (rt *Router) Preflight(f *roster.Family, access string) string {
 	if !ok || rec.Path == "" {
 		return f.Harness + " is not installed"
 	}
-	if f.Harness == "agy" {
+	// Antigravity and Grok Lanes are held by the Maestro hook, so a Lane
+	// without the installed hook has no enforcement at all.
+	if f.Harness == "agy" || f.Harness == "grok" {
 		home, err := os.UserHomeDir()
-		if err != nil || adapter.State("agy", home).Hook != "ok" {
-			return "agy needs its Maestro hook: run maestro adapter install agy"
+		if err != nil || adapter.State(f.Harness, home).Hook != "ok" {
+			return fmt.Sprintf("%s needs its Maestro hook: run maestro adapter install %s", f.Harness, f.Harness)
 		}
 	}
 	if min := rt.Roster.Harness[f.Harness].MinVersion; min != "" && rec.Version != "" && harness.VersionLess(rec.Version, min) {
