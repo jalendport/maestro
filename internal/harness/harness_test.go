@@ -116,7 +116,9 @@ func TestEveryHarnessEnforcesBothShapes(t *testing.T) {
 func TestGrokReadAllowsOnlyReadTools(t *testing.T) {
 	g := &Grok{bin: "/bin/grok"}
 	for i, build := range []func(Launch) (*Command, error){g.Build, g.BuildTab} {
-		command, err := build(Launch{Access: "read", Root: "/project", RunFolder: "/project/run", AllowRules: []string{"Bash"}, AllowedCommands: []string{"touch file"}, AllowCommit: true})
+		// Dirs are extra writable directories of an edit Lane; a read Lane
+		// writes only its Run folder, so they do not decide its sandbox.
+		command, err := build(Launch{Access: "read", Root: "/project", RunFolder: "/project/run", Dirs: []string{"/elsewhere"}, AllowRules: []string{"Bash"}, AllowedCommands: []string{"touch file"}, AllowCommit: true})
 		if err != nil {
 			t.Fatal(err)
 		}

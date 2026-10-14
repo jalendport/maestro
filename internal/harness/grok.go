@@ -83,7 +83,10 @@ func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	// at the kernel level; it fits only when every writable directory is
 	// inside the project root.
 	var flags []string
-	writable := append([]string{l.RunFolder}, l.Dirs...)
+	writable := []string{l.RunFolder}
+	if l.Access == "edit" {
+		writable = append(writable, l.Dirs...)
+	}
 	sandboxed := l.Root != ""
 	for _, dir := range writable {
 		if dir != "" && !within(dir, l.Root) {
