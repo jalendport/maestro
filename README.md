@@ -113,6 +113,8 @@ Grok takes read and edit work. Grok's own permission modes do not hold a Lane: `
 - An edit Lane also runs the checks and the project `allow` list, and writes inside the project, the Run folder, and the extra `dirs`; the workspace sandbox also permits writes to temp directories and `~/.grok`
 - Grok never relays: a command outside the allow list is denied; add it to `checks` or the project `allow` list
 
+The hook judges a command as written. A read-only command that carries a shell expansion (`$`, a backquote, a brace list, or an unquoted glob) is denied, because the shell could turn the expansion into a flag the list forbids; quote the pattern (`find . -name '*.go'`) or name the file. The sandbox is the boundary that holds a shell; the hook is the second line that holds paths, tool names, and the command list.
+
 Grok Lanes run under `--sandbox workspace` when every writable directory is inside the project. For edit Lanes, this includes `dirs`. If a directory lies outside the project, as this repository's Go caches do, the Grok edit Lane runs without the sandbox and its Route is `best-effort`. A read Lane does not use the extra edit `dirs`.
 
 Maestro cannot detect three limits. Grok warns and continues without the kernel sandbox when the OS refuses a built-in profile. A Solo tab whose transcript is not yet on disk at its first tool call runs that call under the Orchestrator rule; the first call of a Lane is the read of its Brief. A check that runs Lane-written code under the Grok workspace sandbox can write `~/.grok`, Grok's own home. Grok's `hashline` file toolset is not supported in a Lane: its write tools are denied as unknown.
@@ -148,6 +150,8 @@ Antigravity takes read and edit work, like the other harnesses. The Maestro hook
 - A read Lane runs read-only commands and writes only its Report in the Run folder
 - An edit Lane also runs commands on the checks and `allow` lists, and writes inside the project, the Run folder, and the extra `dirs`
 - Only an edit Lane in a tab relays other commands; a read Lane or a one-shot Lane denies them
+
+Antigravity has no kernel sandbox, so the hook is the only boundary of an Antigravity Lane. It judges a command as written: a read-only command that carries a shell expansion (`$`, a backquote, a brace list, or an unquoted glob) is denied; quote the pattern or name the file.
 
 The hook entry changed, so an existing install must run `maestro adapter install agy` again.
 

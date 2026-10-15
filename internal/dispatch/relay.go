@@ -60,7 +60,12 @@ func removeDeadRelayLock(path string) {
 		return
 	}
 	var owner relayLock
-	if json.NewDecoder(f).Decode(&owner) == nil && owner.PID > 0 && syscall.Kill(owner.PID, 0) == syscall.ESRCH {
+	if json.NewDecoder(f).Decode(&owner) != nil || owner.PID <= 0 {
+		return
+	}
+	// A lock whose owner is gone, or which is older than any Relay can live
+	// (the owner's pid may belong to a new process by then), is dead.
+	if syscall.Kill(owner.PID, 0) == syscall.ESRCH || time.Since(owner.At) > relayDeadline+relayPollInterval {
 		_ = os.Remove(path)
 	}
 }
@@ -218,12 +223,18 @@ func relayText(request RelayRequest) string {
 }
 
 func (r *relayTracker) start(env *Env, t *Task, rec *Record, name string, request RelayRequest) {
+	r.record(t, rec, name, request)
+	env.Solo.Wake("relay", t.Task, t.Title, name, request.ID)
+}
+
+// record notes an open Relay without a wake-up: a Relay that is already
+// answered when the tracker first sees it needs no Orchestrator.
+func (r *relayTracker) record(t *Task, rec *Record, name string, request RelayRequest) {
 	r.request = &request
 	text := relayText(request)
 	rec.Events = append(rec.Events, Event{At: request.AskedAt, Kind: "relay", Text: text})
 	_ = rec.Save()
 	ui.Eventf("relay", "task %s  %s asks:\n%s", t.Task, name, text)
-	env.Solo.Wake("relay", t.Task, t.Title, name, request.ID)
 }
 
 func (r *relayTracker) finish(rec *Record, answer string, now time.Time) {
@@ -265,7 +276,7 @@ func (r *relayTracker) poll(env *Env, t *Task, rec *Record, name string, now tim
 		if !r.answered[answer.Request.ID] {
 			previous := r.request
 			if previous == nil || previous.ID != answer.Request.ID {
-				r.start(env, t, rec, name, answer.Request)
+				r.record(t, rec, name, answer.Request)
 			}
 			r.finish(rec, answer.Answer, answer.AnsweredAt)
 			r.answered[answer.Request.ID] = true

@@ -127,3 +127,63 @@ func TestAttemptDiffDoesNotRunConfiguredHelpers(t *testing.T) {
 		t.Fatalf("configured helper ran during attempt diff: %v", err)
 	}
 }
+
+func TestInheritKeepsTheEmptyCommitOfAnUncommittedStart(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not on PATH")
+	}
+	root, folder := t.TempDir(), t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root, "-c", "user.name=test", "-c", "user.email=test@example.com"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git("init", "-q")
+
+	// Attempt 1 starts before the first commit, makes it, and fails.
+	first, err := takeBaseline(root, folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Commit != "" {
+		t.Fatalf("baseline commit = %q, want none", first.Commit)
+	}
+	if err := os.WriteFile(filepath.Join(root, "made.txt"), []byte("made\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "made.txt")
+	git("commit", "-q", "-m", "first")
+	changed := first.Changed(root)
+	if !reflect.DeepEqual(changed, []string{"made.txt"}) {
+		t.Fatalf("attempt 1 changed = %v", changed)
+	}
+	rec := &Record{Path: folder, Attempt: 1, Verification: Verification{Changed: changed}}
+	if err := rec.Save(); err != nil {
+		t.Fatal(err)
+	}
+	archiveAttempt(folder, 1)
+
+	// Attempt 2 starts at the new HEAD and must still see the committed file.
+	second, err := takeBaseline(root, folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.inherit(folder, 2); err != nil {
+		t.Fatal(err)
+	}
+	if second.Commit != "" {
+		t.Fatalf("inherited commit = %q, want the empty start", second.Commit)
+	}
+	if changed := second.Changed(root); !reflect.DeepEqual(changed, []string{"made.txt"}) {
+		t.Fatalf("inherited changed = %v, want [made.txt]", changed)
+	}
+	diff, err := second.diff(root, []string{"made.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "new file: made.txt") {
+		t.Fatalf("diff lacks the committed file:\n%s", diff)
+	}
+}

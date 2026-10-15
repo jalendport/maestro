@@ -107,6 +107,9 @@ func (s attemptBaseline) diff(root string, changed []string) (string, error) {
 // whole diff and not the last attempt's slice of it. The earliest attempt
 // wins for a path that several attempts changed.
 func (s *attemptBaseline) inherit(folder string, attempt int) error {
+	// The earliest attempt's commit is the Task's start, and an empty value
+	// there means the repository had no commit yet: it must still win.
+	commit, inherited := "", false
 	for n := attempt - 1; n >= 1; n-- {
 		dir := filepath.Join(folder, FileAttempts, strconv.Itoa(n))
 		rec, err := LoadRecord(dir)
@@ -133,9 +136,10 @@ func (s *attemptBaseline) inherit(folder string, attempt int) error {
 				delete(s.Dirty, p)
 			}
 		}
-		if earlier.Commit != "" {
-			s.Commit = earlier.Commit
-		}
+		commit, inherited = earlier.Commit, true
+	}
+	if inherited {
+		s.Commit = commit
 	}
 	b, err := json.Marshal(s)
 	if err != nil {

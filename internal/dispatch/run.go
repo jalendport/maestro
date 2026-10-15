@@ -409,7 +409,9 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	// Earlier Tasks and attempts can change the tree before this Lane starts.
 	var snap attemptBaseline
 	defer func() {
-		if !snap.Taken.IsZero() {
+		// judge records Changed before the checks run; an exit that skips judge
+		// records it here, so every attempt carries its own work forward.
+		if !rec.judged && !snap.Taken.IsZero() {
 			runRel, _ := filepath.Rel(t.Project, config.RunsDir(t.Project))
 			rec.Verification.Changed = without(snap.Changed(t.Project), runRel)
 			_ = rec.Save()
@@ -817,6 +819,7 @@ loop:
 
 // judge applies the Report status, the scope guard, the checks, and the gate.
 func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []string, b *brief.Brief, snap attemptBaseline) *Record {
+	rec.judged = true
 	rec.Outcome.Status = report.Status
 	rec.Permission.Blocked = report.Blocked
 	switch report.Status {

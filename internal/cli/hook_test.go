@@ -779,7 +779,9 @@ func TestHookCommandTranscriptErrorsDeny(t *testing.T) {
 				}
 				for _, arg := range []string{harness, ""} {
 					out := runHookPayload(t, string(b), arg)
-					if harness == "claude" && failure == "missing" {
+					if harness == "claude" {
+						// Claude Lanes carry MAESTRO_TASK_FOLDER; a transcript
+						// error marks an ordinary session, which the hook leaves alone.
 						if out != "" {
 							t.Fatalf("%s = %s, want no output", arg, out)
 						}

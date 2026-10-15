@@ -61,6 +61,12 @@ func (a *app) hookCmd() *cobra.Command {
 			// The hook closes Access gaps in these Harnesses.
 			if call.Harness == "agy" || call.Harness == "grok" || call.Harness == "claude" {
 				taskFolder, found, err := hook.FindLaneFolder(call)
+				if err != nil && call.Harness == "claude" {
+					// A Claude Lane names its Run folder in its launch settings, so
+					// a transcript Maestro cannot read belongs to an ordinary
+					// session: the Orchestrator rule decides, not a deny.
+					found, err = false, nil
+				}
 				if err != nil {
 					fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, hook.Verdict{Kind: "deny", Reason: err.Error()})))
 					return nil

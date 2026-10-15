@@ -172,6 +172,7 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 	relays := &relayTracker{}
 	nudged := false
 	var nudgedAt time.Time
+	statusErrors := 0
 	reportPath := filepath.Join(t.Folder, FileReport)
 	stop := func(reason string) {
 		l.saveTabLog(pid, t.Folder)
@@ -207,6 +208,15 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 		st, err := l.Client.Status(pid)
 		if tail, outputErr := l.Client.Output(pid, 40); outputErr == nil && output.observe(tail) {
 			lastOutput = time.Now()
+		}
+		if err != nil {
+			// A closed tab is gone from Solo: three answers in a row say so.
+			if statusErrors++; statusErrors >= 3 {
+				rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "stop", Text: "tab closed: " + err.Error()})
+				break
+			}
+		} else {
+			statusErrors = 0
 		}
 		if err == nil && st.Status != "" && !st.Running() {
 			// The tab ended without a Report.

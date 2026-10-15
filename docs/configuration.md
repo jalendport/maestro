@@ -193,7 +193,7 @@ Default entries:
 
 ### [hook]
 
-The hook is the set of `maestro hook` entries that each Adapter installs in a Harness: a `PreToolUse` entry, and for Claude Code, Codex, and Antigravity a second entry for the Reminder event (Antigravity's runs `maestro hook agy`). For Antigravity and Grok the `PreToolUse` entry also holds each Lane's permissions, because those harnesses' own permission rules cannot hold the Access on their own.
+The hook is the set of `maestro hook` entries that each Adapter installs in a Harness: a `PreToolUse` entry, and for Claude Code, Codex, and Antigravity a second entry for the Reminder event (Antigravity's runs `maestro hook agy`). For Antigravity, Grok, and Claude Code the `PreToolUse` entry also holds each Lane's permissions, because those harnesses' own permission rules cannot hold the Access on their own; for Claude Code the hook can only deny, and the Claude sandbox holds the rest. The hook judges a command as written and denies a read-only command that carries a shell expansion.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|

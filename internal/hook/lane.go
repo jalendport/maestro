@@ -247,9 +247,11 @@ func actionOf(c *Call) laneAction {
 		cwd, _ := c.Input["Cwd"].(string)
 		return laneAction{kind: "write", target: target, cwd: cwd}
 	case "write", "search_replace", "Write", "Edit", "MultiEdit", "NotebookEdit":
-		target, _ := c.Input["file_path"].(string)
-		if target == "" {
-			target, _ = c.Input["target_file"].(string)
+		target := ""
+		for _, key := range []string{"file_path", "target_file", "notebook_path"} {
+			if target, _ = c.Input[key].(string); target != "" {
+				break
+			}
 		}
 		return laneAction{kind: "write", target: target, cwd: c.CWD}
 	case "run_command":
@@ -279,7 +281,7 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 		if !filepath.IsAbs(target) {
 			target = nonEmpty(action.cwd, lane.Root) + string(filepath.Separator) + target
 		}
-		if lane.Access == "edit" && inside(target, filepath.Join(lane.Root, ".git")) {
+		if lane.Access == "edit" && insideGitDir(target, lane.Root) {
 			return Verdict{Kind: "deny", Reason: "writes to the project's .git directory are not allowed"}
 		}
 		if inside(target, lane.RunFolder) {
@@ -364,6 +366,29 @@ func readTool(tool string) bool {
 	return false
 }
 
+// insideGitDir reports a path under the project's .git directory. The name is
+// compared without case: on a case-insensitive file system `.GIT/config` is the
+// same file as `.git/config`, and on any other it is a directory git ignores.
+func insideGitDir(path, root string) bool {
+	if root == "" {
+		return false
+	}
+	abs, err := resolvePath(root)
+	if err != nil {
+		return false
+	}
+	path, err = resolvePath(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(abs, path)
+	if err != nil {
+		return false
+	}
+	first, _, _ := strings.Cut(rel, string(filepath.Separator))
+	return strings.EqualFold(first, ".git")
+}
+
 func inside(path, dir string) bool {
 	if dir == "" {
 		return false
@@ -438,8 +463,15 @@ func readCommand(words []string) (string, int) {
 func unsafeReadFlag(command string) string {
 	words := commandWords(command)
 	name, start := readCommand(words)
+	if _, ok := readOnlyCommands[name]; ok {
+		if form := shellExpansion(command); form != "" {
+			return "shell expansion " + form
+		}
+	}
 	for _, word := range words[start:] {
-		if word == "--" {
+		// `--` ends the options of every listed command except find, whose
+		// expression (-exec, -delete) comes after the paths and still runs.
+		if word == "--" && name != "find" {
 			break
 		}
 		if word == "--text" {
@@ -564,6 +596,36 @@ func commandAllowed(command string, lane *Lane) bool {
 	return false
 }
 
+// shellExpansion names the first word of a read-only command the shell would
+// rewrite before the command runs: a parameter or ANSI-C form (`$`), a
+// backquote, a brace list, or a glob. The flag table judges the words as
+// written, so any of these could turn into a flag it denies.
+func shellExpansion(command string) string {
+	var quote byte
+	for i := 0; i < len(command); i++ {
+		ch := command[i]
+		if ch == '\\' && quote != '\'' {
+			i++
+			continue
+		}
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+			} else if quote == '"' && (ch == '$' || ch == '`') {
+				return string(ch)
+			}
+			continue
+		}
+		switch ch {
+		case '\'', '"':
+			quote = ch
+		case '$', '`', '{', '}', '*', '?', '[':
+			return string(ch)
+		}
+	}
+	return ""
+}
+
 func unsafeShell(command string) string {
 	for _, construct := range []string{"\n", "$(", "`", "<(", ">("} {
 		if strings.Contains(command, construct) {
@@ -588,6 +650,11 @@ func unsafeShell(command string) string {
 		}
 		if ch == '\'' || ch == '"' {
 			quote = ch
+			continue
+		}
+		if ch == '>' && i > 0 && command[i-1] == '2' && strings.HasPrefix(command[i:], ">&1") {
+			// 2>&1 joins stderr to stdout; it names no file.
+			i += 2
 			continue
 		}
 		if ch == '>' || ch == '<' {

@@ -39,6 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fixed the Lane signal for a project-relative Pointer and for Codex context messages of a kind Maestro has not seen
 - Fixed the diff a retried or resumed Task is judged on: changes are saved on every exit path, so the gate and the end-of-run Council see every attempt, including deleted untracked files
 - Fixed Relay lock recovery after its owner exits and kept each completed answer with its request id
+- Fixed the read-only command list: `--` no longer ends the check for `find`, whose expression comes after the paths, and a read-only command that carries a shell expansion (`$`, a backquote, a brace list, or an unquoted glob) is denied, because the hook judges the command as written
+- Fixed the `.git` deny of an edit Lane to compare the name without case, so `.GIT/config` is denied on a case-insensitive file system
+- Fixed Claude `NotebookEdit` in a Lane, which reads `notebook_path`
+- Fixed ordinary Claude sessions whose transcript the hook cannot read: they run under the Orchestrator rule instead of a deny, because a Claude Lane names its Run folder in its launch settings
+- Fixed the whole-Task baseline for a Task whose first attempt started before the repository's first commit
+- Fixed a Relay lock older than the Relay deadline to be taken over even when its owner's pid is in use again
+- Fixed a wake-up for a Relay that was already answered before the tracker saw it
+- Fixed the recorded changed files of a judged attempt so they match what the gate saw, not what the checks created afterwards
+- Fixed a Lane or Seat whose Solo tab was closed by hand: it ends at once instead of at its wall limit
+- Fixed the shell check to accept `2>&1`, which names no file
 - Fixed Council todo titles longer than 200 characters by cutting them at a word boundary with a trailing `…`
 - Fixed `maestro status` to show `—` for a Task's elapsed time when the Task never started
 - Fixed the Homebrew cask so it no longer prints a deprecation warning for `postflight` on install

@@ -549,7 +549,7 @@ func TestDecideLaneUnsafeShell(t *testing.T) {
 		{"echo $(touch file)", "$("}, {`echo "$(touch file)"`, "$("},
 		{"echo `touch file`", "`"}, {"cat <(touch file)", "<("}, {"echo >(touch file)", ">("},
 		{"echo x > file", ">"}, {"echo x >> file", ">>"}, {"cat < file", "<"},
-		{"echo x 2> file", "2>"}, {"echo x &> file", "&>"},
+		{"echo x 2> file", "2>"}, {"echo x &> file", "&>"}, {"echo x 2>&1 > file", ">"},
 	} {
 		for _, access := range []string{"read", "edit"} {
 			lane := &Lane{Access: access, Root: "/project", Tab: true, Allow: []string{"Bash(echo *)", "Bash(cat *)", "Bash(pwd *)"}}
@@ -559,7 +559,7 @@ func TestDecideLaneUnsafeShell(t *testing.T) {
 			}
 		}
 	}
-	for _, command := range []string{`echo 'a > b < c & d'`, `echo "a >> b & c"`, `echo a\>b`, "pwd && ls || cat file | wc ; echo done"} {
+	for _, command := range []string{`echo 'a > b < c & d'`, `echo "a >> b & c"`, `echo a\>b`, "pwd && ls || cat file | wc ; echo done", "cat file 2>&1 | wc -l"} {
 		if got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": command}}, &Lane{Access: "read", Root: "/project"}); got.Kind != "auto_approve" {
 			t.Fatalf("safe command %q = %+v", command, got)
 		}
@@ -664,6 +664,48 @@ func TestDecideLaneReadOnlyCommandForms(t *testing.T) {
 	}
 }
 
+func TestDecideLaneReadOnlyShellExpansion(t *testing.T) {
+	for _, tc := range []struct{ command, reason string }{
+		{`find -- . -exec sh -c id \;`, "-exec"},
+		{"find -- .git -delete", "-delete"},
+		{`find . ${X:--exec} touch /tmp/x \;`, "$"},
+		{`find . $'-exec' sh -c id \;`, "$"},
+		{`find . -{print,exec} sh -c id \;`, "{"},
+		{"rg --pr{e,e}=sh x", "{"},
+		{"sort -{o,o} f", "{"},
+		{`cat "$HOME/x"`, "$"},
+		{"cat \"a`id`\"", "`"},
+		{"ls *.go", "*"},
+		{"cat ?.txt", "?"},
+		{"ls [ab].txt", "["},
+		{"head -n 1 -- $FILE", "$"},
+	} {
+		for _, access := range []string{"read", "edit"} {
+			got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": tc.command}}, &Lane{Access: access, Root: "/project", Tab: true})
+			if got.Kind != "deny" || !strings.Contains(got.Reason, tc.reason) {
+				t.Fatalf("%s %q = %+v, want deny naming %q", access, tc.command, got, tc.reason)
+			}
+		}
+	}
+	for _, command := range []string{
+		"find . -name '*.go'", "rg 'x*' -g '*.go' src", "echo '$HOME'", `echo \$HOME`, "git log -- '*.go'",
+		"find . -type f -print", `grep -r "a{2}" .`, "cat file 2>&1",
+	} {
+		for _, access := range []string{"read", "edit"} {
+			if got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": command}}, &Lane{Access: access, Root: "/project"}); got.Kind != "auto_approve" {
+				t.Fatalf("%s %q = %+v", access, command, got)
+			}
+		}
+	}
+	// A check or an allow rule of an edit Lane is judged as written; the flag table does not apply.
+	lane := &Lane{Access: "edit", Root: "/project", Checks: []string{"go test ./..."}, Allow: []string{"Bash(go build *)"}}
+	for _, command := range []string{"go test ./...", "go build ./cmd/*"} {
+		if got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": command}}, lane); got.Kind != "auto_approve" {
+			t.Fatalf("%q = %+v", command, got)
+		}
+	}
+}
+
 func TestDecideLaneKnownReadTools(t *testing.T) {
 	tools := []string{
 		"read_file", "list_dir", "grep", "web_search", "web_fetch", "todo_write",
@@ -705,7 +747,11 @@ func TestDecideLaneGitDirectoryWrites(t *testing.T) {
 	for _, tc := range []struct{ target, want string }{
 		{".git/config", "deny"},
 		{root + "/.git/hooks/pre-commit", "deny"},
+		{".GIT/config", "deny"},
+		{root + "/.Git/hooks/pre-commit", "deny"},
 		{"src/x.go", "auto_approve"},
+		{"src/.git/x.go", "auto_approve"},
+		{".gitignore", "auto_approve"},
 	} {
 		got := DecideLane(&Call{Tool: "write", CWD: root, Input: map[string]any{"file_path": tc.target}}, lane)
 		if got.Kind != tc.want {
@@ -835,8 +881,9 @@ func TestDecideLaneClaudeTools(t *testing.T) {
 		{"report write", "read", "Write", map[string]any{"file_path": "/run/result.md"}, "auto_approve"},
 		{"project edit", "edit", "Edit", map[string]any{"file_path": "/project/main.go"}, "auto_approve"},
 		{"git multi edit", "edit", "MultiEdit", map[string]any{"file_path": "/project/.git/config"}, "deny"},
-		{"read notebook", "read", "NotebookEdit", map[string]any{"file_path": "/project/book.ipynb"}, "deny"},
-		{"edit notebook", "edit", "NotebookEdit", map[string]any{"file_path": "/project/book.ipynb"}, "auto_approve"},
+		{"read notebook", "read", "NotebookEdit", map[string]any{"notebook_path": "/project/book.ipynb"}, "deny"},
+		{"edit notebook", "edit", "NotebookEdit", map[string]any{"notebook_path": "/project/book.ipynb"}, "auto_approve"},
+		{"edit notebook without a path", "edit", "NotebookEdit", map[string]any{"new_source": "x"}, "deny"},
 		{"Agent reader", "read", "Agent", map[string]any{"subagent_type": "Explore"}, "allow"},
 		{"Agent writer", "edit", "Agent", map[string]any{"subagent_type": "writer"}, "deny"},
 		{"Task reader", "read", "Task", map[string]any{"subagent_type": "Explore"}, "allow"},

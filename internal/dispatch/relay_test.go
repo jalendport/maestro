@@ -473,3 +473,67 @@ func TestRelayTrackerConsumesAllAnswersBetweenPolls(t *testing.T) {
 		t.Fatalf("unread answers: %v, %v", paths, err)
 	}
 }
+
+func TestRelayWaitRecoversStaleOwnerByAge(t *testing.T) {
+	folder := t.TempDir()
+	oldDeadline, oldInterval := relayDeadline, relayPollInterval
+	relayDeadline, relayPollInterval = 100*time.Millisecond, time.Millisecond
+	t.Cleanup(func() { relayDeadline, relayPollInterval = oldDeadline, oldInterval })
+	// The owner pid is alive (this process), but the lock is older than any Relay lives.
+	if err := writeRelayJSON(folder, "relay.lock", relayLock{PID: os.Getpid(), At: time.Now().UTC().Add(-relayDeadline - time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	reply := answerRelay(folder, "allow")
+	start := time.Now()
+	if answer, err := RelayWait(folder, RelayRequest{}); err != nil || answer != "allow" {
+		t.Fatalf("recovered Relay = %q, %v", answer, err)
+	}
+	if err := <-reply; err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) >= relayDeadline {
+		t.Fatal("stale owner delayed the Relay until its deadline")
+	}
+	// A fresh lock of a live owner is not taken over.
+	if err := writeRelayJSON(folder, "relay.lock", relayLock{PID: os.Getpid(), At: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if answer, err := RelayWait(folder, RelayRequest{}); err != nil || answer != "denied: no answer" {
+		t.Fatalf("live owner = %q, %v", answer, err)
+	}
+}
+
+func TestRelayTrackerDoesNotWakeForAnAnsweredRelay(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	client, callsPath := deferredSoloClient(t)
+	link := &SoloLink{Client: client, ProjectID: 1, Orchestrator: 42}
+	folder := t.TempDir()
+	control := controlFolder(t, folder)
+	if err := os.MkdirAll(control, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	task := &Task{Task: "abcd", Title: "Brief title", Folder: folder}
+	rec := &Record{Path: folder, Task: "abcd"}
+	tracker := &relayTracker{}
+	request := RelayRequest{ID: "0123456789abcdef", ToolName: "Bash", ToolInput: json.RawMessage(`{}`), AskedAt: time.Now().UTC()}
+	if err := writeRelayJSON(control, "relay-answer-"+request.ID+".json", relayAnswer{request, "allow", request.AskedAt.Add(time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	tracker.poll(&Env{Solo: link}, task, rec, "claude", request.AskedAt.Add(time.Second))
+	if len(rec.Events) != 2 || len(rec.Permission.Relays) != 1 || tracker.open() {
+		t.Fatalf("events: %+v", rec.Events)
+	}
+	if calls, err := os.ReadFile(callsPath); err == nil && strings.Contains(string(calls), "Maestro relay") {
+		t.Fatalf("an answered Relay woke the Orchestrator:\n%s", calls)
+	}
+	// An open Relay still wakes it.
+	open := RelayRequest{ID: "fedcba9876543210", ToolName: "Bash", ToolInput: json.RawMessage(`{}`), AskedAt: time.Now().UTC()}
+	if err := writeRelayJSON(control, "relay.json", open); err != nil {
+		t.Fatal(err)
+	}
+	tracker.poll(&Env{Solo: link}, task, rec, "claude", open.AskedAt)
+	calls, err := os.ReadFile(callsPath)
+	if err != nil || !strings.Contains(string(calls), "Maestro relay") {
+		t.Fatalf("an open Relay did not wake the Orchestrator: %v\n%s", err, calls)
+	}
+}

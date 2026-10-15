@@ -70,6 +70,7 @@ type Task struct {
 
 // Record is dispatch.json: the full Dispatch record. The ledger row is a copy.
 type Record struct {
+	judged    bool      // judge has recorded Changed; the deferred recording stands down
 	Kind      string    `json:"kind"`
 	Project   string    `json:"project"`
 	Run       string    `json:"run"`
