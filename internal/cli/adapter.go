@@ -30,19 +30,26 @@ func (a *app) hookCmd() *cobra.Command {
 			if len(args) == 1 {
 				harness = args[0]
 			}
-			payload, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				if harness == "agy" {
+			// Outside a Lane, an unreadable payload still allows so a Harness is
+			// never blocked. Inside a Lane the tool call must not run.
+			unreadable := func(err error, allowGrok bool) {
+				if os.Getenv("MAESTRO_TASK_FOLDER") != "" && (harness == "grok" || harness == "agy") {
+					reason := "Lane payload unreadable: " + err.Error()
+					fmt.Fprintln(os.Stdout, string(hook.Render(harness, hook.Verdict{Kind: "deny", Reason: reason})))
+					return
+				}
+				if harness == "agy" || (allowGrok && harness == "grok") {
 					fmt.Fprintln(os.Stdout, `{"decision":"allow"}`)
 				}
+			}
+			payload, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				unreadable(err, false)
 				return nil
 			}
 			call, err := hook.Parse(harness, payload)
 			if err != nil {
-				// Never block a Harness on a payload Maestro cannot read.
-				if harness == "grok" || harness == "agy" {
-					fmt.Fprintln(os.Stdout, `{"decision":"allow"}`)
-				}
+				unreadable(err, true)
 				return nil
 			}
 			if call.Event == "ignore" {

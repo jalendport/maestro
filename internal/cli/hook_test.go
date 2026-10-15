@@ -153,7 +153,7 @@ func TestHookCommandLaneFallback(t *testing.T) {
 		{"Grok", `{"access":"read","root":"/project"}`, "grok", `{"toolName":"run_terminal_command","toolInput":{"command":"go run main.go"},"cwd":"/project"}`, `{"decision":"deny","reason":"read Lane: command not on the read-only list"}`},
 		{"Claude", `{"access":"read","root":"/project"}`, "claude", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"},"cwd":"/project"}`, `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"read Lane: command not on the read-only list"}}`},
 		{"Codex", `{"access":"read"}`, "codex", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"}}`, ""},
-		{"bad payload", `{"access":"read"}`, "agy", "not JSON", `{"decision":"allow"}`},
+		{"bad payload", `{"access":"read"}`, "agy", "not JSON", `{"decision":"deny","reason":"Lane payload unreadable: payload is not JSON: invalid character 'o' in literal null (expecting 'u')"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			folder := t.TempDir()
@@ -178,7 +178,48 @@ func TestHookCommandLaneFallback(t *testing.T) {
 	}
 }
 
+func TestHookCommandLanePayloadUnreadable(t *testing.T) {
+	for _, tc := range []struct {
+		name, harness, want string
+		lane                bool
+	}{
+		{"lane grok", "grok", "deny", true},
+		{"lane agy", "agy", "deny", true},
+		{"lane claude", "claude", "", true},
+		{"empty grok", "grok", `{"decision":"allow"}`, false},
+		{"empty agy", "agy", `{"decision":"allow"}`, false},
+		{"empty claude", "claude", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.lane {
+				t.Setenv("MAESTRO_TASK_FOLDER", t.TempDir())
+			} else {
+				t.Setenv("MAESTRO_TASK_FOLDER", "")
+			}
+			got := runHookPayload(t, "not json", tc.harness)
+			if tc.want == "deny" {
+				var answer struct {
+					Decision string `json:"decision"`
+					Reason   string `json:"reason"`
+				}
+				if err := json.Unmarshal([]byte(got), &answer); err != nil {
+					t.Fatal(err)
+				}
+				const prefix = "Lane payload unreadable: "
+				if answer.Decision != "deny" || !strings.HasPrefix(answer.Reason, prefix) || len(answer.Reason) == len(prefix) {
+					t.Fatalf("output = %q", got)
+				}
+				return
+			}
+			if got != tc.want {
+				t.Fatalf("output = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHookCommandUnreadableAntigravityPayload(t *testing.T) {
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	input, err := os.CreateTemp(t.TempDir(), "payload")
 	if err != nil {
 		t.Fatal(err)
