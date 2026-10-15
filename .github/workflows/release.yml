@@ -23,12 +23,23 @@ jobs:
           cache: true
       - name: Test
         run: go test ./...
+      - name: Take the release notes from CHANGELOG.md
+        # The GitHub Release body is the changelog section of this version,
+        # not a list of commits.
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '/^## /{p = ($2 == v)} p && !/^## /' CHANGELOG.md > /tmp/release-notes.md
+          if ! grep -q '[^[:space:]]' /tmp/release-notes.md; then
+            echo "CHANGELOG.md has no section for $version" >&2
+            exit 1
+          fi
+          cat /tmp/release-notes.md
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes /tmp/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Publishing to the tap requires a classic PAT with repo scope stored as TAP_GITHUB_TOKEN.
