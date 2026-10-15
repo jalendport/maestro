@@ -238,7 +238,7 @@ func PrepareIn(env *Env, b *brief.Brief, req router.Request, runID, taskID, runD
 		wall = d
 	}
 	t := &Task{
-		Project: env.Root, Run: runID, Task: taskID, BriefPath: b.Path, Title: b.Title,
+		Project: env.Root, Run: runID, Task: taskID, BriefPath: b.Path, Title: b.Title, Tab: strings.TrimSpace(b.Tab),
 		Category: route.Category, Access: req.Access, Commit: b.WantsCommit(), Touch: b.Touch, Dirs: dirs,
 		Checks: b.Checks, WallLimit: wall.String(), IdleLimit: env.Roster.Failure.IdleLimit.Duration.String(),
 		Route: route, Folder: folder, ClaudeAuto: env.Project != nil && env.Project.ClaudeAuto, InSolo: solo.InSolo(),

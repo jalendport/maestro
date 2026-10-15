@@ -140,6 +140,7 @@ func parseTaskSection(title, section string, defaults Fields) (*Brief, error) {
 	b := &Brief{Sections: map[string]string{}}
 	b.Fields = defaults
 	b.Fields.Title = title
+	b.Fields.Tab = ""
 	b.Fields.BlockedBy = nil
 	// Field list: leading "- key: value" lines before the first subheading.
 	head := section
@@ -227,6 +228,8 @@ func mergeFields(d, t Fields) Fields {
 	if t.Facts != nil {
 		out.Facts = t.Facts
 	}
+	// Title and Tab name one Task; neither comes from the Run defaults.
+	out.Tab = t.Tab
 	out.BlockedBy = t.BlockedBy
 	return out
 }

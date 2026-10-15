@@ -13,6 +13,7 @@ Required: title, ## Goal, ## Done. Everything else is optional.
 
 ---
 title: Add the probe command
+tab: Probe command           # Solo tab name, at most 18 characters; absent: the first words of the title
 category: implement          # implement | fix | refactor | spec | research | review | prose | triage | second opinion | large input
 level: some                  # your Judgment estimate: none | some | significant | expert
 access: edit                 # read | edit; category default when absent (code categories edit, the rest read)

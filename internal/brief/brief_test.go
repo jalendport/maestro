@@ -148,3 +148,18 @@ func TestNamedTodoSurvivesBriefWrite(t *testing.T) {
 		t.Fatalf("Brief=%+v err=%v", parsed, err)
 	}
 }
+
+func TestTabField(t *testing.T) {
+	src := "---\ntitle: Pin Grok home in every try\ntab: Pin Grok home\n---\n## Goal\nx\n## Done\ny\n"
+	b, err := ParseText(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Tab != "Pin Grok home" {
+		t.Errorf("tab = %q", b.Tab)
+	}
+	long := "---\ntitle: T\ntab: this tab name is far too long\n---\n## Goal\nx\n## Done\ny\n"
+	if _, err := ParseText(long); err == nil || !strings.Contains(err.Error(), "tab is") {
+		t.Errorf("long tab: err = %v", err)
+	}
+}

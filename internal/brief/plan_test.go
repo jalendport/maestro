@@ -131,3 +131,17 @@ func TestPlanTaskNamesTodo(t *testing.T) {
 		t.Fatalf("Plan=%+v err=%v", p, err)
 	}
 }
+
+func TestPlanTabIsPerTask(t *testing.T) {
+	src := "---\ntab: Shared\n---\n# P\n\n## First task\n- tab: First\n\n### Goal\nx\n### Done\ny\n\n## Second task\n\n### Goal\nx\n### Done\ny\n"
+	p, err := ParsePlanText(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Tasks[0].Tab; got != "First" {
+		t.Errorf("task 1 tab = %q", got)
+	}
+	if got := p.Tasks[1].Tab; got != "" {
+		t.Errorf("task 2 tab = %q, want none inherited", got)
+	}
+}

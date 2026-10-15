@@ -21,10 +21,11 @@ Ask the user only when a verb exits 2, or when a Task touches a human gate: push
 
 ## Brief and Plan files
 
-`maestro help brief` and `maestro help plan` print the formats. Four rules the formats cannot enforce:
+`maestro help brief` and `maestro help plan` print the formats. Five rules the formats cannot enforce:
 
 - Write the Goal as definitions, not commands.
 - Write the Done as what must be true when the Lane stops.
+- In Solo, give each Task a `tab:` of at most 18 characters that says what the Task does; it names the Solo tab.
 - `touch:` lists every path the Done names, or the Lane stops blocked.
 - A token-billed Lane takes edit work only when `lane:` names it, so name one only when no subscription Lane fits.
 

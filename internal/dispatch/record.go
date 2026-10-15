@@ -43,6 +43,7 @@ type Task struct {
 	Task       string        `json:"task"`
 	BriefPath  string        `json:"brief_path"`
 	Title      string        `json:"title"`
+	Tab        string        `json:"tab,omitempty"`
 	Category   string        `json:"category"`
 	Access     string        `json:"access"`
 	Commit     bool          `json:"commit"`

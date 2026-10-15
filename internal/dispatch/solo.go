@@ -146,7 +146,7 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 		return nil, "", fmt.Errorf("no Solo agent tool for %s (set [harness.%s] solo_tool)", h.Name(), h.Name())
 	}
 	args := tabArgs(command)
-	name := fmt.Sprintf("%s · %s", tabTitle(t.Title), t.Route.FamilyID)
+	name := fmt.Sprintf("%s · %s", tabName(t), t.Route.FamilyID)
 	launched := time.Now()
 	pid, err := l.Client.Spawn(l.ProjectID, toolID, name, args)
 	if err != nil {
@@ -359,9 +359,18 @@ func readAnswer(controlFolder, relayID string) string {
 	return ""
 }
 
-// tabTitle shortens a Task title for the Solo sidebar: the first words that
-// fit in tabTitleMax characters, cut at a word boundary, so the tab reads as
-// "Pin Grok home · claude-opus" and not as a clipped slug.
+// tabName is the short name a Solo tab shows: the Brief's `tab` field, the
+// Orchestrator's own summary, when it has one.
+func tabName(t *Task) string {
+	if t.Tab != "" {
+		return t.Tab
+	}
+	return tabTitle(t.Title)
+}
+
+// tabTitle is the fallback when a Brief has no `tab`: the first words of the
+// title that fit in tabTitleMax characters, cut at a word boundary, so the
+// tab reads as "Pin Grok home · claude-opus" and not as a clipped slug.
 func tabTitle(s string) string {
 	words := strings.Fields(s)
 	if len(words) == 0 {
@@ -381,7 +390,7 @@ func tabTitle(s string) string {
 }
 
 // tabTitleMax leaves room for " · <family>" in Solo's sidebar.
-const tabTitleMax = 18
+const tabTitleMax = brief.TabMax
 
 // reportStable reports a non-empty result.md whose size has not changed for 3 s.
 func reportStable(path string) bool {
