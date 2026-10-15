@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added custom read-only agents to the spawn rule: a sub-agent whose definition file under `.claude/agents` or `~/.claude/agents` has a `tools` list of read tools only may be spawned
 
 ### Changed
+- Changed the effort of an automatic Council Seat to the Family's `council` key when it is set; the default Roster sets `council = "medium"` for `grok`, whose Seats took two to three times as long as the others
 - Changed the Solo tab name to the Brief's new `tab` field (at most 18 characters), or the first words of the Task title cut at a word boundary when the Brief has none
 - Changed held Runs to start a plan Council only on request, at `[run] council_tasks` Tasks (default 10), or for a Router question or Council signal; `--no-council` stops it, and approval reads and routes the Plan file again under the same Run id without a second plan Council
 - Changed Antigravity read enforcement to the Maestro hook, so it no longer depends on the Antigravity settings file

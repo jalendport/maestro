@@ -104,6 +104,7 @@ not_for  = "day-to-day work"
 harness  = "grok"
 models   = ["grok-4.7"]
 levels   = { none = "low", some = "medium", significant = "high", expert = "xhigh" }
+council  = "medium"
 good_for = "issue triage, contrarian checks, quick facts, second opinions"
 not_for  = "security-sensitive edits, multi-file research"
 

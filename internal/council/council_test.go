@@ -100,3 +100,36 @@ func TestSlugify(t *testing.T) {
 		})
 	}
 }
+
+func TestCouncilSeatEffortComesFromTheFamilyCouncilKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("GROK_HOME", t.TempDir())
+	defaults, _, err := config.ParseFile(roster.Defaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ro := roster.Merge(defaults, &config.File{})
+	grok, _ := ro.Family("grok")
+	if grok.Council != "medium" {
+		t.Fatalf("default grok council effort = %q, want medium", grok.Council)
+	}
+	// A requested Seat keeps the effort the request names, and the level's
+	// effort when it names none and the Family has no Council effort.
+	env := &dispatch.Env{Roster: ro, Reg: harness.New(map[string]string{"codex": "/bin/codex"}),
+		Disc: &discovery.Cache{Harness: map[string]discovery.Record{"codex": {Path: "/bin/codex", Version: "1", Models: []harness.Model{{ID: "gpt-6.1-sol"}}}}}}
+	seats, _, err := pickSeats(env, &Council{Level: roster.LevelSignificant}, Opts{Lanes: []string{"codex-sol:xhigh"}})
+	if err != nil || len(seats) != 1 || seats[0].Effort != "xhigh" {
+		t.Fatalf("requested seat = %+v, %v", seats, err)
+	}
+	seats, _, err = pickSeats(env, &Council{Level: roster.LevelSignificant}, Opts{Lanes: []string{"codex-sol"}})
+	if err != nil || len(seats) != 1 || seats[0].Effort != "high" {
+		t.Fatalf("level seat = %+v, %v", seats, err)
+	}
+	sol, _ := ro.Family("codex-sol")
+	sol.Council = "low"
+	seats, _, err = pickSeats(env, &Council{Level: roster.LevelSignificant}, Opts{Lanes: []string{"codex-sol"}})
+	if err != nil || len(seats) != 1 || seats[0].Effort != "low" {
+		t.Fatalf("council-key seat = %+v, %v", seats, err)
+	}
+}

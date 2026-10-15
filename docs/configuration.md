@@ -96,6 +96,7 @@ Keys of `families.<id>`:
 | `request_only` | boolean | `false` | Keeps the Family out of automatic Routes; a Lane of the Family runs only when you request it. |
 | `frontier` | boolean | `false` | Puts the Family in the Frontier Tier, whatever its levels are. |
 | `enabled` | boolean | `true` | Takes the Family out of every Route when it is `false`. |
+| `council` | string | none | Sets the effort of an automatic Council Seat of the Family, whatever the question's level; a requested Seat (`--lane family:effort`) keeps its own effort. The default Roster sets `council = "medium"` for `grok`, whose Seats at `high` took two to three times as long as the other Seats. |
 
 Default entries:
 

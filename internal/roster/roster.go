@@ -128,6 +128,7 @@ type Family struct {
 	RequestOnly bool
 	Frontier    bool
 	Enabled     bool
+	Council     string // effort of an automatic Council Seat; empty = the level's effort
 }
 
 // Tiers returns the Tiers this family serves, derived from its level map.
@@ -408,6 +409,9 @@ func toFamily(id string, base config.Family, delta *config.Family) *Family {
 		}
 		if c.RequestOnly != nil {
 			f.RequestOnly = *c.RequestOnly
+		}
+		if c.Council != nil {
+			f.Council = *c.Council
 		}
 		if c.Frontier != nil {
 			f.Frontier = *c.Frontier

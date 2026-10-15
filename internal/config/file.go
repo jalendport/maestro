@@ -70,6 +70,7 @@ type Family struct {
 	RequestOnly *bool             `toml:"request_only"`
 	Frontier    *bool             `toml:"frontier"`
 	Enabled     *bool             `toml:"enabled"`
+	Council     *string           `toml:"council"` // effort of an automatic Council Seat; empty = the level's effort
 }
 
 // Chains is the rules table for one Tier: a default chain plus category

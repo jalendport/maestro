@@ -272,6 +272,10 @@ func pickSeats(env *dispatch.Env, c *Council, o Opts) ([]*Seat, []string, error)
 	var relaxed []string
 	taken := map[string]bool{}
 	add := func(f *roster.Family, effort string, requested bool) {
+		// A requested effort wins; then the Family's Council effort; then the level's.
+		if effort == "" {
+			effort = f.Council
+		}
 		if effort == "" {
 			effort = f.Levels[c.Level]
 			if !f.Serves(c.Level) {
