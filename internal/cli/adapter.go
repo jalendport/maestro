@@ -22,7 +22,7 @@ func (a *app) hookCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "hook [claude|codex|grok|agy]",
 		Short:  "Hook Carrier entry point for PreToolUse and Reminder events (called by the Adapters)",
-		Long:   "Read the Harness's PreToolUse or Reminder event payload on stdin. Apply the scoped spawn rule and Antigravity Lane permissions to tool calls. The hook Carrier writes the Reminder for an Orchestrator in scope on UserPromptSubmit (Claude Code and Codex) or PreInvocation (Antigravity). Grok uses a rules file Carrier.",
+		Long:   "Read the Harness's PreToolUse or Reminder event payload on stdin. Apply the scoped spawn rule and Lane permissions to tool calls. The hook Carrier writes the Reminder for an Orchestrator in scope on UserPromptSubmit (Claude Code and Codex) or PreInvocation (Antigravity). Grok uses a rules file Carrier.",
 		Args:   cobra.MaximumNArgs(1),
 		Hidden: false,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -58,9 +58,8 @@ func (a *app) hookCmd() *cobra.Command {
 				}
 				return nil
 			}
-			// Antigravity and Grok Lanes are held by this hook: their own
-			// permission systems cannot hold the Access on their own.
-			if call.Harness == "agy" || call.Harness == "grok" {
+			// The hook closes Access gaps in these Harnesses.
+			if call.Harness == "agy" || call.Harness == "grok" || call.Harness == "claude" {
 				taskFolder, found, err := hook.FindLaneFolder(call)
 				if err != nil {
 					fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, hook.Verdict{Kind: "deny", Reason: err.Error()})))
@@ -74,7 +73,7 @@ func (a *app) hookCmd() *cobra.Command {
 					}
 					if lane, ok := hook.LoadLane(folder); ok {
 						verdict := hook.DecideLane(call, lane)
-						if verdict.Kind == "relay" {
+						if verdict.Kind == "relay" && call.Harness != "claude" {
 							input, err := json.Marshal(call.Input)
 							answer := ""
 							if err == nil {
@@ -87,7 +86,9 @@ func (a *app) hookCmd() *cobra.Command {
 								verdict = hook.Verdict{Kind: "auto_approve"}
 							}
 						}
-						fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, verdict)))
+						if out := hook.Render(call.Harness, verdict); out != nil {
+							fmt.Fprintln(os.Stdout, string(out))
+						}
 						return nil
 					}
 					fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, hook.Verdict{Kind: "deny", Reason: "no readable Lane policy"})))

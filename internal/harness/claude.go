@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/jalendport/maestro/internal/adapter"
 )
 
 // Claude is the Claude Code adapter.
@@ -130,6 +132,7 @@ func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 			enforcement = BestEffort
 		}
 	}
+	hookSpec, _ := adapter.Spec("claude")
 	settings, err := json.Marshal(map[string]any{
 		"env": map[string]string{"MAESTRO_TASK_FOLDER": l.RunFolder},
 		"sandbox": map[string]any{
@@ -137,9 +140,16 @@ func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 			"allowUnsandboxedCommands": false, "failIfUnavailable": true,
 			"filesystem": filesystem, "network": map[string]bool{"allowLocalBinding": true},
 		},
-		"hooks": map[string]any{"PermissionRequest": []any{map[string]any{
-			"hooks": []any{map[string]any{"type": "command", "command": quote(self) + " relay " + quote(taskID), "timeout": 660}},
-		}}},
+		"hooks": map[string]any{
+			// Saved settings are excluded, so each Lane needs its own hook.
+			"PreToolUse": []any{map[string]any{
+				"matcher": hookSpec.Matcher,
+				"hooks":   []any{map[string]any{"type": "command", "command": quote(self) + " hook claude", "timeout": hookSpec.Timeout}},
+			}},
+			"PermissionRequest": []any{map[string]any{
+				"hooks": []any{map[string]any{"type": "command", "command": quote(self) + " relay " + quote(taskID), "timeout": 660}},
+			}},
+		},
 	})
 	if err != nil {
 		return nil, err

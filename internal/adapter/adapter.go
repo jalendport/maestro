@@ -36,7 +36,7 @@ type HookEvent struct {
 func Spec(harness string) (HarnessSpec, bool) {
 	switch harness {
 	case "claude":
-		return HarnessSpec{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "A new Claude Code session loads the hook.", promptEvents()}, true
+		return HarnessSpec{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__solo__spawn_agent|mcp__solo__spawn_process", 660, "A new Claude Code session loads the hook.", promptEvents()}, true
 	case "codex":
 		return HarnessSpec{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse and UserPromptSubmit hooks.", []HookEvent{{Name: "PreToolUse", Matcher: true, Command: "maestro hook codex"}, {Name: "UserPromptSubmit", Command: "maestro hook codex"}}}, true
 	case "grok":
@@ -49,7 +49,7 @@ func Spec(harness string) (HarnessSpec, bool) {
 }
 
 func promptEvents() []HookEvent {
-	return []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit"}}
+	return []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit", Timeout: 10}}
 }
 
 // Paths resolves a Harness's files for install, status, and printed steps.

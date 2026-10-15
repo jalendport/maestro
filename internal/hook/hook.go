@@ -1,4 +1,4 @@
-// Package hook reads each Harness's tool calls and Reminder events, applies the scoped spawn rule and Antigravity Lane permissions, and renders the Harness's answer or Reminder.
+// Package hook reads each Harness's tool calls and Reminder events, applies the scoped spawn rule and Lane permissions, and renders the Harness's answer or Reminder.
 package hook
 
 import (
@@ -165,6 +165,9 @@ func readOnlyArgs(in map[string]any) bool {
 // explicitly for Grok, whose hooks fail open on silence.
 func Render(harness string, d interface{ verdict() Verdict }) []byte {
 	v := d.verdict()
+	if harness == "claude" && v.Kind != "deny" {
+		return nil
+	}
 	if harness != "agy" {
 		switch v.Kind {
 		case "auto_approve":

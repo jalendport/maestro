@@ -237,16 +237,16 @@ type laneAction struct {
 	cwd     string // the directory the tool call names, "" when it names none
 }
 
-// actionOf maps Antigravity and Grok tool names to one laneAction.
+// actionOf maps Harness tool names to one laneAction.
 func actionOf(c *Call) laneAction {
 	switch c.Tool {
-	case "invoke_subagent", "define_subagent", "manage_subagents", "spawn_subagent", "task", "Task":
+	case "invoke_subagent", "define_subagent", "manage_subagents", "spawn_subagent", "task", "Task", "Agent":
 		return laneAction{kind: "spawn"}
 	case "write_to_file", "replace_file_content", "multi_replace_file_content":
 		target, _ := c.Input["TargetFile"].(string)
 		cwd, _ := c.Input["Cwd"].(string)
 		return laneAction{kind: "write", target: target, cwd: cwd}
-	case "write", "search_replace", "Write", "Edit", "MultiEdit":
+	case "write", "search_replace", "Write", "Edit", "MultiEdit", "NotebookEdit":
 		target, _ := c.Input["file_path"].(string)
 		if target == "" {
 			target, _ = c.Input["target_file"].(string)

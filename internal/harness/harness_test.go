@@ -218,6 +218,14 @@ func TestClaudeSandboxForEachShape(t *testing.T) {
 					}
 					var settings struct {
 						Sandbox map[string]any `json:"sandbox"`
+						Env     map[string]string
+						Hooks   map[string][]struct {
+							Matcher string
+							Hooks   []struct {
+								Type, Command string
+								Timeout       int
+							}
+						}
 					}
 					var denied []string
 					for i, arg := range command.Cmd.Args {
@@ -247,6 +255,20 @@ func TestClaudeSandboxForEachShape(t *testing.T) {
 					}
 					if !reflect.DeepEqual(settings.Sandbox, want) {
 						t.Fatalf("sandbox: %+v, want %+v", settings.Sandbox, want)
+					}
+					if settings.Env["MAESTRO_TASK_FOLDER"] != launch.RunFolder {
+						t.Fatalf("Lane environment: %+v", settings.Env)
+					}
+					hooks := settings.Hooks["PreToolUse"]
+					if len(hooks) != 1 || hooks[0].Matcher != "Agent|Task|Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__solo__spawn_agent|mcp__solo__spawn_process" || len(hooks[0].Hooks) != 1 {
+						t.Fatalf("Lane hook: %+v", hooks)
+					}
+					if h := hooks[0].Hooks[0]; h.Type != "command" || !strings.HasSuffix(h.Command, " hook claude") || h.Timeout != 660 {
+						t.Fatalf("Lane hook command: %+v", h)
+					}
+					relay := settings.Hooks["PermissionRequest"]
+					if len(relay) != 1 || len(relay[0].Hooks) != 1 || !strings.Contains(relay[0].Hooks[0].Command, " relay ") || relay[0].Hooks[0].Timeout != 660 {
+						t.Fatalf("PermissionRequest Relay: %+v", relay)
 					}
 					if !reflect.DeepEqual(denied, []string{"Edit(///project/.git/**)", "Write(///project/.git/**)"}) {
 						t.Fatalf("git file tools: %v", denied)

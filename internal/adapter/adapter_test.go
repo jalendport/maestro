@@ -75,7 +75,7 @@ func TestSpecs(t *testing.T) {
 		t.Fatal(Harnesses)
 	}
 	want := []HarnessSpec{
-		{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "A new Claude Code session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit"}}},
+		{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__solo__spawn_agent|mcp__solo__spawn_process", 660, "A new Claude Code session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit", Timeout: 10}}},
 		{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse and UserPromptSubmit hooks.", []HookEvent{{Name: "PreToolUse", Matcher: true, Command: "maestro hook codex"}, {Name: "UserPromptSubmit", Command: "maestro hook codex"}}},
 		{".agents/skills/maestro", ".grok/hooks/maestro.json", "", 660, "A new Grok session binds the hook.", []HookEvent{{Name: "PreToolUse"}}},
 		{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "PreInvocation", Direct: true, Command: "maestro hook agy", Timeout: 30}}},
@@ -147,6 +147,38 @@ func TestInstallEachHarness(t *testing.T) {
 			actions(t, Install(name, home, "shared skill\n"), "unchanged", "unchanged", "unchanged", "unchanged")
 			if !bytes.Equal(before, read(t, path)) {
 				t.Fatal("repeat rewrote hook")
+			}
+		})
+	}
+}
+
+func TestInstallUpdatesOlderClaudeHook(t *testing.T) {
+	for _, tc := range []struct {
+		name, matcher string
+		timeout       int
+	}{
+		{"old entry", "Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10},
+		{"old matcher", "Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process", 660},
+		{"old timeout", "Agent|Task|Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := testHome(t)
+			actions(t, Install("claude", home, "skill"), "created", "created", "created", "created")
+			spec, _ := Paths("claude", home)
+			old := spec
+			old.Matcher, old.Timeout = tc.matcher, tc.timeout
+			root := object(member{"hooks", hookSet(old)})
+			data, err := root.MarshalJSON()
+			if err != nil {
+				t.Fatal(err)
+			}
+			put(t, spec.HookFile, string(data))
+			if got := State("claude", home); got.Hook != "wrong" {
+				t.Fatal(got)
+			}
+			actions(t, Install("claude", home, "skill"), "unchanged", "unchanged", "updated", "unchanged")
+			if got := State("claude", home); got.Hook != "ok" || got.Overall != "ok" {
+				t.Fatal(got)
 			}
 		})
 	}

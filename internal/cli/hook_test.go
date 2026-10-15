@@ -17,6 +17,11 @@ import (
 
 func runHookPayload(t *testing.T, payload string, harness string) string {
 	t.Helper()
+	return strings.TrimSpace(runHookPayloadRaw(t, payload, harness))
+}
+
+func runHookPayloadRaw(t *testing.T, payload string, harness string) string {
+	t.Helper()
 	input, err := os.CreateTemp(t.TempDir(), "payload")
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +40,7 @@ func runHookPayload(t *testing.T, payload string, harness string) string {
 	if harness != "" {
 		command.SetArgs([]string{harness})
 	}
-	return strings.TrimSpace(captureStdout(t, command.Execute))
+	return captureStdout(t, command.Execute)
 }
 
 func TestHookCommandAntigravityLane(t *testing.T) {
@@ -146,7 +151,7 @@ func TestHookCommandLaneFallback(t *testing.T) {
 		{"missing Lane", "", "agy", `{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/outside"}}}`, `{"decision":"deny","reason":"no readable Lane policy"}`},
 		{"invalid Lane", "not JSON", "agy", `{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/outside"}}}`, `{"decision":"deny","reason":"no readable Lane policy"}`},
 		{"Grok", `{"access":"read","root":"/project"}`, "grok", `{"toolName":"run_terminal_command","toolInput":{"command":"go run main.go"},"cwd":"/project"}`, `{"decision":"deny","reason":"read Lane: command not on the read-only list"}`},
-		{"Claude", `{"access":"read"}`, "claude", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"}}`, ""},
+		{"Claude", `{"access":"read","root":"/project"}`, "claude", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"},"cwd":"/project"}`, `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"read Lane: command not on the read-only list"}}`},
 		{"Codex", `{"access":"read"}`, "codex", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"}}`, ""},
 		{"bad payload", `{"access":"read"}`, "agy", "not JSON", `{"decision":"allow"}`},
 	} {
@@ -522,7 +527,115 @@ func TestHookCommandGrokLane(t *testing.T) {
 	}
 }
 
-func TestHookCommandClaudeAndCodexToolCallsSkipTranscript(t *testing.T) {
+func TestHookCommandClaudeLane(t *testing.T) {
+	for _, signal := range []string{"env", "transcript"} {
+		for _, tc := range []struct {
+			name, access, tool, policy string
+			input                      map[string]any
+			tab                        bool
+			reason                     string
+		}{
+			{"read write flag", "read", "Bash", "valid", map[string]any{"command": "git log --output=x"}, false, "--output=x"},
+			{"read report write", "read", "Write", "valid", map[string]any{"file_path": "<run>/result.md"}, false, ""},
+			{"read tool", "read", "Read", "valid", map[string]any{"file_path": "<project>/main.go"}, false, ""},
+			{"edit git write", "edit", "Edit", "valid", map[string]any{"file_path": "<project>/.git/config"}, false, ".git"},
+			{"edit tab off-list command", "edit", "Bash", "valid", map[string]any{"command": "go run main.go"}, true, ""},
+			{"missing policy", "read", "Write", "missing", map[string]any{"file_path": "<run>/result.md"}, false, "no readable Lane policy"},
+			{"invalid policy", "read", "Write", "invalid", map[string]any{"file_path": "<run>/result.md"}, false, "no readable Lane policy"},
+			{"reader spawn", "read", "Agent", "valid", map[string]any{"subagent_type": "Explore"}, false, ""},
+			{"writer spawn", "edit", "Agent", "valid", map[string]any{"subagent_type": "writer"}, false, "Sub-agent"},
+			{"Orchestrator Bash", "", "Bash", "valid", map[string]any{"command": "go run main.go"}, false, ""},
+			{"Orchestrator spawn", "", "Agent", "valid", map[string]any{"subagent_type": "writer"}, false, "Sub-agent"},
+		} {
+			t.Run(signal+"/"+tc.name, func(t *testing.T) {
+				t.Setenv("HOME", t.TempDir())
+				t.Setenv("CLAUDE_CONFIG_DIR", "")
+				t.Setenv("MAESTRO_HOME", t.TempDir())
+				t.Setenv("MAESTRO_TASK_FOLDER", "")
+				if err := os.WriteFile(config.UserFile(), []byte("[hook]\nscope = \"all\"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				project := t.TempDir()
+				folder := filepath.Join(project, ".agents", "maestro", "runs", "r-test", "task")
+				control := controlFolder(t, folder)
+				if tc.policy != "missing" {
+					if err := os.MkdirAll(control, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					access := tc.access
+					if access == "" {
+						access = "read"
+					}
+					body, err := json.Marshal(hook.Lane{Harness: "claude", Access: access, Root: project, RunFolder: folder, Tab: tc.tab})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if tc.policy == "invalid" {
+						body = []byte("not JSON")
+					}
+					if err := os.WriteFile(filepath.Join(control, "lane.json"), body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				prompt := "Explain this code."
+				if tc.access != "" {
+					if signal == "env" {
+						t.Setenv("MAESTRO_TASK_FOLDER", folder)
+					} else {
+						prompt = brief.Pointer(filepath.Join(folder, "brief.md"))
+					}
+				}
+				transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
+				entry, err := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": prompt}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(transcript, append(entry, '\n'), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				input := map[string]any{}
+				for key, value := range tc.input {
+					if text, ok := value.(string); ok {
+						value = strings.NewReplacer("<run>", folder, "<project>", project).Replace(text)
+					}
+					input[key] = value
+				}
+				payload, err := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "cwd": project, "session_id": "test", "transcript_path": transcript, "tool_name": tc.tool, "tool_input": input})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, harness := range []string{"claude", ""} {
+					output := runHookPayloadRaw(t, string(payload), harness)
+					if tc.reason == "" {
+						if output != "" {
+							t.Fatalf("harness %q: %q, want no output", harness, output)
+						}
+					} else {
+						var answer struct {
+							HookSpecificOutput struct {
+								HookEventName, PermissionDecision, PermissionDecisionReason string
+							}
+						}
+						if err := json.Unmarshal([]byte(output), &answer); err != nil {
+							t.Fatalf("output %q: %v", output, err)
+						}
+						h := answer.HookSpecificOutput
+						if h.HookEventName != "PreToolUse" || h.PermissionDecision != "deny" || !strings.Contains(h.PermissionDecisionReason, tc.reason) {
+							t.Fatalf("harness %q: %s, want deny with %q", harness, output, tc.reason)
+						}
+					}
+				}
+				for _, name := range []string{"relay.json", "relay.lock"} {
+					if _, err := os.Stat(filepath.Join(control, name)); !os.IsNotExist(err) {
+						t.Fatalf("Claude must use its PermissionRequest Relay: %s, %v", name, err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestHookCommandCodexToolCallsSkipTranscript(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	if err := os.WriteFile(config.UserFile(), []byte("[hook]\nscope = \"all\"\n"), 0o600); err != nil {
@@ -531,7 +644,7 @@ func TestHookCommandClaudeAndCodexToolCallsSkipTranscript(t *testing.T) {
 	// The transcript names a real Lane whose policy would answer differently
 	// from the plain spawn rule: a read Lane denies this command, and a Lane
 	// without a policy denies everything. Either answer means the transcript was read.
-	for _, harness := range []string{"claude", "codex"} {
+	for _, harness := range []string{"codex"} {
 		for _, tc := range []struct {
 			name, tool string
 			input      map[string]any
@@ -616,7 +729,7 @@ func TestHookCommandAntigravityTranscriptLimit(t *testing.T) {
 func TestHookCommandTranscriptErrorsDeny(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
-	for _, harness := range []string{"agy", "grok"} {
+	for _, harness := range []string{"agy", "grok", "claude"} {
 		for _, failure := range []string{"unreadable", "cannot open", "oversized line", "reader limit", "missing"} {
 			t.Run(harness+"/"+failure, func(t *testing.T) {
 				transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
@@ -654,6 +767,8 @@ func TestHookCommandTranscriptErrorsDeny(t *testing.T) {
 					payload["hookEventName"] = "PreToolUse"
 					payload["toolName"] = "write"
 					payload["toolInput"] = map[string]any{"file_path": "/project/x"}
+				} else if harness == "claude" {
+					payload = map[string]any{"hook_event_name": "PreToolUse", "transcript_path": transcript, "cwd": "/project", "tool_name": "Write", "tool_input": map[string]any{"file_path": "/project/x"}}
 				} else {
 					payload["workspacePaths"] = []string{"/project"}
 					payload["toolCall"] = map[string]any{"name": "write_to_file", "args": map[string]any{"TargetFile": "/project/x"}}
@@ -664,9 +779,25 @@ func TestHookCommandTranscriptErrorsDeny(t *testing.T) {
 				}
 				for _, arg := range []string{harness, ""} {
 					out := runHookPayload(t, string(b), arg)
-					var answer struct{ Decision, Reason string }
+					if harness == "claude" && failure == "missing" {
+						if out != "" {
+							t.Fatalf("%s = %s, want no output", arg, out)
+						}
+						continue
+					}
+					var answer struct {
+						Decision, Reason   string
+						HookSpecificOutput struct {
+							PermissionDecision       string
+							PermissionDecisionReason string
+						}
+					}
 					if err := json.Unmarshal([]byte(out), &answer); err != nil {
 						t.Fatal(err)
+					}
+					if harness == "claude" {
+						answer.Decision = answer.HookSpecificOutput.PermissionDecision
+						answer.Reason = answer.HookSpecificOutput.PermissionDecisionReason
 					}
 					want := "deny"
 					if failure == "missing" {

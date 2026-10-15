@@ -800,7 +800,7 @@ func TestDecideLaneCommandCwd(t *testing.T) {
 }
 
 func TestRenderOtherHarnessLaneVerdicts(t *testing.T) {
-	for _, harness := range []string{"claude", "codex", "grok"} {
+	for _, harness := range []string{"codex", "grok"} {
 		if got, want := string(Render(harness, Verdict{Kind: "auto_approve"})), string(Render(harness, Verdict{Kind: "allow"})); got != want {
 			t.Fatalf("%s auto_approve = %s, want %s", harness, got, want)
 		}
@@ -808,6 +808,46 @@ func TestRenderOtherHarnessLaneVerdicts(t *testing.T) {
 		if !strings.Contains(got, "deny") || !strings.Contains(got, "relay is only for Antigravity") {
 			t.Fatalf("%s relay = %s", harness, got)
 		}
+	}
+}
+
+func TestRenderClaudeLaneVerdicts(t *testing.T) {
+	for _, kind := range []string{"allow", "auto_approve", "relay"} {
+		if got := Render("claude", Verdict{Kind: kind}); got != nil {
+			t.Fatalf("%s = %s, want no output", kind, got)
+		}
+	}
+	want := `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Lane policy"}}`
+	if got := string(Render("claude", Verdict{Kind: "deny", Reason: "Lane policy"})); got != want {
+		t.Fatalf("deny = %s, want %s", got, want)
+	}
+}
+
+func TestDecideLaneClaudeTools(t *testing.T) {
+	for _, tc := range []struct {
+		name, access, tool string
+		input              map[string]any
+		want               string
+	}{
+		{"read", "read", "Read", map[string]any{"file_path": "/project/main.go"}, "allow"},
+		{"read command", "read", "Bash", map[string]any{"command": "git log --oneline"}, "auto_approve"},
+		{"write command", "read", "Bash", map[string]any{"command": "git log --output=x"}, "deny"},
+		{"report write", "read", "Write", map[string]any{"file_path": "/run/result.md"}, "auto_approve"},
+		{"project edit", "edit", "Edit", map[string]any{"file_path": "/project/main.go"}, "auto_approve"},
+		{"git multi edit", "edit", "MultiEdit", map[string]any{"file_path": "/project/.git/config"}, "deny"},
+		{"read notebook", "read", "NotebookEdit", map[string]any{"file_path": "/project/book.ipynb"}, "deny"},
+		{"edit notebook", "edit", "NotebookEdit", map[string]any{"file_path": "/project/book.ipynb"}, "auto_approve"},
+		{"Agent reader", "read", "Agent", map[string]any{"subagent_type": "Explore"}, "allow"},
+		{"Agent writer", "edit", "Agent", map[string]any{"subagent_type": "writer"}, "deny"},
+		{"Task reader", "read", "Task", map[string]any{"subagent_type": "Explore"}, "allow"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lane := &Lane{Harness: "claude", Access: tc.access, Root: "/project", RunFolder: "/run"}
+			call := &Call{Harness: "claude", CWD: lane.Root, Tool: tc.tool, Input: tc.input}
+			if got := DecideLane(call, lane); got.Kind != tc.want {
+				t.Fatalf("verdict: %+v, want %s", got, tc.want)
+			}
+		})
 	}
 }
 
