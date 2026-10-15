@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Changed edit Enforcement to use the sandbox and Maestro hook for Claude and Grok, the sandbox for Codex, and the Maestro hook for Antigravity; `claude_auto` and Grok edit Lanes with `dirs` outside the project are `best-effort`
 - Changed every Claude Lane, read and edit, to ignore the user, project, and local settings files; `CLAUDE.md` still loads
 - Changed the Grok hook to check every tool call; agy and grok Lanes fail pre-flight when their Maestro hook is missing, wrong, or disabled; run `maestro adapter install agy` and `maestro adapter install grok` again
+- Changed Grok Lanes to run in Grok's always-approve mode with no allow or deny rules: Grok has no mode that is prompt-free and deny-by-default (`dontAsk` prompts in a tab and headless mode has full tool access), so the Maestro hook decides every tool call before Grok does and the workspace sandbox backs it
 - Changed Grok edit Lanes to use `--sandbox workspace` when every writable directory is inside the project; extra `dirs` outside it turn the sandbox off
 - Changed Claude edit Lanes to run shell commands in the Claude sandbox, with no outbound network and writes limited to the project, Run folder, `dirs`, and per-user temp directory
 - Changed Codex Lanes to pin writable roots instead of inheriting extra roots from user settings

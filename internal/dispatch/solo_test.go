@@ -39,16 +39,11 @@ func TestTabArgsPerHarnessAndAccess(t *testing.T) {
 		{name: "claude", access: "edit", want: append([]string{pointer, "--model", "model", "--effort", "high"}, editClaude...)},
 		{name: "codex", access: "read", want: []string{pointer, "-m", "model", "-C", folder, "-c", "approval_policy=never", "-c", trust, "-c", "model_reasoning_effort=high", "-s", "workspace-write", "-c", "sandbox_workspace_write.writable_roots=[]"}},
 		{name: "codex", access: "edit", want: []string{pointer, "-m", "model", "-C", root, "-c", "approval_policy=never", "-c", trust, "-c", "model_reasoning_effort=high", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--add-dir", folder, "--add-dir", "/extra", "-c", fmt.Sprintf("sandbox_workspace_write.writable_roots=[%q,\"/extra\"]", folder)}},
-		// Grok path rules take the absolute path as written (no `//`); a read
-		// Lane writes only its Run folder, inside the project, so it runs in the
-		// workspace sandbox; the edit Lane's /extra dir is outside, so it does not.
-		{name: "grok", access: "read", want: append(append([]string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--reasoning-effort", "high", "--sandbox", "workspace", "--permission-mode", "dontAsk"}, allowEach(
-			"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "TodoWrite",
-			"Bash(git diff *)", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git blame *)",
-			"Bash(ls *)", "Bash(cat *)", "Bash(ls)", "Bash(git status)")...), "--allow", "Write("+folder+"/**)", "--allow", "Edit("+folder+"/**)")},
-		{name: "grok", access: "edit", want: []string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--reasoning-effort", "high", "--permission-mode", "dontAsk",
-			"--allow", "Write(" + root + "/**)", "--allow", "Edit(" + root + "/**)", "--allow", "Write(" + folder + "/**)", "--allow", "Edit(" + folder + "/**)", "--allow", "Write(/extra/**)", "--allow", "Edit(/extra/**)",
-			"--allow", "Bash(go test ./... *)", "--allow", "Bash(go test ./...)"}},
+		// Grok runs under always-approve with the Maestro hook as the policy; a
+		// read Lane writes only its Run folder, inside the project, so it runs in
+		// the workspace sandbox; the edit Lane's /extra dir is outside, so it does not.
+		{name: "grok", access: "read", want: []string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--reasoning-effort", "high", "--sandbox", "workspace", "--permission-mode", "bypassPermissions"}},
+		{name: "grok", access: "edit", want: []string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--reasoning-effort", "high", "--permission-mode", "bypassPermissions"}},
 		{name: "agy", access: "read", want: []string{"--sandbox", "--model", "model", "--effort", "high", "--prompt-interactive", pointer}},
 		{name: "agy", access: "edit", want: []string{"--sandbox", "--model", "model", "--effort", "high", "--mode", "accept-edits", "--add-dir", "/extra", "--prompt-interactive", pointer}},
 	} {

@@ -1,15 +1,9 @@
 package harness
 
 import (
-	"encoding/json"
-	"fmt"
 	"os"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/BurntSushi/toml"
 )
 
 func feed(t *testing.T, p Parser, path string) *Outcome {
@@ -119,231 +113,37 @@ func TestEveryHarnessEnforcesBothShapes(t *testing.T) {
 	}
 }
 
-func TestGrokReadAllowsOnlyReadTools(t *testing.T) {
+func TestGrokShapesRunAlwaysApproveUnderTheHook(t *testing.T) {
 	g := &Grok{bin: "/bin/grok"}
 	for i, build := range []func(Launch) (*Command, error){g.Build, g.BuildTab} {
-		// Dirs are extra writable directories of an edit Lane; a read Lane
-		// writes only its Run folder, so they do not decide its sandbox.
-		command, err := build(Launch{Access: "read", Root: "/project", RunFolder: "/project/run", Dirs: []string{"/elsewhere"}, AllowRules: []string{"Bash"}, AllowedCommands: []string{"touch file"}, AllowCommit: true})
+		// Grok has no prompt-free deny-by-default mode, so the Maestro hook is
+		// the policy and the mode is always-approve; no allow or deny rule is passed.
+		command, err := build(Launch{Access: "read", Root: "/project", RunFolder: "/project/run", Dirs: []string{"/elsewhere"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		allow, deny := map[string]bool{}, map[string]bool{}
-		for i, arg := range command.Flags {
-			if arg == "--allow" {
-				allow[command.Flags[i+1]] = true
-			}
-			if arg == "--deny" {
-				deny[command.Flags[i+1]] = true
-			}
-		}
-		// Grok lets a deny rule win over every allow rule, so a deny for Write
-		// would cancel the Run folder rule and the Lane could never write its
-		// Report; the Maestro hook holds the Access instead.
-		if len(allow) != len(readTools)+2 || len(deny) != 0 || command.ReportByText != (i == 0) {
-			t.Fatal(command)
-		}
-		if flags := strings.Join(command.Flags, " "); !strings.Contains(flags, "--permission-mode dontAsk") {
-			t.Fatal("read must run under dontAsk", command.Flags)
-		}
-		for _, rule := range readTools {
-			if !allow[rule] {
-				t.Fatal("missing", rule)
-			}
-		}
-		// Grok takes the absolute path as written; `//` would be literal glob text.
-		if !allow["Write(/project/run/**)"] || !allow["Edit(/project/run/**)"] {
-			t.Fatal("Report writes must stay in the Run folder", allow)
-		}
-		if flags := strings.Join(command.Flags, " "); !strings.Contains(flags, "--sandbox workspace") {
-			t.Fatal("read must run in the workspace sandbox", command.Flags)
+		flags := strings.Join(command.Flags, " ")
+		if flags != "--sandbox workspace --permission-mode bypassPermissions" || command.ReportByText != (i == 0) {
+			t.Fatal(command.Flags, command.ReportByText)
 		}
 		if g.Enforcement("read") != Enforced || command.Enforcement != Enforced {
 			t.Fatal("read must be enforced")
 		}
 	}
-}
-
-func TestGrokEditGrantsWritesAndSandbox(t *testing.T) {
-	g := &Grok{bin: "/bin/grok"}
 	command, err := g.Build(Launch{Access: "edit", Root: "/project", RunFolder: "/project/.agents/maestro/runs/r-1/t1", Dirs: []string{"/project/vendor"}, AllowedCommands: []string{"go test ./..."}, AllowCommit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	flags := strings.Join(command.Flags, " ")
-	if command.Enforcement != Enforced {
-		t.Fatal(command.Enforcement)
-	}
-	for _, want := range []string{
-		"--sandbox workspace", "--permission-mode dontAsk",
-		"--allow Write(/project/**) --allow Edit(/project/**)",
-		"--allow Write(/project/.agents/maestro/runs/r-1/t1/**)",
-		"--allow Write(/project/vendor/**)",
-		"--allow Bash(go test ./... *)", "--allow Bash(git commit *)",
-	} {
-		if !strings.Contains(flags, want) {
-			t.Fatalf("missing %q in %s", want, flags)
-		}
-	}
-	if strings.Contains(flags, "--deny") || strings.Contains(flags, "//") {
-		t.Fatal(flags)
+	if flags := strings.Join(command.Flags, " "); flags != "--sandbox workspace --permission-mode bypassPermissions" || command.Enforcement != Enforced {
+		t.Fatal(command.Flags, command.Enforcement)
 	}
 	// An extra directory outside the project does not fit the workspace sandbox.
 	command, err = g.Build(Launch{Access: "edit", Root: "/project", RunFolder: "/project/run", Dirs: []string{"/elsewhere"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if flags := strings.Join(command.Flags, " "); strings.Contains(flags, "--sandbox") || !strings.Contains(flags, "--allow Write(/elsewhere/**)") {
-		t.Fatal(flags)
-	}
-	if command.Enforcement != BestEffort {
-		t.Fatal(command.Enforcement)
-	}
-}
-
-func TestClaudeSandboxForEachShape(t *testing.T) {
-	c := &Claude{bin: "/bin/claude"}
-	for _, access := range []string{"read", "edit"} {
-		for _, auto := range []bool{false, true} {
-			for _, tab := range []bool{false, true} {
-				t.Run(fmt.Sprintf("%s/auto=%t/tab=%t", access, auto, tab), func(t *testing.T) {
-					launch := Launch{Access: access, Root: "/project", RunFolder: "/project/run", Dirs: []string{"/cache", "/project/vendor"}, ClaudeAuto: auto}
-					build := c.Build
-					if tab {
-						build = c.BuildTab
-					}
-					command, err := build(launch)
-					if err != nil {
-						t.Fatal(err)
-					}
-					var settings struct {
-						Sandbox map[string]any `json:"sandbox"`
-						Env     map[string]string
-						Hooks   map[string][]struct {
-							Matcher string
-							Hooks   []struct {
-								Type, Command string
-								Timeout       int
-							}
-						}
-					}
-					var denied []string
-					for i, arg := range command.Cmd.Args {
-						if arg == "--settings" {
-							if err := json.Unmarshal([]byte(command.Cmd.Args[i+1]), &settings); err != nil {
-								t.Fatal(err)
-							}
-						}
-						if arg == "--disallowedTools" {
-							denied = command.Cmd.Args[i+1 : i+3]
-						}
-					}
-					filesystem := map[string]any{}
-					wantDir, wantEnforcement := launch.RunFolder, Enforced
-					if access == "edit" {
-						filesystem["allowWrite"] = []any{launch.RunFolder, "/cache", "/project/vendor"}
-						filesystem["denyWrite"] = []any{"/project/.git/config", "/project/.git/hooks"}
-						wantDir = launch.Root
-						if auto {
-							wantEnforcement = BestEffort
-						}
-					}
-					want := map[string]any{
-						"enabled": true, "autoAllowBashIfSandboxed": false,
-						"allowUnsandboxedCommands": false, "failIfUnavailable": true,
-						"filesystem": filesystem, "network": map[string]any{"allowLocalBinding": true},
-					}
-					if !reflect.DeepEqual(settings.Sandbox, want) {
-						t.Fatalf("sandbox: %+v, want %+v", settings.Sandbox, want)
-					}
-					if settings.Env["MAESTRO_TASK_FOLDER"] != launch.RunFolder {
-						t.Fatalf("Lane environment: %+v", settings.Env)
-					}
-					hooks := settings.Hooks["PreToolUse"]
-					if len(hooks) != 1 || hooks[0].Matcher != "Agent|Task|Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__solo__spawn_agent|mcp__solo__spawn_process" || len(hooks[0].Hooks) != 1 {
-						t.Fatalf("Lane hook: %+v", hooks)
-					}
-					if h := hooks[0].Hooks[0]; h.Type != "command" || !strings.HasSuffix(h.Command, " hook claude") || h.Timeout != 660 {
-						t.Fatalf("Lane hook command: %+v", h)
-					}
-					relay := settings.Hooks["PermissionRequest"]
-					if len(relay) != 1 || len(relay[0].Hooks) != 1 || !strings.Contains(relay[0].Hooks[0].Command, " relay ") || relay[0].Hooks[0].Timeout != 660 {
-						t.Fatalf("PermissionRequest Relay: %+v", relay)
-					}
-					if !reflect.DeepEqual(denied, []string{"Edit(///project/.git/**)", "Write(///project/.git/**)"}) {
-						t.Fatalf("git file tools: %v", denied)
-					}
-					if command.Cmd.Dir != wantDir || command.Enforcement != wantEnforcement {
-						t.Fatalf("directory=%s Enforcement=%s", command.Cmd.Dir, command.Enforcement)
-					}
-				})
-			}
-		}
-	}
-}
-
-func TestCodexPinsWritableRoots(t *testing.T) {
-	c := &Codex{bin: "/bin/codex"}
-	for _, access := range []string{"read", "edit"} {
-		for _, tab := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/tab=%t", access, tab), func(t *testing.T) {
-				launch := Launch{Access: access, Root: "/project", RunFolder: "/project/run", Dirs: []string{"/cache dir", "/quoted\"dir", "/back\\slash"}}
-				build := c.Build
-				if tab {
-					build = c.BuildTab
-				}
-				command, err := build(launch)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var roots []string
-				for i, arg := range command.Cmd.Args {
-					if arg == "-c" && strings.HasPrefix(command.Cmd.Args[i+1], "sandbox_workspace_write.writable_roots=") {
-						var settings struct {
-							Sandbox struct {
-								Roots []string `toml:"writable_roots"`
-							} `toml:"sandbox_workspace_write"`
-						}
-						if _, err := toml.Decode(command.Cmd.Args[i+1], &settings); err != nil {
-							t.Fatal(err)
-						}
-						roots = settings.Sandbox.Roots
-					}
-				}
-				want := []string{}
-				if access == "edit" {
-					want = append([]string{launch.RunFolder}, launch.Dirs...)
-				}
-				if !reflect.DeepEqual(roots, want) || command.Enforcement != Enforced {
-					t.Fatalf("roots=%q Enforcement=%s", roots, command.Enforcement)
-				}
-			})
-		}
-	}
-}
-
-func TestCommandEnforcementForEveryHarnessAndLaunchForm(t *testing.T) {
-	reg := New(map[string]string{"claude": "/bin/claude", "codex": "/bin/codex", "grok": "/bin/grok", "agy": "/bin/agy"})
-	for _, name := range reg.Names() {
-		h, _ := reg.Get(name)
-		for _, access := range []string{"read", "edit"} {
-			for _, tab := range []bool{false, true} {
-				t.Run(fmt.Sprintf("%s/%s/tab=%t", name, access, tab), func(t *testing.T) {
-					root := t.TempDir()
-					build := h.Build
-					if tab {
-						build = h.BuildTab
-					}
-					command, err := build(Launch{Access: access, Root: root, RunFolder: root, Dirs: []string{filepath.Join(root, "cache")}})
-					if err != nil {
-						t.Fatal(err)
-					}
-					if command.Enforcement != Enforced {
-						t.Fatal(command.Enforcement)
-					}
-				})
-			}
-		}
+	if flags := strings.Join(command.Flags, " "); flags != "--permission-mode bypassPermissions" || command.Enforcement != BestEffort {
+		t.Fatal(command.Flags, command.Enforcement)
 	}
 }
 

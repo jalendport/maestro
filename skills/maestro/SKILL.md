@@ -40,6 +40,6 @@ Read `report.md`, then answer once: `maestro resume <run> --task <n> --lane <fam
 
 ## Facts
 
-`maestro roster`, `maestro budget`, and `maestro doctor` print the Lanes, the usage per Account, and the Harnesses. Maestro never passes a bypass flag to a Lane, never pushes, and commits only when a Brief says `commit: true`.
+`maestro roster`, `maestro budget`, and `maestro doctor` print the Lanes, the usage per Account, and the Harnesses. Maestro passes no bypass flag to a Claude, Codex, or Antigravity Lane (a Grok Lane runs in always-approve because the Maestro hook and the sandbox decide before Grok does), never pushes, and commits only when a Brief says `commit: true`.
 
-Grok's own permission modes and rules do not hold a Lane: the Maestro hook and the workspace sandbox do. Grok never relays. Grok edit Lanes with writable `dirs` outside the project run without the sandbox and are `best-effort`.
+Grok's own permission modes do not hold a Lane: the Maestro hook and the workspace sandbox do, and the Lane runs in always-approve so Grok never prompts. Grok never relays. Grok edit Lanes with writable `dirs` outside the project run without the sandbox and are `best-effort`.

@@ -12,7 +12,7 @@ Maestro is a small command-line tool that takes over once you and your coding ag
 - **Checks and a gate** — your project's own verification commands run after every edit, a `touch:` list keeps a task inside the files it was given, and Jev reads the diff against the brief before a task is allowed to close
 - **Subscriptions first** — everyday work spreads across the subscriptions you already pay for, while lanes billed per token get read-only work on their own and edit work only when you ask for them by name; set `[router] orchestrator = "<family>"` in `~/.maestro/config.toml` and the model you are talking to is never spent automatically
 - **Budgets that bind** — usage windows are read from every dispatch (and probed when stale), with a block point, a warning, and a reserve kept back for the session you are in
-- **A permission contract** — a Lane gets `read` or `edit` Access through a sandbox, a tool allowlist, or the Maestro hook, and Maestro never passes a bypass flag
+- **A permission contract** — a Lane gets `read` or `edit` Access through a sandbox, a tool allowlist, or the Maestro hook; Maestro passes no bypass flag to Claude, Codex, or Antigravity, and a Grok Lane runs in always-approve only because the hook and the sandbox decide before Grok does
 - **Solo integration** — inside [Solo](https://soloterm.com), tasks are todos, lanes are tabs, results are comments, and your session is woken when a run ends
 - **Single static binary** — Go, no runtime dependencies, and each harness needs only a skill file, a hook entry or two, and for Grok one rules file
 
@@ -107,7 +107,7 @@ The probe denies only where the hook is in scope: with the default `[hook] scope
 
 ### Connect Grok
 
-Grok takes read and edit work. Grok's own permission modes and rules do not hold a Lane. In a headless `dontAsk` test, Grok approved a write outside the project and a command outside the allow list. The Maestro hook denies what the Lane may not do, and the workspace sandbox backs it at the kernel level:
+Grok takes read and edit work. Grok's own permission modes do not hold a Lane: `dontAsk` is a Claude mode name that Grok accepts but maps to `default`, which prompts in a tab, and headless Grok runs with full tool access. So a Grok Lane runs in always-approve mode and never prompts, and the Maestro hook is the policy: it runs before every tool call and denies what the Lane may not do, and the workspace sandbox backs it at the kernel level:
 
 - A read Lane runs the built-in read-only commands and writes only its Report in the Run folder
 - An edit Lane also runs the checks and the project `allow` list, and writes inside the project, the Run folder, and the extra `dirs`; the workspace sandbox also permits writes to temp directories and `~/.grok`

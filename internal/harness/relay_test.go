@@ -64,7 +64,9 @@ func TestClaudePermissionHookInEveryShape(t *testing.T) {
 	}
 }
 
-func TestGrokEditRulesAndDenyMode(t *testing.T) {
+func TestGrokShapesPassNoRules(t *testing.T) {
+	// Grok runs in always-approve; the Maestro hook is the policy, so no
+	// allow or deny rule is passed for either shape, one-shot or tab.
 	for _, access := range []string{"read", "edit"} {
 		for _, tab := range []bool{false, true} {
 			g := &Grok{bin: "/bin/grok"}
@@ -80,13 +82,8 @@ func TestGrokEditRulesAndDenyMode(t *testing.T) {
 				t.Fatal(err)
 			}
 			args := strings.Join(command.Cmd.Args, "\n")
-			if !strings.Contains(args, "--permission-mode\ndontAsk") {
-				t.Fatalf("mode: %s", args)
-			}
-			for _, rule := range []string{lane.AllowRules[0], "Bash(go test ./... *)", "Bash(git add *)", "Bash(git " + "commit *)"} {
-				if strings.Contains(args, "--allow\n"+rule) != (access == "edit") {
-					t.Fatalf("%s rule %s: %s", access, rule, args)
-				}
+			if !strings.Contains(args, "--permission-mode\nbypassPermissions") || strings.Contains(args, "--allow") || strings.Contains(args, "--deny") {
+				t.Fatalf("%s tab=%v: %s", access, tab, args)
 			}
 		}
 	}
