@@ -33,65 +33,86 @@ func (v Verdict) verdict() Verdict { return v }
 
 // lanePointer matches a Brief path; the prefix before `.agents/` is optional
 // because a headless Lane gets a project-relative Pointer.
-var lanePointer = regexp.MustCompile("((?:[^\\s`\"']+/)?\\.agents/maestro/(?:runs/[^/\\s`\"']+|councils/[^/\\s`\"']+(?:/round-[0-9]+)?)/[^/\\s`\"']+)/brief\\.md")
+var lanePointer = regexp.MustCompile("((?:[^`]+/)?\\.agents/maestro/(?:runs/[^/`]+|councils/[^/`]+(?:/round-[0-9]+)?)/[^/`]+)/brief\\.md")
 var lanePointerSentence = regexp.MustCompile("^\\s*Read the file `" + lanePointer.String() + "` in full, then follow it\\.")
 
-func FindLaneFolder(c *Call) (string, bool) {
+const transcriptReadLimit = 16 * 1024 * 1024
+
+func laneFolder(c *Call, folder string) (string, bool, error) {
+	if !filepath.IsAbs(folder) {
+		base := c.CWD
+		if c.Harness == "agy" && len(c.WorkspacePaths) > 0 {
+			base = c.WorkspacePaths[0]
+		}
+		folder = filepath.Join(base, folder)
+	}
+	folder, err := filepath.Abs(folder)
+	return folder, err == nil, err
+}
+
+func FindLaneFolder(c *Call) (string, bool, error) {
 	if folder := os.Getenv("MAESTRO_TASK_FOLDER"); folder != "" {
-		return folder, true
+		return laneFolder(c, folder)
 	}
 	if c.TranscriptPath == "" {
-		return "", false
+		return "", false, nil
 	}
 	f, err := os.Open(c.TranscriptPath)
 	if err != nil {
-		return "", false
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("cannot open Lane transcript %q: %w", c.TranscriptPath, err)
 	}
 	defer f.Close()
-	if c.Harness == "agy" {
-		b, err := io.ReadAll(io.LimitReader(f, 64*1024))
-		if err == nil {
-			if match := lanePointer.FindSubmatch(b); len(match) > 0 {
-				return string(match[1]), true
-			}
-		}
-		return "", false
+	if c.Harness != "claude" && c.Harness != "codex" && c.Harness != "grok" && c.Harness != "agy" {
+		return "", false, nil
 	}
-	if c.Harness != "claude" && c.Harness != "codex" && c.Harness != "grok" {
-		return "", false
-	}
-	scanner := bufio.NewScanner(io.LimitReader(f, 16*1024*1024))
+	reader := &io.LimitedReader{R: f, N: transcriptReadLimit}
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	if c.Harness == "grok" {
-		// Grok stores a prompt as one or more user_message_chunk updates
-		// that share a prompt index; the first index is the first prompt.
-		var texts []string
+		// Grok stores a prompt as chunks with one prompt index.
+		var prompt strings.Builder
 		first := -1
 		for scanner.Scan() {
 			text, index, ok := grokUserChunk(scanner.Bytes())
 			if ok && (first < 0 || index == first) {
 				first = index
-				texts = append(texts, text)
+				prompt.WriteString(text)
+				if match := lanePointerSentence.FindStringSubmatch(prompt.String()); len(match) > 0 {
+					return laneFolder(c, match[1])
+				}
 				continue
 			}
 			if first >= 0 {
 				break
 			}
 		}
-		if match := lanePointerSentence.FindStringSubmatch(strings.Join(texts, "")); len(match) > 0 {
-			return match[1], true
+		if err := transcriptScanError(c, scanner, reader); err != nil {
+			return "", false, err
 		}
-		return "", false
+		return "", false, nil
 	}
 	for scanner.Scan() {
 		if prompt, ok := transcriptUserPrompt(c.Harness, scanner.Bytes()); ok {
 			if match := lanePointerSentence.FindStringSubmatch(prompt); len(match) > 0 {
-				return match[1], true
+				return laneFolder(c, match[1])
 			}
-			return "", false
+			return "", false, nil
 		}
 	}
-	return "", false
+	return "", false, transcriptScanError(c, scanner, reader)
+}
+
+func transcriptScanError(c *Call, scanner *bufio.Scanner, reader *io.LimitedReader) error {
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("cannot read Lane transcript %q: %w", c.TranscriptPath, err)
+	}
+	if reader.N == 0 {
+		return fmt.Errorf("Lane transcript %q reached the 16 MiB reader limit before the first user prompt was complete", c.TranscriptPath)
+	}
+	return nil
 }
 
 // grokUserChunk reads one line of a Grok session's updates.jsonl and returns
@@ -118,6 +139,24 @@ func grokUserChunk(line []byte) (string, int, bool) {
 }
 
 func transcriptUserPrompt(harness string, line []byte) (string, bool) {
+	if harness == "agy" {
+		var entry struct {
+			Type, Source string
+			Content      json.RawMessage
+		}
+		if json.Unmarshal(line, &entry) != nil || entry.Type != "USER_INPUT" || entry.Source != "USER_EXPLICIT" {
+			return "", false
+		}
+		var prompt string
+		if json.Unmarshal(entry.Content, &prompt) != nil {
+			return "", true
+		}
+		prompt = strings.TrimSpace(prompt)
+		if strings.HasPrefix(prompt, "<USER_REQUEST>") {
+			prompt, _, _ = strings.Cut(strings.TrimPrefix(prompt, "<USER_REQUEST>"), "</USER_REQUEST>")
+		}
+		return prompt, true
+	}
 	type message struct {
 		Type    string          `json:"type"`
 		Role    string          `json:"role"`
@@ -192,7 +231,7 @@ func LoadLane(folder string) (*Lane, bool) {
 
 // laneAction is the harness-neutral view of a tool call the Lane policy judges.
 type laneAction struct {
-	kind    string // spawn, write, command, or "" for a tool the policy lets through
+	kind    string // spawn, write, command, or "" for a tool that needs a name check
 	target  string // write: the file path as the tool got it
 	command string // command: the command line
 	cwd     string // the directory the tool call names, "" when it names none
@@ -234,19 +273,24 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 		return Decide(&spawn, "all").verdict()
 	case "write":
 		target := action.target
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(nonEmpty(action.cwd, lane.Root), target)
+		if target == "" {
+			return Verdict{Kind: "deny", Reason: "write target is empty"}
 		}
-		path, err := filepath.Abs(target)
-		if err == nil && inside(path, lane.RunFolder) {
+		if !filepath.IsAbs(target) {
+			target = nonEmpty(action.cwd, lane.Root) + string(filepath.Separator) + target
+		}
+		if lane.Access == "edit" && inside(target, filepath.Join(lane.Root, ".git")) {
+			return Verdict{Kind: "deny", Reason: "writes to the project's .git directory are not allowed"}
+		}
+		if inside(target, lane.RunFolder) {
 			return Verdict{Kind: "auto_approve"}
 		}
 		if lane.Access == "read" {
 			return Verdict{Kind: "deny", Reason: "read Lane: writes go to the run folder only"}
 		}
-		if err == nil && lane.Access == "edit" {
+		if lane.Access == "edit" {
 			for _, dir := range append([]string{lane.Root}, lane.Dirs...) {
-				if inside(path, dir) {
+				if inside(target, dir) {
 					return Verdict{Kind: "auto_approve"}
 				}
 			}
@@ -270,7 +314,7 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 		}
 		for _, segment := range commandSegments(command) {
 			if flag := unsafeReadFlag(segment); flag != "" {
-				return Verdict{Kind: "deny", Reason: "read-only command carries a write flag: " + flag}
+				return Verdict{Kind: "deny", Reason: "read-only command carries a write flag or form: " + flag}
 			}
 			if commandAllowed(strings.TrimSpace(segment), lane) {
 				continue
@@ -278,7 +322,7 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 			if lane.Access == "read" {
 				return Verdict{Kind: "deny", Reason: "read Lane: command not on the read-only list"}
 			}
-			if lane.Access == "edit" && lane.Tab {
+			if lane.Access == "edit" && lane.Tab && c.Harness != "grok" && lane.Harness != "grok" {
 				return Verdict{Kind: "relay"}
 			}
 			return Verdict{Kind: "deny", Reason: "outside the Lane's allow list; add it to `checks` or the project `allow` list"}
@@ -289,8 +333,35 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 		if isSoloSpawn(c.Tool) {
 			return Decide(c, "all").verdict()
 		}
-		return Verdict{Kind: "allow"}
+		if readTool(c.Tool) {
+			return Verdict{Kind: "allow"}
+		}
+		return Verdict{Kind: "deny", Reason: "unknown Lane tool: " + c.Tool}
 	}
+}
+
+func readTool(tool string) bool {
+	name := strings.TrimPrefix(tool, "hashline_")
+	switch name {
+	case "read_file", "list_dir", "grep", "web_search", "web_fetch", "todo_write",
+		"get_command_or_subagent_output", "kill_command_or_subagent", "ask_user_question",
+		"Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "TodoWrite",
+		"Skill", "skill", "use_skill", "invoke_skill",
+		"view_file", "grep_search", "find_by_name", "view_code_item", "search_web", "read_url_content":
+		return true
+	}
+	for _, prefix := range []string{"solo__", "mcp__solo__"} {
+		if !strings.HasPrefix(tool, prefix) {
+			continue
+		}
+		name := strings.TrimPrefix(tool, prefix)
+		for _, read := range []string{"whoami", "get_", "list_", "todo_get", "todo_list", "todo_comment_create", "scratchpad_read", "help"} {
+			if strings.HasPrefix(name, read) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func inside(path, dir string) bool {
@@ -310,39 +381,46 @@ func inside(path, dir string) bool {
 }
 
 func resolvePath(path string) (string, error) {
-	path, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
+	if !filepath.IsAbs(path) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		path = cwd + string(filepath.Separator) + path
 	}
-	ancestor := path
-	var rest []string
-	for {
-		if _, err := os.Lstat(ancestor); err == nil {
-			resolved, err := filepath.EvalSymlinks(ancestor)
+	resolved := string(filepath.Separator)
+	for _, component := range strings.Split(path, string(filepath.Separator)) {
+		switch component {
+		case "", ".":
+			continue
+		case "..":
+			resolved = filepath.Dir(resolved)
+			continue
+		}
+		resolved = filepath.Join(resolved, component)
+		if _, err := os.Lstat(resolved); err == nil {
+			var err error
+			resolved, err = filepath.EvalSymlinks(resolved)
 			if err != nil {
 				return "", err
 			}
-			for i := len(rest) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, rest[i])
-			}
-			return resolved, nil
 		} else if !os.IsNotExist(err) {
 			return "", err
 		}
-		rest = append(rest, filepath.Base(ancestor))
-		ancestor = filepath.Dir(ancestor)
 	}
+	return resolved, nil
 }
 
 // Keep the read-only commands and their write flags together so an added command
 // cannot hide its write options in a separate permission table.
 var readOnlyCommands = map[string][]string{
-	"cat": nil, "ls": nil, "head": nil, "tail": nil, "grep": nil, "rg": nil,
-	"find": {"-exec", "-execdir", "-delete", "-fprint", "-fprintf", "-fls", "-ok", "-okdir"},
+	"cat": nil, "ls": nil, "head": nil, "tail": nil, "grep": nil,
+	"rg":   {"--pre", "--pre-glob", "--hostname-bin"},
+	"find": {"-exec", "-execdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls", "-ok", "-okdir"},
 	"wc":   nil, "pwd": nil, "echo": nil, "which": nil, "date": nil, "diff": nil,
-	"tree": {"-o"}, "sort": {"-o", "--output"}, "uniq": nil, "cut": nil,
+	"tree": {"-o", "-R", "-H"}, "sort": {"-o", "--output", "--compress-program"}, "uniq": nil, "cut": nil,
 	"basename": nil, "dirname": nil, "stat": nil, "realpath": nil,
-	"git log": {"--output"}, "git diff": {"--output"}, "git show": {"--output"},
+	"git log": {"--output", "--ext-diff", "--textconv"}, "git diff": {"--output", "--ext-diff", "--textconv"}, "git show": {"--output", "--ext-diff", "--textconv"},
 	"git status": nil, "git blame": nil,
 	"git branch": {"-d", "-D", "-m", "-M", "-c", "-C", "-f", "--delete", "--move", "--copy", "--force", "--set-upstream-to", "--unset-upstream", "--edit-description"},
 }
@@ -361,13 +439,82 @@ func unsafeReadFlag(command string) string {
 	words := commandWords(command)
 	name, start := readCommand(words)
 	for _, word := range words[start:] {
+		if word == "--" {
+			break
+		}
+		if word == "--text" {
+			continue
+		}
 		for _, flag := range readOnlyCommands[name] {
-			if word == flag || strings.HasPrefix(flag, "--") && strings.HasPrefix(word, flag+"=") {
-				return flag
+			option, _, _ := strings.Cut(word, "=")
+			if word == flag || strings.HasPrefix(flag, "--") && strings.HasPrefix(option, "--") && len(option) > 2 && strings.HasPrefix(flag, option) {
+				return word
 			}
 			if len(flag) == 2 && strings.HasPrefix(word, "-") && !strings.HasPrefix(word, "--") && strings.Contains(word[1:], flag[1:]) {
-				return flag
+				return word
 			}
+		}
+	}
+	if name == "uniq" && uniqOperands(words[start:]) > 1 {
+		return "uniq with two operands"
+	}
+	if name == "git branch" {
+		return unsafeBranchForm(words[start:])
+	}
+	return ""
+}
+
+func uniqOperands(words []string) int {
+	operands := 0
+	options := true
+	for i := 0; i < len(words); i++ {
+		word := words[i]
+		if options && word == "--" {
+			options = false
+		} else if options && strings.HasPrefix(word, "-") && word != "-" {
+			switch word {
+			case "-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars":
+				i++
+			}
+		} else {
+			operands++
+		}
+	}
+	return operands
+}
+
+func unsafeBranchForm(words []string) string {
+	list, operands, options := false, 0, true
+	for i := 0; i < len(words); i++ {
+		word := words[i]
+		if options {
+			switch word {
+			case "--":
+				options = false
+				continue
+			case "--list":
+				list = true
+				continue
+			case "--show-current", "-a", "-r", "-v", "-vv":
+				continue
+			case "--contains", "--merged", "--no-merged", "--points-at":
+				if i+1 >= len(words) {
+					return "git branch " + word + " without a value"
+				}
+				i++
+				continue
+			}
+			option, _, value := strings.Cut(word, "=")
+			if value && (option == "--contains" || option == "--merged" || option == "--no-merged" || option == "--points-at") {
+				continue
+			}
+			if strings.HasPrefix(word, "-") {
+				return "git branch form: " + word
+			}
+		}
+		operands++
+		if !list || operands > 1 {
+			return "git branch operand: " + word
 		}
 	}
 	return ""

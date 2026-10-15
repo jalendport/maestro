@@ -40,7 +40,9 @@ func (g *Grok) Catalog() ([]Model, string, error) {
 	return models, hint, nil
 }
 
-// Enforcement: the Maestro hook holds both shapes, as it does for Antigravity.
+// Enforcement: the Maestro hook and workspace sandbox hold both shapes.
+// Grok warns and continues if the kernel cannot apply a built-in profile.
+// A launch with an extra directory outside the project is best-effort.
 func (g *Grok) Enforcement(access string) string {
 	if access == "read" || access == "edit" {
 		return Enforced
@@ -131,7 +133,11 @@ func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	cmd := exec.Command(g.bin, args...)
 	cmd.Dir = l.Root
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Flags: flags, PromptStdin: false, ReportByText: l.Access == "read" && !tab}, nil
+	enforcement := Enforced
+	if !sandboxed {
+		enforcement = BestEffort
+	}
+	return &Command{Cmd: cmd, Enforcement: enforcement, Flags: flags, PromptStdin: false, ReportByText: l.Access == "read" && !tab}, nil
 }
 
 // grokWriteRules grants file writes under dir, as an absolute path.

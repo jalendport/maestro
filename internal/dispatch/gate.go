@@ -85,7 +85,7 @@ func collectDiff(root, start string, changed []string) string {
 	var w strings.Builder
 	if start != "" && len(changed) > 0 {
 		for _, rev := range [][]string{{start + "..HEAD"}, {"HEAD"}} {
-			args := append([]string{"-C", root, "diff"}, rev...)
+			args := append([]string{"-C", root, "-c", "core.fsmonitor=false", "-c", "diff.external=", "diff", "--no-ext-diff", "--no-textconv"}, rev...)
 			args = append(args, "--")
 			args = append(args, changed...)
 			if b, err := exec.Command("git", args...).Output(); err == nil {

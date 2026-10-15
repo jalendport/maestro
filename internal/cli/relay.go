@@ -29,7 +29,11 @@ func (a *app) relayCmd() *cobra.Command {
 					return fmt.Errorf("no task %q under %s", args[0], root)
 				}
 			}
-			return dispatch.Relay(config.ControlDirForFolder(folder), cmd.InOrStdin(), cmd.OutOrStdout())
+			control, err := config.ControlDirForFolder(folder)
+			if err != nil {
+				return err
+			}
+			return dispatch.Relay(control, cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}
 }

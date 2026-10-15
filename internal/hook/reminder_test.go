@@ -229,14 +229,29 @@ func TestFindLaneFolderClaudeAndCodexTranscript(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, found := FindLaneFolder(call); !found || got != folder {
-				t.Fatalf("folder = %q, %v; want %q", got, found, folder)
+			if got, found, err := FindLaneFolder(call); err != nil || !found || got != folder {
+				t.Fatalf("folder = %q, %v, %v; want %q", got, found, err, folder)
 			}
 			t.Setenv("MAESTRO_TASK_FOLDER", "/environment")
-			if got, found := FindLaneFolder(call); !found || got != "/environment" {
-				t.Fatalf("environment must take priority: %q, %v", got, found)
+			if got, found, err := FindLaneFolder(call); err != nil || !found || got != "/environment" {
+				t.Fatalf("environment must take priority: %q, %v, %v", got, found, err)
 			}
 		})
+	}
+}
+
+func TestReminderTranscriptError(t *testing.T) {
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	t.Setenv("MAESTRO_LANE", "")
+	for _, harness := range []string{"claude", "codex", "grok", "agy"} {
+		call := &Call{Harness: harness, TranscriptPath: t.TempDir()}
+		want := ""
+		if harness == "agy" {
+			want = "{}"
+		}
+		if got := string(RenderReminder(call, "all")); got != want {
+			t.Fatalf("%s = %q, want %q", harness, got, want)
+		}
 	}
 }
 

@@ -76,7 +76,7 @@ func (s Snapshot) Changed(root string) []string {
 	if s.Commit == "" {
 		args = []string{"ls-tree", "-r", "--name-only", "-z", "HEAD"}
 	}
-	b, err := exec.Command("git", append([]string{"-C", root}, args...)...).Output()
+	b, err := exec.Command("git", append([]string{"-C", root, "-c", "core.fsmonitor=false"}, args...)...).Output()
 	if err == nil {
 		for _, p := range strings.Split(string(b), "\x00") {
 			if p != "" {
@@ -94,7 +94,7 @@ func (s Snapshot) Changed(root string) []string {
 
 // statusPaths is every path git reports as modified, staged, or untracked.
 func statusPaths(root string) ([]string, error) {
-	b, err := exec.Command("git", "-C", root, "status", "--porcelain", "--untracked-files=all").Output()
+	b, err := exec.Command("git", "-C", root, "-c", "core.fsmonitor=false", "status", "--porcelain", "--untracked-files=all").Output()
 	if err != nil {
 		return nil, fmt.Errorf("snapshot needs git and a repository at %s: %w", root, err)
 	}

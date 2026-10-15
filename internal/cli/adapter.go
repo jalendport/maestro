@@ -45,6 +45,9 @@ func (a *app) hookCmd() *cobra.Command {
 				}
 				return nil
 			}
+			if call.Event == "ignore" {
+				return nil
+			}
 			if call.Event == "reminder" {
 				scope := ""
 				if r, err := roster.Load(); err == nil {
@@ -58,8 +61,17 @@ func (a *app) hookCmd() *cobra.Command {
 			// Antigravity and Grok Lanes are held by this hook: their own
 			// permission systems cannot hold the Access on their own.
 			if call.Harness == "agy" || call.Harness == "grok" {
-				if taskFolder, found := hook.FindLaneFolder(call); found {
-					folder := config.ControlDirForFolder(taskFolder)
+				taskFolder, found, err := hook.FindLaneFolder(call)
+				if err != nil {
+					fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, hook.Verdict{Kind: "deny", Reason: err.Error()})))
+					return nil
+				}
+				if found {
+					folder, err := config.ControlDirForFolder(taskFolder)
+					if err != nil {
+						fmt.Fprintln(os.Stdout, string(hook.Render(call.Harness, hook.Verdict{Kind: "deny", Reason: err.Error()})))
+						return nil
+					}
 					if lane, ok := hook.LoadLane(folder); ok {
 						verdict := hook.DecideLane(call, lane)
 						if verdict.Kind == "relay" {

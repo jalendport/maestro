@@ -38,11 +38,10 @@ func Spec(harness string) (HarnessSpec, bool) {
 	case "claude":
 		return HarnessSpec{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "A new Claude Code session loads the hook.", promptEvents()}, true
 	case "codex":
-		return HarnessSpec{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse and UserPromptSubmit hooks.", promptEvents()}, true
+		return HarnessSpec{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse and UserPromptSubmit hooks.", []HookEvent{{Name: "PreToolUse", Matcher: true, Command: "maestro hook codex"}, {Name: "UserPromptSubmit", Command: "maestro hook codex"}}}, true
 	case "grok":
-		// The Grok hook also carries each Lane's permissions, so it matches the
-		// file, shell, and spawn tools under both of Grok's tool name sets.
-		return HarnessSpec{".agents/skills/maestro", ".grok/hooks/maestro.json", "run_terminal_command|run_terminal_cmd|Bash|write|search_replace|Write|Edit|MultiEdit|spawn_subagent|Task|solo__spawn_agent|solo__spawn_process", 660, "A new Grok session binds the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}}}, true
+		// Every tool call must reach the Lane hook, including unknown MCP tools.
+		return HarnessSpec{".agents/skills/maestro", ".grok/hooks/maestro.json", "", 660, "A new Grok session binds the hook.", []HookEvent{{Name: "PreToolUse"}}}, true
 	case "agy":
 		return HarnessSpec{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "PreInvocation", Direct: true, Command: "maestro hook agy", Timeout: 30}}}, true
 	}
@@ -54,6 +53,7 @@ func promptEvents() []HookEvent {
 }
 
 // Paths resolves a Harness's files for install, status, and printed steps.
+// Any test that reads Grok state must set GROK_HOME under its temporary HOME.
 func Paths(harness, home string) (HarnessSpec, bool) {
 	spec, ok := Spec(harness)
 	if !ok {
@@ -67,6 +67,8 @@ func Paths(harness, home string) (HarnessSpec, bool) {
 		spec.HookFile = filepath.Join(config.ClaudeHome(home), "settings.json")
 	case "codex":
 		spec.HookFile = filepath.Join(config.CodexHome(home), "hooks.json")
+	case "grok":
+		spec.HookFile = filepath.Join(grokHome(home), "hooks", "maestro.json")
 	}
 	return spec, true
 }
@@ -187,12 +189,13 @@ func ensureLink(path string) (string, error) {
 }
 
 type Status struct {
-	Harness  string
-	Skill    string
-	Link     string
-	Hook     string
-	Reminder string
-	Overall  string
+	Harness    string
+	Skill      string
+	Link       string
+	Hook       string
+	Reminder   string
+	Overall    string
+	HookReason string
 }
 
 func State(harness string, home string) Status {
@@ -219,6 +222,12 @@ func State(harness string, home string) Status {
 		}
 		states := hookStates(harness, spec.HookFile, spec)
 		s.Hook = states[0]
+		if s.Hook != "missing" {
+			s.HookReason = disabledReason(harness, spec.HookFile, home)
+			if s.HookReason != "" {
+				s.Hook = "disabled"
+			}
+		}
 		if harness == "grok" {
 			s.Reminder = reminderState(ReminderFile(home))
 		} else {

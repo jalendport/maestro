@@ -69,6 +69,146 @@ func TestRunOnceTakesFreshBaseline(t *testing.T) {
 	}
 }
 
+func TestRunOnceRecordsChangesAcrossFailedAttempts(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deleted=%t", deleted), func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
+			root := t.TempDir()
+			if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
+				t.Fatalf("git init: %v %s", err, out)
+			}
+			folder := filepath.Join(config.RunsDir(root), "r-test", "abcd")
+			if err := os.MkdirAll(folder, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := "made.txt"
+			action := "printf 'new work\\n' > \"$TEST_CHANGED\""
+			if deleted {
+				path = "dirty.txt"
+				action = "rm \"$TEST_CHANGED\""
+				if err := os.WriteFile(filepath.Join(root, path), []byte("original work\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bin := filepath.Join(t.TempDir(), "lane")
+			script := "#!/bin/sh\ncat >/dev/null\nif [ \"$TEST_ATTEMPT\" = 1 ]; then\n" + action + "\nexit 1\nfi\nprintf 'STATUS: done\\n' > \"$TEST_REPORT\"\n"
+			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			r := &roster.Roster{}
+			r.Router.Backend = "rules"
+			env := &Env{Root: root, Roster: r, Reg: harness.New(map[string]string{"codex": bin})}
+			task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessEdit,
+				Touch: []string{"allowed.txt"}, Route: &router.Route{Harness: "codex"}, WallLimit: "1m", IdleLimit: "1m"}
+			t.Setenv("TEST_CHANGED", filepath.Join(root, path))
+			t.Setenv("TEST_REPORT", filepath.Join(folder, FileReport))
+			t.Setenv("TEST_ATTEMPT", "1")
+			first := runOnce(env, task, &brief.Brief{}, 1, nil)
+			if first.Outcome.Outcome != OutcomeFailed || first.Outcome.FailureClass != FailTransient {
+				t.Fatalf("first outcome: %+v", first.Outcome)
+			}
+			stored, err := LoadRecord(folder)
+			if err != nil || !reflect.DeepEqual(stored.Verification.Changed, []string{path}) {
+				t.Fatalf("first Record: %+v, error: %v", stored, err)
+			}
+			archiveAttempt(folder, 1)
+			t.Setenv("TEST_ATTEMPT", "2")
+			second := runOnce(env, task, &brief.Brief{}, 2, nil)
+			stored, err = LoadRecord(folder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, rec := range []*Record{second, stored} {
+				if !reflect.DeepEqual(rec.Verification.Changed, []string{path}) || !reflect.DeepEqual(rec.Verification.TouchViolations, []string{path}) {
+					t.Fatalf("retry verification: %+v", rec.Verification)
+				}
+			}
+			if deleted {
+				diff := DiffFor(root, second)
+				if !strings.Contains(diff, "-original work") || !strings.Contains(diff, "+++ /dev/null") {
+					t.Fatalf("Task diff lacks removal: %s", diff)
+				}
+			}
+		})
+	}
+}
+
+func TestRunOnceRecordsChangesOnBlockedCancelStallAndJudgedPaths(t *testing.T) {
+	for _, mode := range []string{"blocked", "cancel", "stall", "judged"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
+			root, folder := t.TempDir(), t.TempDir()
+			if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
+				t.Fatalf("git init: %v %s", err, out)
+			}
+			bin := filepath.Join(t.TempDir(), "lane")
+			script := "#!/bin/sh\ncat >/dev/null\nprintf 'work\\n' > \"$TEST_CHANGED\"\n"
+			wantOutcome := OutcomeUnverified
+			switch mode {
+			case "blocked":
+				script += "printf 'STATUS: blocked\\n' > \"$TEST_REPORT\"\n"
+				wantOutcome = OutcomeBlocked
+			case "cancel", "stall":
+				script += "exec sleep 30\n"
+				wantOutcome = OutcomeCancelled
+				if mode == "stall" {
+					wantOutcome = OutcomeTimedOut
+				}
+			default:
+				script += "printf 'STATUS: done\\n' > \"$TEST_REPORT\"\n"
+			}
+			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			changedPath := filepath.Join(root, "made.txt")
+			t.Setenv("TEST_CHANGED", changedPath)
+			t.Setenv("TEST_REPORT", filepath.Join(folder, FileReport))
+			r := &roster.Roster{}
+			r.Router.Backend = "rules"
+			env := &Env{Root: root, Roster: r, Reg: harness.New(map[string]string{"codex": bin})}
+			task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessEdit,
+				Touch: []string{"made.txt"}, Route: &router.Route{Harness: "codex"}, WallLimit: "1m", IdleLimit: "1m"}
+			if mode == "stall" {
+				task.IdleLimit = "1ms"
+			}
+			if mode == "cancel" {
+				cancel := make(chan struct{})
+				task.Cancel = cancel
+				go func() {
+					defer close(cancel)
+					deadline := time.NewTimer(5 * time.Second)
+					defer deadline.Stop()
+					ticker := time.NewTicker(10 * time.Millisecond)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-deadline.C:
+							return
+						case <-ticker.C:
+							if _, err := os.Stat(changedPath); err == nil {
+								return
+							}
+						}
+					}
+				}()
+			}
+			rec := runOnce(env, task, &brief.Brief{}, 1, nil)
+			if rec.Outcome.Outcome != wantOutcome {
+				t.Fatalf("outcome: %+v, want %s", rec.Outcome, wantOutcome)
+			}
+			stored, err := LoadRecord(folder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, rec := range []*Record{rec, stored} {
+				if !reflect.DeepEqual(rec.Verification.Changed, []string{"made.txt"}) {
+					t.Fatalf("changed = %v", rec.Verification.Changed)
+				}
+			}
+		})
+	}
+}
+
 func TestRunOncePausesLimitsAndRecordsRelay(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	root, folder := t.TempDir(), t.TempDir()
@@ -79,7 +219,7 @@ func TestRunOncePausesLimitsAndRecordsRelay(t *testing.T) {
 	}
 	env := &Env{Root: root, Roster: &roster.Roster{}, Project: &config.Project{Allow: []string{"Bash(go run *)"}}, Reg: harness.New(map[string]string{"claude": bin})}
 	task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessRead, Route: &router.Route{Harness: "claude"}, WallLimit: "3s", IdleLimit: "3s"}
-	control := config.ControlDirForFolder(folder)
+	control := controlFolder(t, folder)
 	done := make(chan error, 1)
 	go func() {
 		until := time.Now().Add(2 * time.Second)
@@ -93,13 +233,13 @@ func TestRunOncePausesLimitsAndRecordsRelay(t *testing.T) {
 			}
 			time.Sleep(time.Millisecond)
 		}
-		request := RelayRequest{ToolName: "Bash", ToolInput: []byte(`{"command":"pwd"}`), AskedAt: time.Now().UTC()}
+		request := RelayRequest{ID: "0123456789abcdef", ToolName: "Bash", ToolInput: []byte(`{"command":"pwd"}`), AskedAt: time.Now().UTC()}
 		if err := writeRelayJSON(control, "relay.json", request); err != nil {
 			done <- err
 			return
 		}
 		time.Sleep(4 * time.Second)
-		if err := writeRelayJSON(control, "relay-answer.json", relayAnswer{request, "deny", time.Now().UTC()}); err != nil {
+		if err := writeRelayJSON(control, "relay-answer-"+request.ID+".json", relayAnswer{request, "deny", time.Now().UTC()}); err != nil {
 			done <- err
 			return
 		}
@@ -126,7 +266,7 @@ func TestRunOncePausesLimitsAndRecordsRelay(t *testing.T) {
 func TestArchiveAttemptPreservesBaselineTabLogAndLane(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	folder := t.TempDir()
-	control := config.ControlDirForFolder(folder)
+	control := controlFolder(t, folder)
 	if err := os.MkdirAll(control, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -135,13 +275,13 @@ func TestArchiveAttemptPreservesBaselineTabLogAndLane(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"lane.json", "answer-allow", "answer-deny", "relay.json", "relay-answer.json"} {
+	for _, name := range []string{"lane.json", "answer-allow", "answer-deny", "relay.json", "relay.lock", "relay-answer-0123456789abcdef.json", "relay-answer-fedcba9876543210.json"} {
 		if err := os.WriteFile(filepath.Join(control, name), []byte(name), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	archiveAttempt(folder, 1)
-	for _, name := range []string{FileBaseline, "tab.log", "lane.json", "answer-allow", "answer-deny", "relay.json", "relay-answer.json"} {
+	for _, name := range []string{FileBaseline, "tab.log", "lane.json", "answer-allow", "answer-deny", "relay.json", "relay.lock", "relay-answer-0123456789abcdef.json", "relay-answer-fedcba9876543210.json"} {
 		b, err := os.ReadFile(filepath.Join(folder, FileAttempts, "1", name))
 		if err != nil || string(b) != name {
 			t.Fatalf("archive %s: %q, %v", name, b, err)
@@ -157,17 +297,21 @@ func TestArchiveAttemptPreservesBaselineTabLogAndLane(t *testing.T) {
 
 func TestClearAnswersRemovesLane(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
-	folder := config.ControlDir("r-test", "abcd")
+	folder := controlFolder(t, filepath.Join(t.TempDir(), "r-test", "abcd"))
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(folder, "lane.json")
-	if err := os.WriteFile(path, []byte(`{"access":"edit"}`), 0o644); err != nil {
-		t.Fatal(err)
+	names := []string{"lane.json", "relay.lock", "relay.json", "relay-answer-0123456789abcdef.json", "relay-answer-fedcba9876543210.json", "answer-allow", "answer-deny"}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(folder, name), []byte(`{"access":"edit"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	clearAnswers(folder)
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("Lane permissions remain after cleanup: %v", err)
+	for _, name := range names {
+		if _, err := os.Stat(filepath.Join(folder, name)); !os.IsNotExist(err) {
+			t.Fatalf("control file %s remains after cleanup: %v", name, err)
+		}
 	}
 }
 
@@ -185,8 +329,8 @@ func TestRunOnceWritesLaneForEveryHarnessAndAccess(t *testing.T) {
 					t.Fatalf("git init: %v: %s", err, out)
 				}
 				bin := filepath.Join(t.TempDir(), "lane")
-				control := config.ControlDirForFolder(folder)
-				if control != config.ControlDir("r-test", "abcd") {
+				control := controlFolder(t, folder)
+				if !config.IsProjectKey(filepath.Base(filepath.Dir(control))) || filepath.Base(control) != "abcd" {
 					t.Fatalf("control folder = %s", control)
 				}
 				t.Setenv("MAESTRO_TEST_CONTROL", control)
@@ -250,7 +394,7 @@ func TestRunOnceAgyUsesSoloTab(t *testing.T) {
 	if rec.SoloProcess != 42 || rec.Outcome.Outcome != OutcomeAnswered || rec.Outcome.ReportByText {
 		t.Fatalf("Antigravity tab outcome: %+v", rec.Outcome)
 	}
-	lane, ok := hook.LoadLane(config.ControlDirForFolder(folder))
+	lane, ok := hook.LoadLane(controlFolder(t, folder))
 	if !ok || !lane.Tab || lane.Harness != "agy" || lane.Access != brief.AccessRead {
 		t.Fatalf("tab permissions: %+v", lane)
 	}
@@ -272,6 +416,130 @@ func TestRunOnceAgyUsesSoloTab(t *testing.T) {
 	want := []string{"--sandbox", "--model", "gemini-3.8-flash", "--effort", "high", "--prompt-interactive", brief.Pointer(filepath.Join(folder, FileBrief))}
 	if spawn.Params.Name != "spawn_agent" || !reflect.DeepEqual(spawn.Params.Arguments.ExtraArgs, want) {
 		t.Fatalf("tab launch: %+v, want %q", spawn, want)
+	}
+}
+
+func TestRunOnceClaudeReadUsesAbsolutePaths(t *testing.T) {
+	for _, tab := range []bool{false, true} {
+		t.Run(fmt.Sprintf("tab=%t", tab), func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
+			t.Setenv("CODEX_HOME", t.TempDir())
+			root := t.TempDir()
+			folder := filepath.Join(config.RunsDir(root), "r-test", "abcd")
+			if err := os.MkdirAll(folder, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			bin := filepath.Join(t.TempDir(), "lane")
+			pointerPath := filepath.Join(folder, "received-pointer.txt")
+			cwdPath := filepath.Join(folder, "received-cwd.txt")
+			t.Setenv("MAESTRO_TEST_POINTER", pointerPath)
+			t.Setenv("MAESTRO_TEST_CWD", cwdPath)
+			script := "#!/bin/sh\npwd > \"$MAESTRO_TEST_CWD\"\ncat > \"$MAESTRO_TEST_POINTER\"\nprintf '## Answer\\nanswer\\nSTATUS: done\\n' > \"$MAESTRO_TASK_FOLDER/result.md\"\n"
+			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			env := &Env{Root: root, Roster: &roster.Roster{Harness: map[string]config.Harness{"claude": {SoloTool: 9}}}, Reg: harness.New(map[string]string{"claude": bin})}
+			callsPath := ""
+			if tab {
+				t.Setenv("MAESTRO_TEST_REPORT", filepath.Join(folder, FileReport))
+				client, calls := deferredSoloClient(t)
+				callsPath = calls
+				env.Solo = &SoloLink{Client: client, ProjectID: 1}
+			}
+			task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessRead, Council: tab,
+				Route: &router.Route{Harness: "claude", Model: "opus"}, WallLimit: "1m", IdleLimit: "1m"}
+			absoluteFile := filepath.Join(root, "absolute.go")
+			b := &brief.Brief{Files: []string{"main.go", absoluteFile}}
+			rec := runOnce(env, task, b, 1, nil)
+			if rec.Outcome.Outcome != OutcomeAnswered {
+				t.Fatalf("outcome: %+v", rec.Outcome)
+			}
+			pointer := ""
+			if tab {
+				calls, err := os.ReadFile(callsPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var spawn struct {
+					Params struct {
+						Arguments struct {
+							ExtraArgs []string `json:"extra_args"`
+						} `json:"arguments"`
+					} `json:"params"`
+				}
+				if err := json.Unmarshal([]byte(strings.Split(string(calls), "\n")[0]), &spawn); err != nil {
+					t.Fatal(err)
+				}
+				pointer = spawn.Params.Arguments.ExtraArgs[0]
+			} else {
+				data, err := os.ReadFile(pointerPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pointer = string(data)
+				cwd, err := os.ReadFile(cwdPath)
+				resolvedFolder, resolveErr := filepath.EvalSymlinks(folder)
+				if err != nil || resolveErr != nil || strings.TrimSpace(string(cwd)) != resolvedFolder {
+					t.Fatalf("working directory=%q, errors=%v/%v", cwd, err, resolveErr)
+				}
+			}
+			if !strings.HasPrefix(pointer, brief.Pointer(filepath.Join(folder, FileBrief))) || !strings.Contains(pointer, root) {
+				t.Fatalf("Pointer: %s", pointer)
+			}
+			rendered, err := os.ReadFile(filepath.Join(folder, FileBrief))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{filepath.Join(root, "main.go"), absoluteFile, filepath.Join(folder, FileReport)} {
+				if !filepath.IsAbs(path) || !strings.Contains(string(rendered), path) {
+					t.Fatalf("missing absolute path %s in Brief: %s", path, rendered)
+				}
+			}
+			if !reflect.DeepEqual(b.Files, []string{"main.go", absoluteFile}) {
+				t.Fatalf("source Brief changed: %v", b.Files)
+			}
+		})
+	}
+}
+
+func TestRunOnceRecordsClaudeAutoEnforcement(t *testing.T) {
+	for _, auto := range []bool{false, true} {
+		t.Run(fmt.Sprintf("auto=%t", auto), func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
+			root := t.TempDir()
+			if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
+				t.Fatalf("git init: %v: %s", err, out)
+			}
+			folder := filepath.Join(config.RunsDir(root), "r-test", "abcd")
+			if err := os.MkdirAll(folder, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			bin := filepath.Join(t.TempDir(), "lane")
+			script := "#!/bin/sh\ncat >/dev/null\nprintf 'STATUS: done\\n' > \"$MAESTRO_TASK_FOLDER/result.md\"\n"
+			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			env := &Env{Root: root, Roster: &roster.Roster{}, Reg: harness.New(map[string]string{"claude": bin})}
+			task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessEdit, ClaudeAuto: auto,
+				Route: &router.Route{Harness: "claude", Enforcement: harness.Enforced}, WallLimit: "1m", IdleLimit: "1m"}
+			rec := runOnce(env, task, &brief.Brief{}, 1, nil)
+			if rec.Outcome.Outcome != OutcomeUnverified {
+				t.Fatalf("outcome: %+v", rec.Outcome)
+			}
+			stored, err := LoadRecord(folder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := harness.Enforced
+			if auto {
+				want = harness.BestEffort
+			}
+			for _, record := range []*Record{rec, stored} {
+				if record.Permission.Enforcement != want {
+					t.Fatalf("Record Enforcement=%q, want %q", record.Permission.Enforcement, want)
+				}
+			}
+		})
 	}
 }
 

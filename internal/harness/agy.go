@@ -102,7 +102,7 @@ func (a *Agy) build(l Launch, tab bool) (*Command, error) {
 	cmd := exec.Command(a.bin, args...)
 	cmd.Dir = l.Root
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Flags: flags}, nil
+	return &Command{Cmd: cmd, Enforcement: a.Enforcement(l.Access), Flags: flags}, nil
 }
 
 func (a *Agy) NewParser() Parser { return &agyParser{out: &Outcome{}} }

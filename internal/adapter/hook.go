@@ -122,31 +122,48 @@ func events(root *value, harness string, create bool) (*value, error) {
 
 func mergeEntry(entries *value, spec HarnessSpec, event HookEvent) string {
 	desired := entry(spec, event)
-	index := maestroIndex(entries, event.Direct)
-	if index < 0 {
-		entries.array = append(entries.array, desired)
-		return "created"
-	}
-	item := entries.array[index]
-	if event.Direct || len(item.get("hooks").array) == 1 {
-		if equal(item, desired) {
-			return "unchanged"
-		}
-		entries.array[index] = desired
-		return "updated"
-	}
-	changed := false
-	handlers := item.get("hooks")
-	for i, handler := range handlers.array {
-		if maestroCommand(handler) && !equal(handler, desired.get("hooks").array[0]) {
-			handlers.array[i] = desired.get("hooks").array[0]
-			changed = true
-		}
-	}
-	if !changed {
+	if eventState(entries, spec, event) == "ok" {
 		return "unchanged"
 	}
-	return "updated"
+	state := "created"
+	var kept []*value
+	written := false
+	for _, item := range entries.array {
+		owned := maestroCommand(item) && event.Direct
+		if !event.Direct {
+			handlers := item.get("hooks")
+			if handlers != nil && handlers.kind == '[' {
+				var foreign []*value
+				for _, handler := range handlers.array {
+					if maestroCommand(handler) {
+						owned = true
+					} else {
+						foreign = append(foreign, handler)
+					}
+				}
+				if owned && len(foreign) > 0 {
+					handlers.array = foreign
+					kept = append(kept, item)
+					state = "updated"
+					continue
+				}
+			}
+		}
+		if !owned {
+			kept = append(kept, item)
+			continue
+		}
+		state = "updated"
+		if !written {
+			kept = append(kept, desired)
+			written = true
+		}
+	}
+	if !written {
+		kept = append(kept, desired)
+	}
+	entries.array = kept
+	return state
 }
 
 func ensureHooks(harness, path string, spec HarnessSpec) ([]string, error) {
@@ -181,7 +198,11 @@ func ensureHooks(harness, path string, spec HarnessSpec) ([]string, error) {
 			return states, fmt.Errorf("%s must be a JSON array", event.Name)
 		}
 	}
-	changed := false
+	enabledChanged := false
+	if harness == "agy" {
+		enabledChanged = removeDisabledFields(set)
+	}
+	changed := enabledChanged
 	for i, event := range spec.Events {
 		entries := set.get(event.Name)
 		if entries == nil {
@@ -189,6 +210,9 @@ func ensureHooks(harness, path string, spec HarnessSpec) ([]string, error) {
 			set.set(event.Name, entries)
 		}
 		states[i] = mergeEntry(entries, spec, event)
+		if enabledChanged && states[i] == "unchanged" {
+			states[i] = "updated"
+		}
 		changed = changed || states[i] != "unchanged"
 	}
 	if !changed {
@@ -238,22 +262,16 @@ func eventState(entries *value, spec HarnessSpec, event HookEvent) string {
 	if entries.kind != '[' {
 		return "wrong"
 	}
-	index := maestroIndex(entries, event.Direct)
-	if index < 0 {
-		return "missing"
-	}
 	desired := entry(spec, event)
-	if equal(entries.array[index], desired) {
-		return "ok"
-	}
-	if !event.Direct {
-		if handlers := entries.array[index].get("hooks"); len(handlers.array) > 1 {
-			for _, handler := range handlers.array {
-				if equal(handler, desired.get("hooks").array[0]) {
-					return "ok"
-				}
-			}
+	state := "missing"
+	for _, item := range entries.array {
+		if maestroIndex(array(item), event.Direct) < 0 {
+			continue
 		}
+		if state != "missing" || !equal(item, desired) {
+			return "wrong"
+		}
+		state = "ok"
 	}
-	return "wrong"
+	return state
 }

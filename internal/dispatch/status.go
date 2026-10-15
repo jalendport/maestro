@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
@@ -76,7 +77,8 @@ func RelayEvents(rec *Record) string {
 		if event.Kind == "relay" || event.Kind == "relay-answer" {
 			text += fmt.Sprintf("%s  task %s  %s\n", event.Kind, rec.Task, event.Text)
 			if event.Kind == "relay" {
-				text += fmt.Sprintf("         maestro answer %s allow|deny\n", rec.Task)
+				id, _, _ := strings.Cut(event.Text, " ")
+				text += fmt.Sprintf("         maestro answer %s allow|deny --relay %s\n", rec.Task, id)
 			}
 		}
 	}

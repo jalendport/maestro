@@ -18,13 +18,14 @@ import (
 func TestAdapterPrintsExactHookSet(t *testing.T) {
 	for _, tc := range []struct{ harness, want string }{
 		{"claude", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}],"matcher":"Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process"}],"UserPromptSubmit":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}]}]}}`},
-		{"codex", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}],"matcher":"Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process"}],"UserPromptSubmit":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}]}]}}`},
-		{"grok", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":660,"type":"command"}],"matcher":"run_terminal_command|run_terminal_cmd|Bash|write|search_replace|Write|Edit|MultiEdit|spawn_subagent|Task|solo__spawn_agent|solo__spawn_process"}]}}`},
+		{"codex", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook codex","timeout":10,"type":"command"}],"matcher":"Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process"}],"UserPromptSubmit":[{"hooks":[{"command":"maestro hook codex","timeout":10,"type":"command"}]}]}}`},
+		{"grok", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":660,"type":"command"}]}]}}`},
 		{"agy", `{"maestro":{"PreInvocation":[{"command":"maestro hook agy","timeout":30,"type":"command"}],"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":660,"type":"command"}],"matcher":"run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents"}]}}`},
 	} {
 		t.Run(tc.harness, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
 			t.Setenv("MAESTRO_HOME", t.TempDir())
 			t.Setenv("CLAUDE_CONFIG_DIR", "")
 			t.Setenv("CODEX_HOME", "")
@@ -65,6 +66,7 @@ func TestAdapterInstallPrintsParseErrorOnce(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
 			t.Setenv("MAESTRO_HOME", t.TempDir())
 			t.Setenv("CLAUDE_CONFIG_DIR", "")
 			t.Setenv("CODEX_HOME", "")
@@ -119,7 +121,9 @@ func TestAdapterCommandHelp(t *testing.T) {
 func TestAdapterGrokPrintsConfigPath(t *testing.T) {
 	for _, maestroHome := range []string{"", filepath.Join(t.TempDir(), "home with spaces")} {
 		t.Run(maestroHome, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
 			t.Setenv("MAESTRO_HOME", maestroHome)
 			command := (&app{}).adapterCmd()
 			command.SetArgs([]string{"grok"})
@@ -138,13 +142,14 @@ func TestAdapterGrokPrintsConfigPath(t *testing.T) {
 func TestAdapterPrintsCarrier(t *testing.T) {
 	for _, tc := range []struct{ harness, key, event, want string }{
 		{"claude", "hooks", "UserPromptSubmit", `[{"hooks":[{"type":"command","command":"maestro hook","timeout":10}]}]`},
-		{"codex", "hooks", "UserPromptSubmit", `[{"hooks":[{"type":"command","command":"maestro hook","timeout":10}]}]`},
+		{"codex", "hooks", "UserPromptSubmit", `[{"hooks":[{"type":"command","command":"maestro hook codex","timeout":10}]}]`},
 		{"agy", "maestro", "PreInvocation", `[{"type":"command","command":"maestro hook agy","timeout":30}]`},
 		{"grok", "", "", ""},
 	} {
 		t.Run(tc.harness, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
 			t.Setenv("MAESTRO_HOME", t.TempDir())
 			t.Setenv("CLAUDE_CONFIG_DIR", "")
 			t.Setenv("CODEX_HOME", "")
@@ -197,6 +202,7 @@ func TestDoctorRequiresReminderForInstalledHarness(t *testing.T) {
 	home := t.TempDir()
 	t.Chdir(t.TempDir())
 	t.Setenv("HOME", home)
+	t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
@@ -256,5 +262,66 @@ func TestReminderRootHelp(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help is missing %q: %s", want, output)
 		}
+	}
+}
+
+func TestDoctorReportsDisabledHookReason(t *testing.T) {
+	for _, name := range []string{"agy", "grok"} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Chdir(t.TempDir())
+			t.Setenv("HOME", home)
+			t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
+			t.Setenv("MAESTRO_HOME", t.TempDir())
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			t.Setenv("CODEX_HOME", "")
+			t.Setenv("SOLO_PROCESS_ID", "")
+			t.Setenv("PATH", "")
+			if result := adapter.Install(name, home, "skill"); result.Err != nil {
+				t.Fatal(result.Err)
+			}
+			spec, _ := adapter.Paths(name, home)
+			path := filepath.Join(os.Getenv("GROK_HOME"), "disabled-hooks")
+			content := []byte("maestro\n")
+			if name == "agy" {
+				path = spec.HookFile
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var root map[string]map[string]any
+				if err := json.Unmarshal(data, &root); err != nil {
+					t.Fatal(err)
+				}
+				root["maestro"]["enabled"] = false
+				content, err = json.Marshal(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(path, content, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			state := adapter.State(name, home)
+			for _, jsonOutput := range []bool{false, true} {
+				command := (&app{json: jsonOutput}).doctorCmd()
+				output := captureStdout(t, command.Execute)
+				if jsonOutput {
+					var rows []doctorRow
+					if err := json.Unmarshal([]byte(output), &rows); err != nil {
+						t.Fatal(err)
+					}
+					output = ""
+					for _, row := range rows {
+						if row.Name == "adapter "+name {
+							output = row.Detail
+						}
+					}
+				}
+				if state.Hook != "disabled" || !strings.Contains(output, "hook disabled") || !strings.Contains(output, state.HookReason) {
+					t.Fatalf("state = %+v, doctor = %q", state, output)
+				}
+			}
+		})
 	}
 }

@@ -90,6 +90,7 @@ func (c *Codex) build(l Launch, tab bool) (*Command, error) {
 		args = append(args, "-c", "model_reasoning_effort="+l.Effort)
 	}
 	var flags []string
+	writable := []string{}
 	reportByText := false
 	switch l.Access {
 	case "read":
@@ -102,6 +103,7 @@ func (c *Codex) build(l Launch, tab bool) (*Command, error) {
 			reportByText = false
 		}
 	case "edit":
+		writable = append([]string{l.RunFolder}, l.Dirs...)
 		// The sandbox protects .agents/ like .git/, so the Run folder is opened by name.
 		flags = append(flags, "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--add-dir", l.RunFolder)
 		for _, d := range l.Dirs {
@@ -110,6 +112,11 @@ func (c *Codex) build(l Launch, tab bool) (*Command, error) {
 	default:
 		return nil, fmt.Errorf("codex has no %q shape", l.Access)
 	}
+	roots, err := json.Marshal(writable)
+	if err != nil {
+		return nil, err
+	}
+	flags = append(flags, "-c", "sandbox_workspace_write.writable_roots="+string(roots))
 	args = append(args, flags...)
 	if !tab {
 		args = append(args, "-")
@@ -117,7 +124,7 @@ func (c *Codex) build(l Launch, tab bool) (*Command, error) {
 	cmd := exec.Command(c.bin, args...)
 	cmd.Dir = root
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Flags: flags, PromptStdin: !tab, ReportByText: reportByText}, nil
+	return &Command{Cmd: cmd, Enforcement: c.Enforcement(l.Access), Flags: flags, PromptStdin: !tab, ReportByText: reportByText}, nil
 }
 
 func (c *Codex) NewParser() Parser { return &codexParser{out: &Outcome{}} }

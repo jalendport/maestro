@@ -1,9 +1,15 @@
 package harness
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func feed(t *testing.T, p Parser, path string) *Outcome {
@@ -152,7 +158,7 @@ func TestGrokReadAllowsOnlyReadTools(t *testing.T) {
 		if flags := strings.Join(command.Flags, " "); !strings.Contains(flags, "--sandbox workspace") {
 			t.Fatal("read must run in the workspace sandbox", command.Flags)
 		}
-		if g.Enforcement("read") != Enforced {
+		if g.Enforcement("read") != Enforced || command.Enforcement != Enforced {
 			t.Fatal("read must be enforced")
 		}
 	}
@@ -165,6 +171,9 @@ func TestGrokEditGrantsWritesAndSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	flags := strings.Join(command.Flags, " ")
+	if command.Enforcement != Enforced {
+		t.Fatal(command.Enforcement)
+	}
 	for _, want := range []string{
 		"--sandbox workspace", "--permission-mode dontAsk",
 		"--allow Write(/project/**) --allow Edit(/project/**)",
@@ -186,6 +195,133 @@ func TestGrokEditGrantsWritesAndSandbox(t *testing.T) {
 	}
 	if flags := strings.Join(command.Flags, " "); strings.Contains(flags, "--sandbox") || !strings.Contains(flags, "--allow Write(/elsewhere/**)") {
 		t.Fatal(flags)
+	}
+	if command.Enforcement != BestEffort {
+		t.Fatal(command.Enforcement)
+	}
+}
+
+func TestClaudeSandboxForEachShape(t *testing.T) {
+	c := &Claude{bin: "/bin/claude"}
+	for _, access := range []string{"read", "edit"} {
+		for _, auto := range []bool{false, true} {
+			for _, tab := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/auto=%t/tab=%t", access, auto, tab), func(t *testing.T) {
+					launch := Launch{Access: access, Root: "/project", RunFolder: "/project/run", Dirs: []string{"/cache", "/project/vendor"}, ClaudeAuto: auto}
+					build := c.Build
+					if tab {
+						build = c.BuildTab
+					}
+					command, err := build(launch)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var settings struct {
+						Sandbox map[string]any `json:"sandbox"`
+					}
+					var denied []string
+					for i, arg := range command.Cmd.Args {
+						if arg == "--settings" {
+							if err := json.Unmarshal([]byte(command.Cmd.Args[i+1]), &settings); err != nil {
+								t.Fatal(err)
+							}
+						}
+						if arg == "--disallowedTools" {
+							denied = command.Cmd.Args[i+1 : i+3]
+						}
+					}
+					filesystem := map[string]any{}
+					wantDir, wantEnforcement := launch.RunFolder, Enforced
+					if access == "edit" {
+						filesystem["allowWrite"] = []any{launch.RunFolder, "/cache", "/project/vendor"}
+						filesystem["denyWrite"] = []any{"/project/.git/config", "/project/.git/hooks"}
+						wantDir = launch.Root
+						if auto {
+							wantEnforcement = BestEffort
+						}
+					}
+					want := map[string]any{
+						"enabled": true, "autoAllowBashIfSandboxed": false,
+						"allowUnsandboxedCommands": false, "failIfUnavailable": true,
+						"filesystem": filesystem, "network": map[string]any{"allowLocalBinding": true},
+					}
+					if !reflect.DeepEqual(settings.Sandbox, want) {
+						t.Fatalf("sandbox: %+v, want %+v", settings.Sandbox, want)
+					}
+					if !reflect.DeepEqual(denied, []string{"Edit(///project/.git/**)", "Write(///project/.git/**)"}) {
+						t.Fatalf("git file tools: %v", denied)
+					}
+					if command.Cmd.Dir != wantDir || command.Enforcement != wantEnforcement {
+						t.Fatalf("directory=%s Enforcement=%s", command.Cmd.Dir, command.Enforcement)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestCodexPinsWritableRoots(t *testing.T) {
+	c := &Codex{bin: "/bin/codex"}
+	for _, access := range []string{"read", "edit"} {
+		for _, tab := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/tab=%t", access, tab), func(t *testing.T) {
+				launch := Launch{Access: access, Root: "/project", RunFolder: "/project/run", Dirs: []string{"/cache dir", "/quoted\"dir", "/back\\slash"}}
+				build := c.Build
+				if tab {
+					build = c.BuildTab
+				}
+				command, err := build(launch)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var roots []string
+				for i, arg := range command.Cmd.Args {
+					if arg == "-c" && strings.HasPrefix(command.Cmd.Args[i+1], "sandbox_workspace_write.writable_roots=") {
+						var settings struct {
+							Sandbox struct {
+								Roots []string `toml:"writable_roots"`
+							} `toml:"sandbox_workspace_write"`
+						}
+						if _, err := toml.Decode(command.Cmd.Args[i+1], &settings); err != nil {
+							t.Fatal(err)
+						}
+						roots = settings.Sandbox.Roots
+					}
+				}
+				want := []string{}
+				if access == "edit" {
+					want = append([]string{launch.RunFolder}, launch.Dirs...)
+				}
+				if !reflect.DeepEqual(roots, want) || command.Enforcement != Enforced {
+					t.Fatalf("roots=%q Enforcement=%s", roots, command.Enforcement)
+				}
+			})
+		}
+	}
+}
+
+func TestCommandEnforcementForEveryHarnessAndLaunchForm(t *testing.T) {
+	reg := New(map[string]string{"claude": "/bin/claude", "codex": "/bin/codex", "grok": "/bin/grok", "agy": "/bin/agy"})
+	for _, name := range reg.Names() {
+		h, _ := reg.Get(name)
+		for _, access := range []string{"read", "edit"} {
+			for _, tab := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/tab=%t", name, access, tab), func(t *testing.T) {
+					root := t.TempDir()
+					build := h.Build
+					if tab {
+						build = h.BuildTab
+					}
+					command, err := build(Launch{Access: access, Root: root, RunFolder: root, Dirs: []string{filepath.Join(root, "cache")}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if command.Enforcement != Enforced {
+						t.Fatal(command.Enforcement)
+					}
+				})
+			}
+		}
 	}
 }
 

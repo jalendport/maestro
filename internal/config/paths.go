@@ -3,9 +3,11 @@
 package config
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
+	"strings"
 )
 
 // Home is the global state directory, ~/.maestro by default. MAESTRO_HOME
@@ -29,20 +31,53 @@ func BudgetFile() string    { return filepath.Join(Home(), "budget.json") }
 func DiscoveryFile() string { return filepath.Join(Home(), "cache", "discovery.json") }
 func RunsIndexDir() string  { return filepath.Join(Home(), "runs") }
 
-func ControlDir(run, task string) string { return filepath.Join(Home(), "control", run, task) }
-
-// ControlDirForFolder maps a task folder (<run>/<task>) or a Seat folder
-// (<slug>/<seat> or <slug>/round-N/<seat>) to its control folder.
-func ControlDirForFolder(folder string) string {
-	folder = filepath.Clean(folder)
-	parent := filepath.Dir(folder)
-	if roundDir.MatchString(filepath.Base(parent)) {
-		return filepath.Join(ControlDir(filepath.Base(filepath.Dir(parent)), filepath.Base(parent)), filepath.Base(folder))
+// ControlDirForFolder maps an absolute Task or Seat folder to its project's
+// control folder. The project key uses the root with symlinks resolved.
+func ControlDirForFolder(folder string) (string, error) {
+	if !filepath.IsAbs(folder) {
+		return "", fmt.Errorf("control folder needs an absolute path: %s", folder)
 	}
-	return ControlDir(filepath.Base(parent), filepath.Base(folder))
+	folder = filepath.Clean(folder)
+	root, artifact := filepath.Dir(folder), filepath.Base(folder)
+	for parent := folder; parent != filepath.Dir(parent); parent = filepath.Dir(parent) {
+		kind := filepath.Base(parent)
+		maestro := filepath.Dir(parent)
+		agents := filepath.Dir(maestro)
+		if (kind == "runs" || kind == "councils") && filepath.Base(maestro) == "maestro" && filepath.Base(agents) == ".agents" {
+			root = filepath.Dir(agents)
+			artifact, _ = filepath.Rel(parent, folder)
+			break
+		}
+	}
+	resolved, err := resolveControlRoot(root)
+	if err != nil {
+		return "", err
+	}
+	key := fmt.Sprintf("%x", sha256.Sum256([]byte(resolved)))[:16]
+	return filepath.Join(Home(), "control", key, artifact), nil
 }
 
-var roundDir = regexp.MustCompile(`^round-[0-9]+$`)
+// A test or a removed artifact can name a root that does not exist yet.
+// Resolve its existing parent before adding the missing path components.
+func resolveControlRoot(root string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(root)
+	if err == nil {
+		return resolved, nil
+	}
+	if !os.IsNotExist(err) || root == filepath.Dir(root) {
+		return "", err
+	}
+	parent, err := resolveControlRoot(filepath.Dir(root))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, filepath.Base(root)), nil
+}
+
+// IsProjectKey identifies a project folder under the global control folder.
+func IsProjectKey(name string) bool {
+	return len(name) == 16 && strings.Trim(name, "0123456789abcdefABCDEF") == ""
+}
 
 // Per-project locations relative to the project root.
 func ProjectFile(root string) string { return filepath.Join(root, ".agents", "maestro.toml") }

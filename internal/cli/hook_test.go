@@ -59,7 +59,7 @@ func TestHookCommandAntigravityLane(t *testing.T) {
 			t.Setenv("MAESTRO_HOME", t.TempDir())
 			folder := t.TempDir()
 			t.Setenv("MAESTRO_TASK_FOLDER", folder)
-			control := config.ControlDirForFolder(folder)
+			control := controlFolder(t, folder)
 			if err := os.MkdirAll(control, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -95,16 +95,14 @@ func TestHookCommandAntigravityRelay(t *testing.T) {
 			t.Setenv("MAESTRO_HOME", t.TempDir())
 			folder := t.TempDir()
 			t.Setenv("MAESTRO_TASK_FOLDER", folder)
-			control := config.ControlDirForFolder(folder)
+			control := controlFolder(t, folder)
 			if err := os.MkdirAll(control, 0o700); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(`{"access":"edit","root":"/project","tab":true}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(control, "answer-"+answer), nil, 0o600); err != nil {
-				t.Fatal(err)
-			}
+			reply := answerOpenRelay(control, answer)
 			payload := `{"toolCall":{"name":"run_command","args":{"CommandLine":"go run main.go","Cwd":"/project","Blocking":true}}}`
 			output := runHookPayload(t, payload, "agy")
 			want := `{"decision":"auto_approve"}`
@@ -114,7 +112,11 @@ func TestHookCommandAntigravityRelay(t *testing.T) {
 			if output != want {
 				t.Fatalf("answer: %s, want %s", output, want)
 			}
-			b, err := os.ReadFile(filepath.Join(control, "relay-answer.json"))
+			got := <-reply
+			if got.err != nil {
+				t.Fatal(got.err)
+			}
+			b, err := os.ReadFile(filepath.Join(control, "relay-answer-"+got.id+".json"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -155,7 +157,7 @@ func TestHookCommandLaneFallback(t *testing.T) {
 			if tc.name == "outside Lane" {
 				t.Setenv("MAESTRO_TASK_FOLDER", "")
 			}
-			control := config.ControlDirForFolder(folder)
+			control := controlFolder(t, folder)
 			if tc.lane != "" {
 				if err := os.MkdirAll(control, 0o700); err != nil {
 					t.Fatal(err)
@@ -199,11 +201,15 @@ func TestHookCommandTranscriptLane(t *testing.T) {
 				folder := filepath.Join(root, ".agents", "maestro", kind, "review", "seat")
 				transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
 				pointer := "Read the file `" + filepath.Join(folder, "brief.md") + "` in full, then follow it."
-				if err := os.WriteFile(transcript, []byte(pointer), 0o600); err != nil {
+				entry, err := json.Marshal(map[string]any{"type": "USER_INPUT", "source": "USER_EXPLICIT", "content": "<USER_REQUEST>\n" + pointer + "\n</USER_REQUEST>"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(transcript, entry, 0o600); err != nil {
 					t.Fatal(err)
 				}
 				if policy != "missing" {
-					control := config.ControlDirForFolder(folder)
+					control := controlFolder(t, folder)
 					if err := os.MkdirAll(control, 0o700); err != nil {
 						t.Fatal(err)
 					}
@@ -317,7 +323,7 @@ func TestHookCommandReminderInsideLane(t *testing.T) {
 					}
 					folder := filepath.Join(t.TempDir(), ".agents", "maestro", "runs", "r-test", "task")
 					if policy == "valid" {
-						control := config.ControlDirForFolder(folder)
+						control := controlFolder(t, folder)
 						if err := os.MkdirAll(control, 0o700); err != nil {
 							t.Fatal(err)
 						}
@@ -350,6 +356,9 @@ func TestHookCommandReminderInsideLane(t *testing.T) {
 						transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
 						pointer := "Read the file `" + filepath.Join(folder, "brief.md") + "` in full, then follow it."
 						body := []byte(pointer)
+						if harness == "agy" || harness == "agy detected" {
+							body, _ = json.Marshal(map[string]any{"type": "USER_INPUT", "source": "USER_EXPLICIT", "content": "<USER_REQUEST>\n" + pointer + "\n</USER_REQUEST>"})
+						}
 						if harness != "agy" && harness != "agy detected" {
 							message := map[string]any{"role": "user", "content": pointer}
 							entry := map[string]any{"type": "user", "message": message}
@@ -458,7 +467,7 @@ func TestHookCommandGrokLane(t *testing.T) {
 				t.Setenv("MAESTRO_TASK_FOLDER", run)
 			}
 			if tc.policy {
-				control := config.ControlDirForFolder(run)
+				control := controlFolder(t, run)
 				if err := os.MkdirAll(control, 0o700); err != nil {
 					t.Fatal(err)
 				}
@@ -537,7 +546,7 @@ func TestHookCommandClaudeAndCodexToolCallsSkipTranscript(t *testing.T) {
 					t.Fatal(err)
 				}
 				if tc.policy {
-					control := config.ControlDirForFolder(folder)
+					control := controlFolder(t, folder)
 					if err := os.MkdirAll(control, 0o700); err != nil {
 						t.Fatal(err)
 					}
@@ -558,8 +567,8 @@ func TestHookCommandClaudeAndCodexToolCallsSkipTranscript(t *testing.T) {
 					t.Fatal(err)
 				}
 				call := &hook.Call{Harness: harness, TranscriptPath: transcript}
-				if got, found := hook.FindLaneFolder(call); !found || got != folder {
-					t.Fatalf("the fixture must name a Lane: %q, %v", got, found)
+				if got, found, err := hook.FindLaneFolder(call); err != nil || !found || got != folder {
+					t.Fatalf("the fixture must name a Lane: %q, %v, %v", got, found, err)
 				}
 				payload, err := json.Marshal(map[string]any{"hook_event_name": "PreToolUse", "transcript_path": transcript, "tool_name": tc.tool, "tool_input": tc.input})
 				if err != nil {
@@ -577,25 +586,119 @@ func TestHookCommandClaudeAndCodexToolCallsSkipTranscript(t *testing.T) {
 func TestHookCommandAntigravityTranscriptLimit(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
-	for _, offset := range []int{63 * 1024, 64 * 1024} {
-		t.Run(strconv.Itoa(offset), func(t *testing.T) {
+	for _, tc := range []struct {
+		name, text, want string
+	}{
+		{"bare path before 64 KiB", strings.Repeat("x", 63*1024) + " `/project/.agents/maestro/runs/r-test/abcd/brief.md`", `{"decision":"allow"}`},
+		{"bare path after 64 KiB", strings.Repeat("x", 64*1024) + " `/project/.agents/maestro/runs/r-test/abcd/brief.md`", `{"decision":"allow"}`},
+		{"first user prompt over 100 KiB", strings.Repeat(" ", 101*1024) + brief.Pointer("/project/.agents/maestro/runs/r-test/abcd/brief.md"), `{"decision":"deny","reason":"no readable Lane policy"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
-			body := strings.Repeat("x", offset) + " `/project/.agents/maestro/runs/r-test/abcd/brief.md`"
-			if err := os.WriteFile(transcript, []byte(body), 0o600); err != nil {
+			body, err := json.Marshal(map[string]any{"type": "USER_INPUT", "source": "USER_EXPLICIT", "content": "<USER_REQUEST>\n" + tc.text + "\n</USER_REQUEST>"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(transcript, body, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			payload, err := json.Marshal(map[string]any{"transcriptPath": transcript, "toolCall": map[string]any{"name": "run_command", "args": map[string]any{"CommandLine": "pwd"}}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := `{"decision":"allow"}`
-			if offset < 64*1024 {
-				want = `{"decision":"deny","reason":"no readable Lane policy"}`
-			}
-			if got := runHookPayload(t, string(payload), "agy"); got != want {
-				t.Fatalf("output = %q, want %q", got, want)
+			if got := runHookPayload(t, string(payload), "agy"); got != tc.want {
+				t.Fatalf("output = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestHookCommandTranscriptErrorsDeny(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	for _, harness := range []string{"agy", "grok"} {
+		for _, failure := range []string{"unreadable", "cannot open", "oversized line", "reader limit", "missing"} {
+			t.Run(harness+"/"+failure, func(t *testing.T) {
+				transcript := filepath.Join(t.TempDir(), "transcript.jsonl")
+				var body string
+				reason := ""
+				switch failure {
+				case "unreadable":
+					transcript = t.TempDir()
+					reason = "cannot read Lane transcript"
+				case "cannot open":
+					if err := os.WriteFile(transcript, nil, 0o000); err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { _ = os.Chmod(transcript, 0o600) })
+					if f, err := os.Open(transcript); err == nil {
+						f.Close()
+						t.Skip("this user can open mode 000 files")
+					}
+					reason = "cannot open Lane transcript"
+				case "oversized line":
+					body = strings.Repeat("x", 4*1024*1024+1) + "\n"
+					reason = "token too long"
+				case "reader limit":
+					line := "{\"type\":\"system\",\"text\":\"" + strings.Repeat("x", 1024) + "\"}\n"
+					body = strings.Repeat(line, 16*1024*1024/len(line)+1)
+					reason = "16 MiB reader limit"
+				}
+				if body != "" {
+					if err := os.WriteFile(transcript, []byte(body), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				payload := map[string]any{"transcriptPath": transcript, "cwd": "/project"}
+				if harness == "grok" {
+					payload["hookEventName"] = "PreToolUse"
+					payload["toolName"] = "write"
+					payload["toolInput"] = map[string]any{"file_path": "/project/x"}
+				} else {
+					payload["workspacePaths"] = []string{"/project"}
+					payload["toolCall"] = map[string]any{"name": "write_to_file", "args": map[string]any{"TargetFile": "/project/x"}}
+				}
+				b, err := json.Marshal(payload)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, arg := range []string{harness, ""} {
+					out := runHookPayload(t, string(b), arg)
+					var answer struct{ Decision, Reason string }
+					if err := json.Unmarshal([]byte(out), &answer); err != nil {
+						t.Fatal(err)
+					}
+					want := "deny"
+					if failure == "missing" {
+						want = "allow"
+					}
+					if answer.Decision != want || reason != "" && (!strings.Contains(answer.Reason, reason) || !strings.Contains(answer.Reason, transcript)) {
+						t.Fatalf("%s = %s, want %s with %q", arg, out, want, reason)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestHookCommandGrokOtherEventsAreSilent(t *testing.T) {
+	t.Setenv("MAESTRO_TASK_FOLDER", t.TempDir())
+	for _, event := range []string{"UserPromptSubmit", "user_prompt_submit", "PostToolUse", "Stop", ""} {
+		for _, tool := range []string{"", "write"} {
+			payload := map[string]any{"hookEventName": event}
+			if tool != "" {
+				payload["toolName"] = tool
+			}
+			body, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, arg := range []string{"grok", ""} {
+				if got := runHookPayload(t, string(body), arg); got != "" {
+					t.Fatalf("%s %s = %q", arg, event, got)
+				}
+			}
+		}
 	}
 }
 
@@ -635,7 +738,7 @@ func TestHookCommandToolCallPrecedesReminder(t *testing.T) {
 				if insideLane {
 					folder := t.TempDir()
 					t.Setenv("MAESTRO_TASK_FOLDER", folder)
-					control := config.ControlDirForFolder(folder)
+					control := controlFolder(t, folder)
 					if err := os.MkdirAll(control, 0o700); err != nil {
 						t.Fatal(err)
 					}

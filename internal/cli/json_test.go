@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/council"
+	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/ui"
 )
@@ -22,12 +22,16 @@ func TestJSONCommandsPrintOneObject(t *testing.T) {
 	if err := os.MkdirAll(folder, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(config.ControlDirForFolder(folder), 0o700); err != nil {
+	if err := os.MkdirAll(controlFolder(t, folder), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(dispatch.RelayRequest{ID: "0123456789abcdef"})
+	if err := os.WriteFile(filepath.Join(controlFolder(t, folder), "relay.json"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	oldQuiet := ui.Quiet
 	t.Cleanup(func() { ui.Quiet = oldQuiet })
-	for _, args := range [][]string{{"version", "--json"}, {"answer", "abcd", "deny", "--json"}} {
+	for _, args := range [][]string{{"version", "--json"}, {"answer", "abcd", "deny", "--relay", "0123456789abcdef", "--json"}} {
 		t.Run(args[0], func(t *testing.T) {
 			root := (&app{version: "test"}).build()
 			root.SetArgs(args)
@@ -42,7 +46,7 @@ func TestJSONCommandsPrintOneObject(t *testing.T) {
 			}
 		})
 	}
-	if _, err := os.Stat(filepath.Join(config.ControlDirForFolder(folder), "answer-deny")); err != nil {
+	if _, err := os.Stat(filepath.Join(controlFolder(t, folder), "answer-deny")); err != nil {
 		t.Fatalf("answer marker is not in the control folder: %v", err)
 	}
 }

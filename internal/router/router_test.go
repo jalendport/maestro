@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -23,8 +24,13 @@ import (
 
 func testRouter(t *testing.T) *Router {
 	t.Helper()
+	previousOS := sandboxOS
+	sandboxOS = "darwin"
+	t.Cleanup(func() { sandboxOS = previousOS })
 	t.Setenv("MAESTRO_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
 	t.Setenv("TYPESAFE_API_KEY", "")
 	d, _, _ := config.ParseFile(roster.Defaults)
 	r := roster.Merge(d, &config.File{})
@@ -108,6 +114,99 @@ func TestRequestedLaneWarns(t *testing.T) {
 	}
 	if !r.Requested || r.OverrideWarning == "" || r.Effort != "high" || r.Model != "fable" {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestRouteEnforcementMatchesLaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name, family, access, root, want, warning string
+		projectDirs, briefDirs                    []string
+		auto                                      bool
+	}{
+		{name: "claude", family: "claude-opus", access: "edit", want: harness.Enforced},
+		{name: "claude_auto", family: "claude-opus", access: "edit", auto: true, want: harness.BestEffort, warning: "claude_auto: edit shape is best-effort"},
+		{name: "claude_auto_read", family: "claude-opus", access: "read", auto: true, want: harness.Enforced},
+		{name: "grok_inside", family: "grok", access: "edit", root: "/project", projectDirs: []string{"/project/cache"}, briefDirs: []string{"/project/vendor"}, want: harness.Enforced},
+		{name: "grok_project_outside", family: "grok", access: "edit", root: "/project", projectDirs: []string{"/cache"}, want: harness.BestEffort, warning: "grok: an extra dir outside the project turns the sandbox off; edit shape is best-effort"},
+		{name: "grok_brief_outside", family: "grok", access: "edit", root: "/project", briefDirs: []string{"/project-other"}, want: harness.BestEffort, warning: "grok: an extra dir outside the project turns the sandbox off; edit shape is best-effort"},
+		{name: "grok_tilde_outside", family: "grok", access: "edit", root: "/project", projectDirs: []string{"~/.cache"}, want: harness.BestEffort, warning: "grok: an extra dir outside the project turns the sandbox off; edit shape is best-effort"},
+		{name: "grok_tilde_inside", family: "grok", access: "edit", root: "~", briefDirs: []string{"~/cache"}, want: harness.Enforced},
+		{name: "grok_unknown_root", family: "grok", access: "edit", briefDirs: []string{"/outside"}, want: harness.Enforced},
+		{name: "grok_read", family: "grok", access: "read", root: "/project", projectDirs: []string{"/outside"}, want: harness.Enforced},
+	} {
+		for _, source := range []string{"requested", "rules", "council"} {
+			t.Run(tc.name+"/"+source, func(t *testing.T) {
+				rt := testRouter(t)
+				f := rt.Roster.Families[tc.family]
+				for _, family := range rt.Roster.Families {
+					family.Enabled = family.ID == f.ID
+				}
+				f.RequestOnly = false
+				if f.Harness == "grok" {
+					if result := adapter.Install("grok", os.Getenv("HOME"), "skill"); result.Err != nil {
+						t.Fatal(result.Err)
+					}
+				}
+				b := &brief.Brief{Fields: brief.Fields{Level: "significant", Dirs: tc.briefDirs}}
+				req := Request{Brief: b, Access: tc.access, Root: config.ExpandHome(tc.root), Project: &config.Project{ClaudeAuto: tc.auto, Dirs: tc.projectDirs}}
+				switch source {
+				case "requested":
+					req.Lane = f.ID
+				case "council":
+					req.Seat = f.ID
+				}
+				route, err := rt.Route(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if route.FamilyID != f.ID || route.Source != source || route.Enforcement != tc.want {
+					t.Fatalf("Route: %+v", route)
+				}
+				wantWarning := ""
+				if source == "requested" {
+					wantWarning = tc.warning
+				}
+				if route.OverrideWarning != wantWarning || (wantWarning != "" && !strings.Contains(route.ReasonLine, wantWarning)) {
+					t.Fatalf("warning=%q reason=%q", route.OverrideWarning, route.ReasonLine)
+				}
+			})
+		}
+	}
+}
+
+func TestClaudePreflightNeedsLinuxSandboxDependencies(t *testing.T) {
+	for _, tc := range []struct {
+		os           string
+		bwrap, socat bool
+	}{
+		{os: "linux"}, {os: "linux", bwrap: true}, {os: "linux", socat: true},
+		{os: "linux", bwrap: true, socat: true}, {os: "darwin"},
+	} {
+		t.Run(fmt.Sprintf("%s/bwrap=%t/socat=%t", tc.os, tc.bwrap, tc.socat), func(t *testing.T) {
+			rt := testRouter(t)
+			sandboxOS = tc.os
+			binDir := t.TempDir()
+			t.Setenv("PATH", binDir)
+			for name, installed := range map[string]bool{"bwrap": tc.bwrap, "socat": tc.socat} {
+				if installed {
+					if err := os.WriteFile(filepath.Join(binDir, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			want := ""
+			if tc.os == "linux" && (!tc.bwrap || !tc.socat) {
+				want = "claude sandbox needs bubblewrap and socat on PATH"
+			}
+			for _, access := range []string{"read", "edit"} {
+				if got := rt.Preflight(rt.Roster.Families["claude-opus"], access); got != want {
+					t.Fatalf("%s: %q, want %q", access, got, want)
+				}
+				if got := rt.Preflight(rt.Roster.Families["codex-sol"], access); got != "" {
+					t.Fatalf("Codex: %s", got)
+				}
+			}
+		})
 	}
 }
 
@@ -229,6 +328,53 @@ func TestHookHeldHarnessPreflightRequiresHook(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPreflightReportsDisabledHookReason(t *testing.T) {
+	for _, tc := range []struct{ harness, family string }{{"agy", "agy-flash"}, {"grok", "grok"}} {
+		t.Run(tc.harness, func(t *testing.T) {
+			rt := testRouter(t)
+			home := os.Getenv("HOME")
+			if result := adapter.Install(tc.harness, home, "skill"); result.Err != nil {
+				t.Fatal(result.Err)
+			}
+			spec, _ := adapter.Paths(tc.harness, home)
+			path := filepath.Join(os.Getenv("GROK_HOME"), "disabled-hooks")
+			content := []byte("maestro.json\n")
+			if tc.harness == "agy" {
+				path = spec.HookFile
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var root map[string]map[string]any
+				if err := json.Unmarshal(data, &root); err != nil {
+					t.Fatal(err)
+				}
+				root["maestro"]["enabled"] = false
+				content, err = json.Marshal(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(path, content, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			state := adapter.State(tc.harness, home)
+			if state.Hook != "disabled" || !strings.Contains(state.HookReason, path) {
+				t.Fatal(state)
+			}
+			for _, access := range []string{"read", "edit"} {
+				want := tc.harness + " hook is disabled: " + state.HookReason
+				if got := rt.Preflight(rt.Roster.Families[tc.family], access); got != want {
+					t.Fatalf("%s: %q, want %q", access, got, want)
+				}
+			}
+			if got := strings.Contains(state.HookReason, "maestro adapter install"); got != (tc.harness == "agy") {
+				t.Fatal(state.HookReason)
+			}
+		})
 	}
 }
 

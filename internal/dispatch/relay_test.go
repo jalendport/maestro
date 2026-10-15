@@ -3,14 +3,51 @@ package dispatch
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
 )
+
+func controlFolder(t *testing.T, folder string) string {
+	t.Helper()
+	control, err := config.ControlDirForFolder(folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return control
+}
+
+func waitRelayRequest(folder string) (RelayRequest, error) {
+	until := time.Now().Add(time.Second)
+	for time.Now().Before(until) {
+		var request RelayRequest
+		b, err := os.ReadFile(filepath.Join(folder, "relay.json"))
+		if err == nil && json.Unmarshal(b, &request) == nil && request.ID != "" {
+			return request, nil
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return RelayRequest{}, fmt.Errorf("Relay did not open")
+}
+
+func answerRelay(folder, answer string) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		request, err := waitRelayRequest(folder)
+		if err == nil {
+			err = WriteRelayAnswer(folder, answer, request.ID)
+		}
+		done <- err
+	}()
+	return done
+}
 
 func TestRelayDecisionsAndCleanup(t *testing.T) {
 	oldDeadline, oldInterval := relayDeadline, relayPollInterval
@@ -25,9 +62,10 @@ func TestRelayDecisionsAndCleanup(t *testing.T) {
 				done <- Relay(folder, strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"pwd"},"tool_use_id":"tool-1"}`), &output)
 			}()
 			if answer != "timeout" {
+				var request RelayRequest
 				until := time.Now().Add(time.Second)
 				for {
-					if _, err := os.Stat(filepath.Join(folder, "relay.json")); err == nil {
+					if b, err := os.ReadFile(filepath.Join(folder, "relay.json")); err == nil && json.Unmarshal(b, &request) == nil {
 						break
 					}
 					if time.Now().After(until) {
@@ -35,7 +73,10 @@ func TestRelayDecisionsAndCleanup(t *testing.T) {
 					}
 					time.Sleep(time.Millisecond)
 				}
-				if err := os.WriteFile(filepath.Join(folder, "answer-"+answer), nil, 0o644); err != nil {
+				if !config.IsProjectKey(request.ID) {
+					t.Fatalf("invalid Relay id: %q", request.ID)
+				}
+				if err := WriteRelayAnswer(folder, answer, request.ID); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -66,7 +107,11 @@ func TestRelayDecisionsAndCleanup(t *testing.T) {
 				}
 			}
 			var saved relayAnswer
-			b, err := os.ReadFile(filepath.Join(folder, "relay-answer.json"))
+			files, err := filepath.Glob(filepath.Join(folder, "relay-answer-*.json"))
+			if err != nil || len(files) != 1 {
+				t.Fatalf("answer files: %v, %v", files, err)
+			}
+			b, err := os.ReadFile(files[0])
 			if err != nil || json.Unmarshal(b, &saved) != nil || saved.Request.ToolUseID != "tool-1" || saved.Request.AskedAt.IsZero() {
 				t.Fatalf("saved answer: %s, %v", b, err)
 			}
@@ -82,10 +127,11 @@ func TestRelayWaitAnswersAndCleanup(t *testing.T) {
 		t.Run(answer, func(t *testing.T) {
 			folder := t.TempDir()
 			request := RelayRequest{ToolName: "run_command", ToolInput: json.RawMessage(`{"CommandLine":"go test ./...","Cwd":"/project"}`)}
-			if err := os.WriteFile(filepath.Join(folder, "answer-"+answer), nil, 0o644); err != nil {
+			reply := answerRelay(folder, answer)
+			got, err := RelayWait(folder, request)
+			if err := <-reply; err != nil {
 				t.Fatal(err)
 			}
-			got, err := RelayWait(folder, request)
 			if err != nil || got != answer {
 				t.Fatalf("answer: %q, %v; want %q", got, err, answer)
 			}
@@ -95,7 +141,11 @@ func TestRelayWaitAnswersAndCleanup(t *testing.T) {
 				}
 			}
 			var saved relayAnswer
-			b, err := os.ReadFile(filepath.Join(folder, "relay-answer.json"))
+			files, err := filepath.Glob(filepath.Join(folder, "relay-answer-*.json"))
+			if err != nil || len(files) != 1 {
+				t.Fatalf("answer files: %v, %v", files, err)
+			}
+			b, err := os.ReadFile(files[0])
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,7 +162,7 @@ func TestRelayWaitAnswersAndCleanup(t *testing.T) {
 func TestRelayTrackerRecordsRepeatedRequestsAndAnswers(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	folder := t.TempDir()
-	control := config.ControlDirForFolder(folder)
+	control := controlFolder(t, folder)
 	if err := os.MkdirAll(control, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +172,7 @@ func TestRelayTrackerRecordsRepeatedRequestsAndAnswers(t *testing.T) {
 	tracker := &relayTracker{}
 	start := time.Now().UTC()
 	for i, answer := range []string{"allow", "deny", "denied: no answer"} {
-		request := RelayRequest{ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"pwd"}`), AskedAt: start.Add(time.Duration(i) * 10 * time.Second)}
+		request := RelayRequest{ID: fmt.Sprintf("%016x", i+1), ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"pwd"}`), AskedAt: start.Add(time.Duration(i) * 10 * time.Second)}
 		if err := writeRelayJSON(control, "relay.json", request); err != nil {
 			t.Fatal(err)
 		}
@@ -131,7 +181,7 @@ func TestRelayTrackerRecordsRepeatedRequestsAndAnswers(t *testing.T) {
 		if !tracker.open() || len(rec.Events) != i*2+1 {
 			t.Fatalf("open Relay: %+v", rec.Events)
 		}
-		if err := writeRelayJSON(control, "relay-answer.json", relayAnswer{request, answer, request.AskedAt.Add(5 * time.Second)}); err != nil {
+		if err := writeRelayJSON(control, "relay-answer-"+request.ID+".json", relayAnswer{request, answer, request.AskedAt.Add(5 * time.Second)}); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Remove(filepath.Join(control, "relay.json")); err != nil {
@@ -168,7 +218,7 @@ func TestRelayTrackerHandlesMissingAndFastRequests(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	for _, fast := range []bool{false, true} {
 		folder := t.TempDir()
-		control := config.ControlDirForFolder(folder)
+		control := controlFolder(t, folder)
 		if err := os.MkdirAll(control, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -176,9 +226,9 @@ func TestRelayTrackerHandlesMissingAndFastRequests(t *testing.T) {
 		rec := &Record{Path: folder, Task: "abcd"}
 		tracker := &relayTracker{}
 		env := &Env{}
-		request := RelayRequest{ToolName: "Bash", ToolInput: json.RawMessage(`{}`), AskedAt: time.Now().UTC()}
+		request := RelayRequest{ID: "0123456789abcdef", ToolName: "Bash", ToolInput: json.RawMessage(`{}`), AskedAt: time.Now().UTC()}
 		if fast {
-			if err := writeRelayJSON(control, "relay-answer.json", relayAnswer{request, "allow", request.AskedAt.Add(time.Second)}); err != nil {
+			if err := writeRelayJSON(control, "relay-answer-"+request.ID+".json", relayAnswer{request, "allow", request.AskedAt.Add(time.Second)}); err != nil {
 				t.Fatal(err)
 			}
 		} else {
@@ -199,7 +249,7 @@ func TestRelayTrackerHandlesMissingAndFastRequests(t *testing.T) {
 
 func TestRelayWaitSerializesAnswers(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
-	folder := config.ControlDir("r-test", "abcd")
+	folder := controlFolder(t, filepath.Join(t.TempDir(), "r-test", "abcd"))
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -215,20 +265,21 @@ func TestRelayWaitSerializesAnswers(t *testing.T) {
 		answer, err := RelayWait(folder, RelayRequest{ToolName: "run_command", ToolUseID: "first"})
 		first <- result{answer, err}
 	}()
-	waitForRequest := func(id string) {
+	waitForRequest := func(id string) string {
 		t.Helper()
 		until := time.Now().Add(time.Second)
 		for time.Now().Before(until) {
 			b, err := os.ReadFile(filepath.Join(folder, "relay.json"))
 			var request RelayRequest
 			if err == nil && json.Unmarshal(b, &request) == nil && request.ToolUseID == id {
-				return
+				return request.ID
 			}
 			time.Sleep(time.Millisecond)
 		}
 		t.Fatalf("Relay %s did not open", id)
+		return ""
 	}
-	waitForRequest("first")
+	firstID := waitForRequest("first")
 	go func() {
 		answer, err := RelayWait(folder, RelayRequest{ToolName: "run_command", ToolUseID: "second"})
 		second <- result{answer, err}
@@ -238,19 +289,22 @@ func TestRelayWaitSerializesAnswers(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), `"tool_use_id":"first"`) {
 		t.Fatalf("second caller replaced first request: %s, %v", b, err)
 	}
-	if err := os.WriteFile(filepath.Join(folder, "answer-allow"), nil, 0o600); err != nil {
+	if err := WriteRelayAnswer(folder, "allow", firstID); err != nil {
 		t.Fatal(err)
 	}
 	if got := <-first; got.err != nil || got.answer != "allow" {
 		t.Fatalf("first answer: %+v", got)
 	}
-	waitForRequest("second")
+	secondID := waitForRequest("second")
+	if firstID == secondID {
+		t.Fatal("Relay ids match")
+	}
 	select {
 	case got := <-second:
 		t.Fatalf("second caller consumed first answer: %+v", got)
 	case <-time.After(20 * time.Millisecond):
 	}
-	if err := os.WriteFile(filepath.Join(folder, "answer-deny"), nil, 0o600); err != nil {
+	if err := WriteRelayAnswer(folder, "deny", secondID); err != nil {
 		t.Fatal(err)
 	}
 	if got := <-second; got.err != nil || got.answer != "deny" {
@@ -265,10 +319,11 @@ func TestRelayWaitSerializesAnswers(t *testing.T) {
 
 func TestRelayWaitLockDeadlineDoesNotConsumeAnswer(t *testing.T) {
 	folder := t.TempDir()
-	for _, name := range []string{"relay.lock", "answer-allow"} {
-		if err := os.WriteFile(filepath.Join(folder, name), nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
+	if err := writeRelayJSON(folder, "relay.lock", relayLock{PID: os.Getpid(), At: time.Now().Add(-time.Hour), ID: "owner"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "answer-allow"), []byte("owner"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	oldDeadline, oldInterval := relayDeadline, relayPollInterval
 	relayDeadline, relayPollInterval = 20*time.Millisecond, time.Millisecond
@@ -280,5 +335,141 @@ func TestRelayWaitLockDeadlineDoesNotConsumeAnswer(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(folder, name)); err != nil {
 			t.Fatalf("waiting caller removed %s: %v", name, err)
 		}
+	}
+}
+
+func TestRelayWaitRecoversDeadOwner(t *testing.T) {
+	command := exec.Command("true")
+	if err := command.Run(); err != nil {
+		t.Fatal(err)
+	}
+	pid := command.Process.Pid
+	if syscall.Kill(pid, 0) != syscall.ESRCH {
+		t.Fatal("test process is still alive")
+	}
+	folder := t.TempDir()
+	if err := writeRelayJSON(folder, "relay.lock", relayLock{PID: pid, At: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	reply := answerRelay(folder, "allow")
+	oldDeadline, oldInterval := relayDeadline, relayPollInterval
+	relayDeadline, relayPollInterval = 100*time.Millisecond, time.Millisecond
+	t.Cleanup(func() { relayDeadline, relayPollInterval = oldDeadline, oldInterval })
+	start := time.Now()
+	if answer, err := RelayWait(folder, RelayRequest{}); err != nil || answer != "allow" {
+		t.Fatalf("recovered Relay = %q, %v", answer, err)
+	}
+	if err := <-reply; err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) >= relayDeadline {
+		t.Fatal("dead owner delayed the Relay until its deadline")
+	}
+	if _, err := os.Stat(filepath.Join(folder, "relay.lock")); !os.IsNotExist(err) {
+		t.Fatalf("recovered lock remains: %v", err)
+	}
+}
+
+func TestRelayWaitKeepsSuccessorFiles(t *testing.T) {
+	folder := t.TempDir()
+	done := make(chan error, 1)
+	go func() {
+		_, err := RelayWait(folder, RelayRequest{})
+		done <- err
+	}()
+	opened, err := waitRelayRequest(folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor := relayLock{PID: os.Getpid(), At: time.Now().UTC(), ID: "fedcba9876543210"}
+	if err := writeRelayJSON(folder, "relay.lock", successor); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRelayJSON(folder, "relay.json", RelayRequest{ID: successor.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "answer-deny"), []byte(opened.ID), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if owner, ok := readRelayLock(filepath.Join(folder, "relay.lock")); !ok || owner != successor {
+		t.Fatalf("successor lock removed: %+v, %v", owner, ok)
+	}
+	b, err := os.ReadFile(filepath.Join(folder, "relay.json"))
+	var request RelayRequest
+	if err != nil || json.Unmarshal(b, &request) != nil || request.ID != successor.ID {
+		t.Fatalf("successor request removed: %s, %v", b, err)
+	}
+}
+
+func TestReadAnswerRemovesStaleMarkers(t *testing.T) {
+	for _, stale := range []string{"", "1111111111111111"} {
+		folder := t.TempDir()
+		if err := os.WriteFile(filepath.Join(folder, "answer-allow"), []byte(stale), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(folder, "answer-deny"), []byte("2222222222222222"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := readAnswer(folder, "2222222222222222"); got != "deny" {
+			t.Fatalf("stale allow was consumed: %q", got)
+		}
+		for _, name := range []string{"answer-allow", "answer-deny"} {
+			if _, err := os.Stat(filepath.Join(folder, name)); !os.IsNotExist(err) {
+				t.Fatalf("%s remains: %v", name, err)
+			}
+		}
+	}
+}
+
+func TestRelayTrackerConsumesAllAnswersBetweenPolls(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	folder := t.TempDir()
+	control := controlFolder(t, folder)
+	if err := os.MkdirAll(control, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	task, rec := &Task{Task: "abcd", Folder: folder}, &Record{Path: folder, Task: "abcd"}
+	tracker := &relayTracker{}
+	env := &Env{}
+	start := time.Now().UTC()
+	requests := []RelayRequest{
+		{ID: "2222222222222222", ToolName: "first", AskedAt: start},
+		{ID: "1111111111111111", ToolName: "second", AskedAt: start.Add(2 * time.Second)},
+	}
+	// The first request is already open when both answers arrive.
+	if err := writeRelayJSON(control, "relay.json", requests[0]); err != nil {
+		t.Fatal(err)
+	}
+	tracker.poll(env, task, rec, "agy", start)
+	for i, answer := range []string{"allow", "deny"} {
+		request := requests[i]
+		if err := writeRelayJSON(control, "relay-answer-"+request.ID+".json", relayAnswer{request, answer, request.AskedAt.Add(time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The second owner has not yet removed its request file.
+	if err := writeRelayJSON(control, "relay.json", requests[1]); err != nil {
+		t.Fatal(err)
+	}
+	tracker.poll(env, task, rec, "agy", start.Add(4*time.Second))
+	tracker.poll(env, task, rec, "agy", start.Add(5*time.Second))
+	if tracker.open() || len(rec.Permission.Relays) != 2 || len(rec.Events) != 4 || tracker.total != 2*time.Second {
+		t.Fatalf("Relay state: %+v, %+v", tracker, rec)
+	}
+	for i, want := range []string{"allow", "deny"} {
+		var entry struct{ ID, Tool, Answer string }
+		if err := json.Unmarshal(rec.Permission.Relays[i], &entry); err != nil {
+			t.Fatal(err)
+		}
+		if entry.ID != requests[i].ID || entry.Tool != requests[i].ToolName || entry.Answer != want {
+			t.Fatalf("Relay %d has wrong answer: %+v", i, entry)
+		}
+	}
+	paths, err := filepath.Glob(filepath.Join(control, "relay-answer-*.json"))
+	if err != nil || len(paths) != 0 {
+		t.Fatalf("unread answers: %v, %v", paths, err)
 	}
 }

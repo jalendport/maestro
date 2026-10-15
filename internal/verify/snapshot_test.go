@@ -30,6 +30,41 @@ func TestSnapshotChanged(t *testing.T) {
 	}
 }
 
+func TestSnapshotDoesNotRunConfiguredFSMonitor(t *testing.T) {
+	root := snapshotRepo(t)
+	marker := filepath.Join(t.TempDir(), "marker")
+	t.Setenv("TEST_GIT_MARKER", marker)
+	script := filepath.Join(t.TempDir(), "fsmonitor")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'called\\n' > \"$TEST_GIT_MARKER\"\nprintf 'token\\000'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", root, "config", "core.fsmonitor", script).CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", root, "status", "--porcelain").CombinedOutput(); err != nil {
+		t.Fatalf("control status: %v %s", err, out)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatalf("configured fsmonitor did not run in the control: %v", err)
+	}
+	s, err := Take(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("configured fsmonitor ran during Take: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "made.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Changed(root); !reflect.DeepEqual(got, []string{"made.txt"}) {
+		t.Fatalf("Changed = %v", got)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("configured fsmonitor ran during Changed: %v", err)
+	}
+}
+
 func TestSnapshotChangedIgnoresUntouchedUntrackedFile(t *testing.T) {
 	root := snapshotRepo(t)
 	path := "existing.txt"

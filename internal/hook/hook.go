@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/jalendport/maestro/internal/config"
+	"gopkg.in/yaml.v3"
 )
 
 // Decision is the harness-neutral result.
@@ -38,7 +39,7 @@ type Call struct {
 }
 
 // readOnlyAgents are the built-in Claude agent types that only read. A custom
-// agent counts as read-only when its definition file keeps writeTools out.
+// agent counts as read-only when its tools are all on the read-only list.
 var readOnlyAgents = []string{"Explore", "Plan", "claude-code-guide"}
 
 var writeTools = []string{"Edit", "Write", "NotebookEdit"}
@@ -73,6 +74,9 @@ func Parse(harness string, payload []byte) (*Call, error) {
 			c.Input = in
 		}
 	case "grok":
+		if event, ok := raw["hookEventName"]; ok && event != "PreToolUse" && event != "pre_tool_use" {
+			c.Event = "ignore"
+		}
 		c.Tool, _ = raw["toolName"].(string)
 		c.TranscriptPath, _ = raw["transcriptPath"].(string)
 		if in, ok := raw["toolInput"].(map[string]any); ok {
@@ -196,25 +200,26 @@ func Render(harness string, d interface{ verdict() Verdict }) []byte {
 	return bytes.TrimSpace(buf.Bytes())
 }
 
-// readOnlyAgent reports whether a sub-agent type only reads: a built-in
-// read-only type, or a custom agent whose definition file either lists its
-// tools without any of writeTools or disallows every one of them.
+// Custom agents need an explicit read-only list because omitted tools can
+// inherit Bash or MCP tools.
 func readOnlyAgent(sub, cwd string) bool {
 	for _, agent := range readOnlyAgents {
 		if strings.EqualFold(sub, agent) {
 			return true
 		}
 	}
-	tools, disallowed, ok := agentTools(sub, cwd)
-	switch {
-	case !ok:
+	tools, _, ok := agentTools(sub, cwd)
+	if !ok || tools == nil {
 		return false
-	case tools != nil:
-		return !hasAny(tools, writeTools)
-	case disallowed != nil:
-		return hasAll(disallowed, writeTools)
 	}
-	return false
+	for _, tool := range tools {
+		switch tool {
+		case "Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch", "TodoWrite":
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // agentTools reads the `tools` and `disallowedTools` front matter of the
@@ -239,22 +244,24 @@ func agentTools(name, cwd string) (tools, disallowed []string, ok bool) {
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		return nil, nil, false
 	}
-	for _, line := range lines[1:] {
+	end := 0
+	for i, line := range lines[1:] {
 		if strings.TrimSpace(line) == "---" {
+			end = i + 1
 			break
 		}
-		key, value, found := strings.Cut(line, ":")
-		if !found {
-			continue
-		}
-		switch strings.TrimSpace(key) {
-		case "tools":
-			tools = toolList(value)
-		case "disallowedTools":
-			disallowed = toolList(value)
-		}
 	}
-	return tools, disallowed, true
+	if end == 0 {
+		return nil, nil, false
+	}
+	var front struct {
+		Tools      yaml.Node `yaml:"tools"`
+		Disallowed yaml.Node `yaml:"disallowedTools"`
+	}
+	if yaml.Unmarshal([]byte(strings.Join(lines[1:end], "\n")), &front) != nil {
+		return nil, nil, false
+	}
+	return toolList(front.Tools), toolList(front.Disallowed), true
 }
 
 func agentDirs(cwd string) []string {
@@ -278,11 +285,22 @@ func agentDirs(cwd string) []string {
 	return dirs
 }
 
-// toolList splits a front matter value: comma-separated, with or without brackets.
-func toolList(value string) []string {
-	value = strings.Trim(strings.TrimSpace(value), "[]")
+func toolList(value yaml.Node) []string {
+	if value.Kind == yaml.SequenceNode {
+		out := []string{}
+		for _, item := range value.Content {
+			if item.Kind != yaml.ScalarNode || item.Tag != "!!str" {
+				return nil
+			}
+			out = append(out, item.Value)
+		}
+		return out
+	}
+	if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+		return nil
+	}
 	out := []string{}
-	for _, item := range strings.Split(value, ",") {
+	for _, item := range strings.Split(value.Value, ",") {
 		if item = strings.Trim(strings.TrimSpace(item), `"'`); item != "" {
 			out = append(out, item)
 		}

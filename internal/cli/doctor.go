@@ -97,7 +97,11 @@ func (a *app) doctorCmd() *cobra.Command {
 			}
 			for _, name := range adapter.Harnesses {
 				state := adapter.State(name, home)
-				rows = append(rows, doctorRow{Name: "adapter " + name, Detail: fmt.Sprintf("skill %s, link %s, hook %s, reminder %s", state.Skill, state.Link, state.Hook, state.Reminder), State: state.Overall})
+				detail := fmt.Sprintf("skill %s, link %s, hook %s, reminder %s", state.Skill, state.Link, state.Hook, state.Reminder)
+				if state.HookReason != "" {
+					detail += "; " + state.HookReason
+				}
+				rows = append(rows, doctorRow{Name: "adapter " + name, Detail: detail, State: state.Overall})
 				if env.Disc.Harness[name].Path != "" && (state.Overall == "partial" || state.Overall == "wrong") {
 					problems++
 				}

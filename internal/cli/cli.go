@@ -186,7 +186,7 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, "  "+ui.Name.Render("add <brief.md>")+"           Add a Task to the live Run")
 	ui.Fprintln(out, "  "+ui.Name.Render("cancel <task|run>")+"        Cancel a Task or a Run (running Dispatches are stopped)")
 	ui.Fprintln(out, "  "+ui.Name.Render("tell <task> <text>")+"       Send a note into a running Lane (Solo tab only)")
-	ui.Fprintln(out, "  "+ui.Name.Render("answer <task> allow|deny")+" Answer a relayed permission prompt")
+	ui.Fprintln(out, "  "+ui.Name.Render("answer <task> allow|deny --relay <id>")+" Answer a relayed permission prompt")
 	ui.Fprintln(out, "  "+ui.Name.Render("approve <run>")+"            Approve a breakdown that was held for approval")
 	ui.Fprintln(out, "  "+ui.Name.Render("resume <run> --task <n>")+"  (--lane F[:E] | --brief <file> | --skip)  Continue a paused Run")
 	ui.Fprintln(out, "  "+ui.Name.Render("clean [--older-than 30d]")+" Remove old Run and Council folders (never the ledger)")

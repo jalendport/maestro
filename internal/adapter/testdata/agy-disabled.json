@@ -1,0 +1,15 @@
+{
+  "other": {"enabled": false},
+  "maestro": {
+    "enabled": false,
+    "metadata": {"enabled": false},
+    "PreToolUse": [
+      {
+        "enabled": false,
+        "matcher": "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents",
+        "hooks": [{"type": "command", "command": "maestro hook", "timeout": 660}]
+      }
+    ],
+    "PreInvocation": [{"enabled": false, "type": "command", "command": "maestro hook agy", "timeout": 30}]
+  }
+}

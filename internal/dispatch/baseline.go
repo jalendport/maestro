@@ -85,7 +85,7 @@ func (s attemptBaseline) diff(root string, changed []string) (string, error) {
 				return "", err
 			}
 		}
-		cmd := exec.Command("git", "diff", "--no-index", "--no-prefix", "--", paths[0], paths[1])
+		cmd := exec.Command("git", "-c", "core.fsmonitor=false", "-c", "diff.external=", "diff", "--no-ext-diff", "--no-textconv", "--no-index", "--no-prefix", "--", paths[0], paths[1])
 		cmd.Dir = folder
 		b, err := cmd.Output()
 		if err != nil && (cmd.ProcessState == nil || cmd.ProcessState.ExitCode() != 1) {
@@ -127,8 +127,11 @@ func (s *attemptBaseline) inherit(folder string, attempt int) error {
 			} else {
 				delete(s.Contents, p)
 			}
-			// Not dirty at the Task's start: Changed reports it from the status alone.
-			delete(s.Dirty, p)
+			if at, ok := earlier.Dirty[p]; ok {
+				s.Dirty[p] = at
+			} else {
+				delete(s.Dirty, p)
+			}
 		}
 		if earlier.Commit != "" {
 			s.Commit = earlier.Commit

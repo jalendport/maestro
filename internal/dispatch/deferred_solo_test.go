@@ -123,9 +123,9 @@ func TestWakeUsesOnlyFixedFields(t *testing.T) {
 	task := &Task{Task: "abcd", Title: "Brief title", Folder: folder}
 	rec := &Record{Path: folder}
 	tracker := &relayTracker{}
-	tracker.start(&Env{Solo: link}, task, rec, "claude", RelayRequest{AskedAt: time.Now(), ToolName: "LANE_TOOL", ToolInput: json.RawMessage(`{"command":"LANE_TEXT"}`)})
-	link.Wake("run end", "r-test", "Run title", "")
-	link.Wake("council end", "c-test", "Council title", "codex")
+	tracker.start(&Env{Solo: link}, task, rec, "claude", RelayRequest{ID: "0123456789abcdef", AskedAt: time.Now(), ToolName: "LANE_TOOL", ToolInput: json.RawMessage(`{"command":"LANE_TEXT"}`)})
+	link.Wake("run end", "r-test", "Run title", "", "")
+	link.Wake("council end", "c-test", "Council title", "codex", "")
 	calls, err := os.ReadFile(callsPath)
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +146,7 @@ func TestWakeUsesOnlyFixedFields(t *testing.T) {
 		}
 	}
 	want := []string{
-		`Maestro relay: id="abcd" title="Brief title" harness="claude". Run: maestro answer abcd allow|deny`,
+		`Maestro relay: id="abcd" title="Brief title" harness="claude" relay="0123456789abcdef". Run: maestro answer abcd allow|deny --relay 0123456789abcdef`,
 		`Maestro run end: id="r-test" title="Run title" harness="". Run: maestro wait r-test`,
 	}
 	if len(bodies) != len(want) {

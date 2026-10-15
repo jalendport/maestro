@@ -13,6 +13,7 @@ import (
 
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/roster"
+	"github.com/jalendport/maestro/internal/verify"
 )
 
 func TestGateRedactsBriefAndDiff(t *testing.T) {
@@ -72,4 +73,67 @@ func TestGateWithoutKeyIsSkipped(t *testing.T) {
 	if gate.Skipped == "" || gate.Satisfies != 0 || gate.Verdict != "" {
 		t.Fatalf("missing key must skip verification: %+v", gate)
 	}
+}
+
+func TestCollectDiffDoesNotRunConfiguredHelpers(t *testing.T) {
+	for _, helper := range []string{"diff.external", "diff.test.textconv", "core.fsmonitor"} {
+		t.Run(helper, func(t *testing.T) {
+			root := diffRepo(t)
+			marker := filepath.Join(t.TempDir(), "marker")
+			t.Setenv("TEST_GIT_MARKER", marker)
+			script := filepath.Join(t.TempDir(), "helper")
+			if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'called\\n' > \"$TEST_GIT_MARKER\"\nprintf 'helper output\\n'\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			git := func(args ...string) {
+				t.Helper()
+				if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+					t.Fatalf("git %v: %v %s", args, err, out)
+				}
+			}
+			git("config", helper, script)
+			if helper == "diff.test.textconv" {
+				if err := os.WriteFile(filepath.Join(root, ".gitattributes"), []byte("tracked.txt diff=test\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("after\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			start := verify.Head(root)
+			if helper == "core.fsmonitor" {
+				git("status", "--porcelain")
+			} else {
+				git("diff", "--ext-diff", "HEAD")
+			}
+			if err := os.Remove(marker); err != nil {
+				t.Fatalf("configured helper did not run in the control: %v", err)
+			}
+			diff := collectDiff(root, start, []string{"tracked.txt"})
+			if !strings.Contains(diff, "-before") || !strings.Contains(diff, "+after") {
+				t.Fatalf("diff = %s", diff)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("configured helper ran during collectDiff: %v", err)
+			}
+		})
+	}
+}
+
+func diffRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "tracked.txt")
+	git("-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-qm", "Start")
+	return root
 }

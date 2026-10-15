@@ -70,7 +70,7 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 		if ts.BlockedBy == nil {
 			ts.BlockedBy = []string{}
 		}
-		req := router.Request{Brief: b, Access: ts.Access, Lane: firstNonEmpty(b.Lane, o.Lane), Level: o.Level, Project: env.Project, InSolo: solo.InSolo()}
+		req := router.Request{Brief: b, Access: ts.Access, Root: env.Root, Lane: firstNonEmpty(b.Lane, o.Lane), Level: o.Level, Project: env.Project, InSolo: solo.InSolo()}
 		req.Floor, req.Ceiling = routeBounds(s, b)
 		route, err := rt.Route(req)
 		switch e := err.(type) {
@@ -798,7 +798,7 @@ func (sup *Supervisor) end(state string) error {
 		if review != nil {
 			title += "; council " + review.Slug
 		}
-		sup.Env.Solo.Wake("run end", s.Run, title, "")
+		sup.Env.Solo.Wake("run end", s.Run, title, "", "")
 	}
 	if err := s.Save(); err != nil {
 		return err

@@ -10,7 +10,14 @@ import (
 
 const Reminder = "Maestro: you are the Orchestrator. You plan, judge, and read every diff; Lanes write the code. When the user approves a plan, write the Plan file and run `maestro run`. One bounded task is a Brief file and `maestro dispatch`. A review, or one question for several minds, is `maestro council`. The maestro skill holds the rules; `maestro help brief` and `maestro help plan` print the formats. If your prompt points you at a Maestro Brief file, you are a Lane, not the Orchestrator: ignore this and follow the Brief."
 
-func ReminderFile(home string) string { return filepath.Join(home, ".grok", "rules", "maestro.md") }
+func grokHome(home string) string {
+	if dir := os.Getenv("GROK_HOME"); dir != "" {
+		return dir
+	}
+	return filepath.Join(home, ".grok")
+}
+
+func ReminderFile(home string) string { return filepath.Join(grokHome(home), "rules", "maestro.md") }
 
 func ReminderRule() string {
 	path := config.UserFile()

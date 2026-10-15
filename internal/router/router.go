@@ -6,6 +6,9 @@ package router
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -26,6 +29,7 @@ import (
 type Request struct {
 	Brief    *brief.Brief
 	Access   string
+	Root     string
 	Lane     string // --lane family[:effort]
 	Floor    roster.Tier
 	Ceiling  roster.Tier
@@ -141,7 +145,12 @@ func (rt *Router) Weight(f *roster.Family) float64 {
 
 // Route applies the hard rules, then asks Jev to pick a Family.
 // The rules table uses the same candidates when Jev is absent.
-func (rt *Router) Route(req Request) (*Route, error) {
+func (rt *Router) Route(req Request) (route *Route, err error) {
+	defer func() {
+		if route != nil && err == nil {
+			route.Enforcement, _ = rt.enforcement(req, route.Family)
+		}
+	}()
 	if req.Lane == "" && req.Seat == "" {
 		req.Lane = req.Brief.Lane
 	}
@@ -356,6 +365,8 @@ func (rt *Router) candidates(req Request, level roster.Level) ([]*roster.Family,
 	return out, excluded
 }
 
+var sandboxOS = runtime.GOOS
+
 // Preflight is hard rule 4: installed, version gate, model in the catalog,
 // and a launch shape for this Access. Empty means the family passes.
 func (rt *Router) Preflight(f *roster.Family, access string) string {
@@ -373,11 +384,22 @@ func (rt *Router) Preflight(f *roster.Family, access string) string {
 	if !ok || rec.Path == "" {
 		return f.Harness + " is not installed"
 	}
+	if f.Harness == "claude" && sandboxOS == "linux" {
+		for _, bin := range []string{"bwrap", "socat"} {
+			if _, err := exec.LookPath(bin); err != nil {
+				return "claude sandbox needs bubblewrap and socat on PATH"
+			}
+		}
+	}
 	// Antigravity and Grok Lanes are held by the Maestro hook, so a Lane
 	// without the installed hook has no enforcement at all.
 	if f.Harness == "agy" || f.Harness == "grok" {
 		home, err := os.UserHomeDir()
-		if err != nil || adapter.State(f.Harness, home).Hook != "ok" {
+		state := adapter.State(f.Harness, home)
+		if err == nil && state.Hook == "disabled" {
+			return fmt.Sprintf("%s hook is disabled: %s", f.Harness, state.HookReason)
+		}
+		if err != nil || state.Hook != "ok" {
 			return fmt.Sprintf("%s needs its Maestro hook: run maestro adapter install %s", f.Harness, f.Harness)
 		}
 	}
@@ -472,6 +494,9 @@ func (rt *Router) requested(req Request, level, estimate roster.Level, category 
 		return nil, fmt.Errorf("family %s is blocked by budget: %s", id, v.Reason)
 	}
 	var warnings []string
+	if _, warning := rt.enforcement(req, f); warning != "" {
+		warnings = append(warnings, warning)
+	}
 	if f.RequestOnly {
 		warnings = append(warnings, "request-only family")
 	}
@@ -512,6 +537,36 @@ func (rt *Router) requested(req Request, level, estimate roster.Level, category 
 	r.OverrideWarning = strings.Join(warnings, "; ")
 	r.ReasonLine = reason(r, "requested")
 	return r, nil
+}
+
+func (rt *Router) enforcement(req Request, f *roster.Family) (string, string) {
+	h, _ := rt.Reg.Get(f.Harness)
+	value := h.Enforcement(req.Access)
+	if req.Access != brief.AccessEdit {
+		return value, ""
+	}
+	if f.Harness == "claude" && req.Project != nil && req.Project.ClaudeAuto {
+		return harness.BestEffort, "claude_auto: edit shape is best-effort"
+	}
+	if f.Harness == "grok" && req.Root != "" {
+		var dirs []string
+		if req.Project != nil {
+			dirs = append(dirs, req.Project.Dirs...)
+		}
+		dirs = append(dirs, req.Brief.Dirs...)
+		root, rootErr := filepath.Abs(req.Root)
+		for _, dir := range dirs {
+			if dir == "" {
+				continue
+			}
+			path, pathErr := filepath.Abs(config.ExpandHome(dir))
+			rel, err := filepath.Rel(root, path)
+			if rootErr != nil || pathErr != nil || err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+				return harness.BestEffort, "grok: an extra dir outside the project turns the sandbox off; edit shape is best-effort"
+			}
+		}
+	}
+	return value, ""
 }
 
 func (rt *Router) finish(f *roster.Family, level, estimate roster.Level, category, access, source string, defaults []string, excluded []Exclusion) *Route {

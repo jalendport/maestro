@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,12 +11,11 @@ import (
 func TestControlDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("MAESTRO_HOME", home)
-	if got, want := ControlDir("r-test", "abcd"), filepath.Join(home, "control", "r-test", "abcd"); got != want {
-		t.Fatalf("ControlDir = %q, want %q", got, want)
-	}
 	for _, folder := range []string{"/project/.agents/maestro/runs/r-test/abcd", "/project/.agents/maestro/councils/r-test/abcd/"} {
-		if got, want := ControlDirForFolder(folder), ControlDir("r-test", "abcd"); got != want {
-			t.Fatalf("control folder = %q, want %q", got, want)
+		key := fmt.Sprintf("%x", sha256.Sum256([]byte("/project")))[:16]
+		want := filepath.Join(home, "control", key, "r-test", "abcd")
+		if got, err := ControlDirForFolder(folder); err != nil || got != want {
+			t.Fatalf("control folder = %q, %v; want %q", got, err, want)
 		}
 	}
 }
@@ -125,10 +126,53 @@ func TestEnsureIgnoredDir(t *testing.T) {
 
 func TestControlDirForFolderRounds(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", "/m")
-	if got := ControlDirForFolder("/p/.agents/maestro/councils/slug/round-2/grok"); got != "/m/control/slug/round-2/grok" {
-		t.Fatalf("round folder mapped to %s", got)
+	key := fmt.Sprintf("%x", sha256.Sum256([]byte("/p")))[:16]
+	if got, err := ControlDirForFolder("/p/.agents/maestro/councils/slug/round-2/grok"); err != nil || got != "/m/control/"+key+"/slug/round-2/grok" {
+		t.Fatalf("round folder mapped to %s, %v", got, err)
 	}
-	if got := ControlDirForFolder("/p/.agents/maestro/runs/r-0001/abcd"); got != "/m/control/r-0001/abcd" {
-		t.Fatalf("task folder mapped to %s", got)
+	if got, err := ControlDirForFolder("/p/.agents/maestro/runs/r-0001/abcd"); err != nil || got != "/m/control/"+key+"/r-0001/abcd" {
+		t.Fatalf("task folder mapped to %s, %v", got, err)
+	}
+}
+
+func TestControlDirProjectKeys(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	p, err := ControlDirForFolder("/p/.agents/maestro/runs/r-0001/t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := ControlDirForFolder("/q/.agents/maestro/runs/r-0001/t1")
+	if err != nil || p == q {
+		t.Fatalf("project folders collide: %s, %s, %v", p, q, err)
+	}
+	if _, err := ControlDirForFolder(".agents/maestro/runs/r-0001/t1"); err == nil {
+		t.Fatal("relative folder accepted")
+	}
+	root := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{".agents/maestro/runs/r-0001/t1", "bare"} {
+		actual, err := ControlDirForFolder(filepath.Join(root, suffix))
+		if err != nil {
+			t.Fatal(err)
+		}
+		linked, err := ControlDirForFolder(filepath.Join(alias, suffix))
+		if err != nil || actual != linked {
+			t.Fatalf("symlink changed the key: %s, %s, %v", actual, linked, err)
+		}
+		key := fmt.Sprintf("%x", sha256.Sum256([]byte(resolved)))[:16]
+		artifact := "r-0001/t1"
+		if suffix == "bare" {
+			artifact = "bare"
+		}
+		if actual != filepath.Join(Home(), "control", key, artifact) {
+			t.Fatalf("unexpected artifact path: %s", actual)
+		}
 	}
 }

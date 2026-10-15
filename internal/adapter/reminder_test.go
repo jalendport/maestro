@@ -21,7 +21,7 @@ func TestReminderText(t *testing.T) {
 func TestReminderHookInstallAndState(t *testing.T) {
 	for _, tc := range []struct{ harness, key, event, want string }{
 		{"claude", "hooks", "UserPromptSubmit", `[{"hooks":[{"type":"command","command":"maestro hook","timeout":10}]}]`},
-		{"codex", "hooks", "UserPromptSubmit", `[{"hooks":[{"type":"command","command":"maestro hook","timeout":10}]}]`},
+		{"codex", "hooks", "UserPromptSubmit", `[{"hooks":[{"type":"command","command":"maestro hook codex","timeout":10}]}]`},
 		{"agy", "maestro", "PreInvocation", `[{"type":"command","command":"maestro hook agy","timeout":30}]`},
 	} {
 		t.Run(tc.harness, func(t *testing.T) {
@@ -246,8 +246,12 @@ func TestReminderKeepsForeignHandlersInSharedEntry(t *testing.T) {
 			oldEntry := before.get("hooks").get("UserPromptSubmit").array[0]
 			newEntry := after.get("hooks").get("UserPromptSubmit").array[0]
 			oldHandlers, newHandlers := oldEntry.get("hooks").array, newEntry.get("hooks").array
-			if len(newHandlers) != 3 || !bytes.Equal(mustJSON(t, oldHandlers[0]), mustJSON(t, newHandlers[0])) || !bytes.Equal(mustJSON(t, oldHandlers[2]), mustJSON(t, newHandlers[2])) || !bytes.Equal(mustJSON(t, oldEntry.get("extra")), mustJSON(t, newEntry.get("extra"))) {
+			if len(newHandlers) != 2 || !bytes.Equal(mustJSON(t, oldHandlers[0]), mustJSON(t, newHandlers[0])) || !bytes.Equal(mustJSON(t, oldHandlers[2]), mustJSON(t, newHandlers[1])) || !bytes.Equal(mustJSON(t, oldEntry.get("extra")), mustJSON(t, newEntry.get("extra"))) {
 				t.Fatalf("foreign handlers changed: %s", read(t, spec.HookFile))
+			}
+			entries := after.get("hooks").get("UserPromptSubmit").array
+			if len(entries) != 2 || !equal(entries[1], entry(spec, spec.Events[1])) {
+				t.Fatal("dedicated Reminder entry missing")
 			}
 			if got := State(name, home); got.Reminder != "ok" {
 				t.Fatal(got)

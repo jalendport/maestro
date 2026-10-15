@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -513,25 +512,37 @@ func (a *app) cleanCmd() *cobra.Command {
 					if err != nil || !st.IsDir() || live[p] || dispatch.HasRunningRecord(p) || time.Since(st.ModTime()) < d {
 						continue
 					}
-					controls := []string{config.ControlDir(e.Name(), "")}
-					if err := filepath.WalkDir(p, func(path string, entry fs.DirEntry, err error) error {
-						if err != nil {
-							return err
-						}
-						if !entry.IsDir() && entry.Name() == dispatch.FileTask {
-							controls = append(controls, config.ControlDirForFolder(filepath.Dir(path)))
-						}
-						return nil
-					}); err != nil {
+					control, err := config.ControlDirForFolder(p)
+					if err != nil {
 						return err
 					}
 					if err := os.RemoveAll(p); err == nil {
-						for _, control := range controls {
-							if err := os.RemoveAll(control); err != nil {
-								return err
-							}
+						if err := os.RemoveAll(control); err != nil {
+							return err
 						}
+						// Remove the project key only when it has no artifacts.
+						_ = os.Remove(filepath.Dir(control))
 						removed++
+					}
+				}
+			}
+			controlRoot := filepath.Join(config.Home(), "control")
+			entries, err := os.ReadDir(controlRoot)
+			if err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			for _, entry := range entries {
+				if config.IsProjectKey(entry.Name()) {
+					continue
+				}
+				path := filepath.Join(controlRoot, entry.Name())
+				st, err := entry.Info()
+				if err != nil {
+					return err
+				}
+				if time.Since(st.ModTime()) >= d {
+					if err := os.RemoveAll(path); err != nil {
+						return err
 					}
 				}
 			}
@@ -607,8 +618,9 @@ func (a *app) waitRun(folder string) error {
 }
 
 func (a *app) answerCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "answer <task> allow|deny",
+	var relayID string
+	c := &cobra.Command{
+		Use:   "answer <task> allow|deny --relay <id>",
 		Short: "Answer a relayed permission prompt",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -624,13 +636,36 @@ func (a *app) answerCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("no task %q under %s", args[0], root)
 			}
-			control := config.ControlDirForFolder(folder)
-			if err := os.WriteFile(filepath.Join(control, "answer-"+args[1]), nil, 0o600); err != nil {
+			control, err := config.ControlDirForFolder(folder)
+			if err != nil {
+				return err
+			}
+			var request dispatch.RelayRequest
+			b, err := os.ReadFile(filepath.Join(control, "relay.json"))
+			if os.IsNotExist(err) {
+				return fmt.Errorf("no open relay for task %s", args[0])
+			}
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal(b, &request); err != nil {
+				return err
+			}
+			if request.ID == "" {
+				return fmt.Errorf("no open relay for task %s", args[0])
+			}
+			if relayID != request.ID {
+				return fmt.Errorf("relay %s is no longer open; the open relay is %s", relayID, request.ID)
+			}
+			if err := dispatch.WriteRelayAnswer(control, args[1], relayID); err != nil {
 				return err
 			}
 			return a.result(map[string]any{"task": args[0], "answer": args[1]}, "task %s: %s", args[0], args[1])
 		},
 	}
+	c.Flags().StringVar(&relayID, "relay", "", "id of the open Relay")
+	_ = c.MarkFlagRequired("relay")
+	return c
 }
 
 func (a *app) tellCmd() *cobra.Command {

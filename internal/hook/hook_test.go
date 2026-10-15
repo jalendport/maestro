@@ -126,7 +126,13 @@ func TestCustomReadOnlyAgents(t *testing.T) {
 	projectAgents := filepath.Join(project, ".claude", "agents")
 	write(userAgents, "scout", "disallowedTools: Edit, Write, NotebookEdit, Agent\nmodel: haiku\n")
 	write(userAgents, "grunt", "disallowedTools: Agent\nmodel: sonnet\n")
-	write(userAgents, "reader", "tools: Read, Grep, Glob, Bash\n")
+	write(userAgents, "reader", "tools: Read, Glob, Grep\n")
+	write(userAgents, "shell", "tools: Read, Bash\n")
+	write(userAgents, "mcp", "tools: Read, mcp__solo__spawn_agent\n")
+	write(userAgents, "deny-writes", "disallowedTools: Edit, Write, NotebookEdit\n")
+	write(userAgents, "block-reader", "tools:\n  - Read\n  - Glob\n  - Grep\n")
+	write(userAgents, "block-shell", "tools:\n  - Read\n  - Bash\n")
+	write(userAgents, "null-tools", "tools:\ndisallowedTools: Edit, Write, NotebookEdit\n")
 	write(userAgents, "quoted", "tools: [\"Read\", \"Grep\"]\n")
 	write(userAgents, "editor", "tools: Read, Edit\n")
 	write(userAgents, "partial", "disallowedTools: Edit, Write\n")
@@ -141,7 +147,9 @@ func TestCustomReadOnlyAgents(t *testing.T) {
 		name  string
 		allow bool
 	}{
-		{"scout", true}, {"SCOUT", true}, {"grunt", false}, {"reader", true}, {"quoted", true}, {"editor", false},
+		{"scout", false}, {"SCOUT", false}, {"grunt", false}, {"reader", true}, {"quoted", true}, {"editor", false},
+		{"shell", false}, {"mcp", false}, {"deny-writes", false},
+		{"block-reader", true}, {"block-shell", false}, {"null-tools", false},
 		{"partial", false}, {"plain", false}, {"local", true}, {"shadowed", false}, {"nofront", false},
 		{"missing", false}, {"../scout", false}, {"", false},
 	} {
@@ -149,6 +157,9 @@ func TestCustomReadOnlyAgents(t *testing.T) {
 			call := &Call{Tool: "Agent", CWD: cwd, Input: map[string]any{"subagent_type": tc.name}}
 			if d := Decide(call, "all"); d.Allow != tc.allow {
 				t.Fatalf("%q from %s: %+v, want allow=%v", tc.name, cwd, d, tc.allow)
+			}
+			if got := readOnlyAgent(tc.name, cwd); got != tc.allow {
+				t.Fatalf("readOnlyAgent(%q, %q) = %v, want %v", tc.name, cwd, got, tc.allow)
 			}
 		}
 	}

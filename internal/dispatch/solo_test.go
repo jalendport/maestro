@@ -24,10 +24,12 @@ func TestTabArgsPerHarnessAndAccess(t *testing.T) {
 		"Bash(git diff *)", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git blame *)",
 		"Bash(ls *)", "Bash(cat *)", "Bash(ls)", "Bash(git status)",
 		"Write(//" + folder + "/**)", "Edit(//" + folder + "/**)",
-		"mcp__solo__whoami", "mcp__solo__get_process_status", "mcp__solo__get_process_output", "mcp__solo__todo_comment_create"}
+		"mcp__solo__whoami", "mcp__solo__get_process_status", "mcp__solo__get_process_output", "mcp__solo__todo_comment_create",
+		"--disallowedTools", "Edit(//" + root + "/.git/**)", "Write(//" + root + "/.git/**)"}
 	editClaude := []string{"--setting-sources", "", "--permission-mode", "acceptEdits", "--allowedTools",
 		"Bash(git diff *)", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git blame *)", "Bash(git status)", "Bash(git diff)", "Bash(ls *)", "Bash(cat *)", "WebFetch", "WebSearch",
-		"Bash(go test ./...)", "Bash(go test ./... *)", "mcp__solo__*", "--add-dir", "/extra"}
+		"Bash(go test ./...)", "Bash(go test ./... *)", "mcp__solo__*", "--add-dir", "/extra",
+		"--disallowedTools", "Edit(//" + root + "/.git/**)", "Write(//" + root + "/.git/**)"}
 	for _, tt := range []struct {
 		name, access string
 		want         []string
@@ -35,8 +37,8 @@ func TestTabArgsPerHarnessAndAccess(t *testing.T) {
 	}{
 		{name: "claude", access: "read", want: append([]string{pointer, "--model", "model", "--effort", "high"}, readClaude...)},
 		{name: "claude", access: "edit", want: append([]string{pointer, "--model", "model", "--effort", "high"}, editClaude...)},
-		{name: "codex", access: "read", want: []string{pointer, "-m", "model", "-C", folder, "-c", "approval_policy=never", "-c", trust, "-c", "model_reasoning_effort=high", "-s", "workspace-write"}},
-		{name: "codex", access: "edit", want: []string{pointer, "-m", "model", "-C", root, "-c", "approval_policy=never", "-c", trust, "-c", "model_reasoning_effort=high", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--add-dir", folder, "--add-dir", "/extra"}},
+		{name: "codex", access: "read", want: []string{pointer, "-m", "model", "-C", folder, "-c", "approval_policy=never", "-c", trust, "-c", "model_reasoning_effort=high", "-s", "workspace-write", "-c", "sandbox_workspace_write.writable_roots=[]"}},
+		{name: "codex", access: "edit", want: []string{pointer, "-m", "model", "-C", root, "-c", "approval_policy=never", "-c", trust, "-c", "model_reasoning_effort=high", "-s", "workspace-write", "-c", "sandbox_workspace_write.network_access=true", "--add-dir", folder, "--add-dir", "/extra", "-c", fmt.Sprintf("sandbox_workspace_write.writable_roots=[%q,\"/extra\"]", folder)}},
 		// Grok path rules take the absolute path as written (no `//`); a read
 		// Lane writes only its Run folder, inside the project, so it runs in the
 		// workspace sandbox; the edit Lane's /extra dir is outside, so it does not.
@@ -67,6 +69,13 @@ func TestTabArgsPerHarnessAndAccess(t *testing.T) {
 			got := tabArgs(command)
 			if tt.name == "claude" {
 				got = got[:len(got)-2]
+				wantDir := root
+				if tt.access == "read" {
+					wantDir = folder
+				}
+				if command.Cmd.Dir != wantDir {
+					t.Fatalf("working directory: %s, want %s", command.Cmd.Dir, wantDir)
+				}
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("tab arguments:\n got %q\nwant %q", got, tt.want)

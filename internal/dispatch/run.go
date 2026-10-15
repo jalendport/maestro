@@ -195,6 +195,7 @@ func PrepareIn(env *Env, b *brief.Brief, req router.Request, runID, taskID, runD
 	rt := env.NewRouter()
 	req.Brief = b
 	req.Project = env.Project
+	req.Root = env.Root
 	req.Access = b.EffectiveAccess()
 	req.InSolo = solo.InSolo()
 	route, err := rt.Route(req)
@@ -333,8 +334,12 @@ attempts:
 // clearAnswers drops old Lane permissions and answer markers left by an
 // earlier attempt or a late `maestro answer`.
 func clearAnswers(folder string) {
-	for _, name := range []string{"relay.json", "relay-answer.json", "lane.json"} {
+	for _, name := range []string{"relay.json", "relay.lock", "relay-answer.json", "lane.json"} {
 		_ = os.Remove(filepath.Join(folder, name))
+	}
+	answers, _ := filepath.Glob(filepath.Join(folder, "relay-answer-*.json"))
+	for _, path := range answers {
+		_ = os.Remove(path)
 	}
 	for _, ans := range []string{"allow", "deny"} {
 		_ = os.Remove(filepath.Join(folder, "answer-"+ans))
@@ -364,8 +369,16 @@ func archiveAttempt(folder string, n int) {
 	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, FileBaseline, "tab.log"} {
 		_ = os.Rename(filepath.Join(folder, f), filepath.Join(dst, f))
 	}
-	control := config.ControlDirForFolder(folder)
-	for _, name := range []string{"lane.json", "answer-allow", "answer-deny", "relay.json", "relay-answer.json"} {
+	control, err := config.ControlDirForFolder(folder)
+	if err != nil {
+		return
+	}
+	names := []string{"lane.json", "answer-allow", "answer-deny", "relay.json", "relay.lock", "relay-answer.json"}
+	answers, _ := filepath.Glob(filepath.Join(control, "relay-answer-*.json"))
+	for _, path := range answers {
+		names = append(names, filepath.Base(path))
+	}
+	for _, name := range names {
 		src := filepath.Join(control, name)
 		if b, err := os.ReadFile(src); err == nil {
 			if err := os.WriteFile(filepath.Join(dst, name), b, 0o600); err == nil {
@@ -395,6 +408,13 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 
 	// Earlier Tasks and attempts can change the tree before this Lane starts.
 	var snap attemptBaseline
+	defer func() {
+		if !snap.Taken.IsZero() {
+			runRel, _ := filepath.Rel(t.Project, config.RunsDir(t.Project))
+			rec.Verification.Changed = without(snap.Changed(t.Project), runRel)
+			_ = rec.Save()
+		}
+	}()
 	if err := env.Roster.ValidateAccounts(); err != nil {
 		return fail(FailLane, err.Error())
 	}
@@ -466,18 +486,22 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	if useTab {
 		launch.Pointer = brief.Pointer(filepath.Join(t.Folder, FileBrief))
 		reportRel = reportPath
-		if h.Name() == "codex" && t.Access == brief.AccessRead {
-			launch.Pointer += fmt.Sprintf(" The repository is at `%s`; read repository files through absolute paths.", t.Project)
-			copyBrief := *b
-			copyBrief.Files = make([]string, len(b.Files))
-			for i, path := range b.Files {
-				if !filepath.IsAbs(path) {
-					path = filepath.Join(t.Project, path)
-				}
-				copyBrief.Files[i] = path
+	}
+	if t.Access == brief.AccessRead && (h.Name() == "claude" || (useTab && h.Name() == "codex")) {
+		launch.Pointer = brief.Pointer(filepath.Join(t.Folder, FileBrief))
+		launch.Pointer += fmt.Sprintf(" The repository is at `%s`; read repository files through absolute paths.", t.Project)
+		reportRel = reportPath
+		copyBrief := *b
+		copyBrief.Files = make([]string, len(b.Files))
+		for i, path := range b.Files {
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(t.Project, path)
 			}
-			renderBrief = &copyBrief
+			copyBrief.Files[i] = path
 		}
+		renderBrief = &copyBrief
+	}
+	if useTab {
 		command, err = h.BuildTab(launch)
 	} else {
 		command, err = h.Build(launch)
@@ -486,6 +510,9 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		return fail(FailLane, err.Error())
 	}
 	rec.Permission.Flags = command.Flags
+	if command.Enforcement != "" {
+		rec.Permission.Enforcement = command.Enforcement
+	}
 	rec.Outcome.ReportByText = command.ReportByText
 
 	rendered := brief.Render(renderBrief, brief.RenderOpts{
@@ -502,7 +529,10 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	if err != nil {
 		return fail(FailLane, err.Error())
 	}
-	control := config.ControlDirForFolder(t.Folder)
+	control, err := config.ControlDirForFolder(t.Folder)
+	if err != nil {
+		return fail(FailLane, err.Error())
+	}
 	if err := os.MkdirAll(control, 0o700); err != nil {
 		return fail(FailLane, err.Error())
 	}

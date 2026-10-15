@@ -17,7 +17,11 @@ func testHome(t *testing.T) string {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("HOME", home)
+	t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
 	t.Setenv("MAESTRO_HOME", filepath.Join(t.TempDir(), "maestro"))
+	previous := grokManagedDir
+	grokManagedDir = filepath.Join(home, "etc", "grok")
+	t.Cleanup(func() { grokManagedDir = previous })
 	return home
 }
 
@@ -72,8 +76,8 @@ func TestSpecs(t *testing.T) {
 	}
 	want := []HarnessSpec{
 		{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "A new Claude Code session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit"}}},
-		{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse and UserPromptSubmit hooks.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit"}}},
-		{".agents/skills/maestro", ".grok/hooks/maestro.json", "run_terminal_command|run_terminal_cmd|Bash|write|search_replace|Write|Edit|MultiEdit|spawn_subagent|Task|solo__spawn_agent|solo__spawn_process", 660, "A new Grok session binds the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}}},
+		{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse and UserPromptSubmit hooks.", []HookEvent{{Name: "PreToolUse", Matcher: true, Command: "maestro hook codex"}, {Name: "UserPromptSubmit", Command: "maestro hook codex"}}},
+		{".agents/skills/maestro", ".grok/hooks/maestro.json", "", 660, "A new Grok session binds the hook.", []HookEvent{{Name: "PreToolUse"}}},
 		{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "PreInvocation", Direct: true, Command: "maestro hook agy", Timeout: 30}}},
 	}
 	for i, name := range Harnesses {
@@ -99,7 +103,7 @@ func TestInstallEachHarness(t *testing.T) {
 			if r.Harness != name || r.Next != spec.Next {
 				t.Fatal(r)
 			}
-			if got := State(name, home); got != (Status{name, "ok", "ok", "ok", "ok", "ok"}) {
+			if got := State(name, home); got != (Status{Harness: name, Skill: "ok", Link: "ok", Hook: "ok", Reminder: "ok", Overall: "ok"}) {
 				t.Fatal(got)
 			}
 			if string(read(t, SkillFile())) != "shared skill\n" {
@@ -132,7 +136,12 @@ func TestInstallEachHarness(t *testing.T) {
 			entries := set.(map[string]any)["PreToolUse"].([]any)
 			e := entries[0].(map[string]any)
 			handler := e["hooks"].([]any)[0].(map[string]any)
-			if len(entries) != 1 || e["matcher"] != spec.Matcher || handler["type"] != "command" || handler["command"] != "maestro hook" || handler["timeout"] != float64(spec.Timeout) {
+			command := Command
+			if name == "codex" {
+				command = "maestro hook codex"
+			}
+			matcher, hasMatcher := e["matcher"]
+			if len(entries) != 1 || hasMatcher != spec.Events[0].Matcher || (hasMatcher && matcher != spec.Matcher) || handler["type"] != "command" || handler["command"] != command || handler["timeout"] != float64(spec.Timeout) {
 				t.Fatal(doc)
 			}
 			actions(t, Install(name, home, "shared skill\n"), "unchanged", "unchanged", "unchanged", "unchanged")
@@ -420,7 +429,7 @@ func TestOwnedHookSets(t *testing.T) {
 	}
 }
 
-func TestInstallKeepsForeignHandlersInMaestroEntry(t *testing.T) {
+func TestInstallMovesMaestroOutOfSharedEntry(t *testing.T) {
 	for _, name := range Harnesses {
 		t.Run(name, func(t *testing.T) {
 			home := testHome(t)
@@ -436,15 +445,22 @@ func TestInstallKeepsForeignHandlersInMaestroEntry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if got := State(name, home); got.Hook != "wrong" {
+				t.Fatal(got)
+			}
 			actions(t, Install(name, home, "skill"), "created", "created", "updated", "created")
 			after, err := decode(read(t, path))
 			if err != nil {
 				t.Fatal(err)
 			}
 			oldEntry := before.get(key).get("PreToolUse").array[0]
-			newEntry := after.get(key).get("PreToolUse").array[0]
+			entries := after.get(key).get("PreToolUse").array
+			if len(entries) != 2 || !equal(entries[1], entry(spec, spec.Events[0])) {
+				t.Fatalf("dedicated entry missing: %s", read(t, path))
+			}
+			newEntry := entries[0]
 			oldHooks, newHooks := oldEntry.get("hooks"), newEntry.get("hooks")
-			if len(newHooks.array) != 3 || !equal(oldHooks.array[0], newHooks.array[0]) || !equal(oldHooks.array[2], newHooks.array[2]) || !equal(newHooks.array[1], entry(spec, spec.Events[0]).get("hooks").array[0]) {
+			if len(newHooks.array) != 2 || !bytes.Equal(mustJSON(t, oldHooks.array[0]), mustJSON(t, newHooks.array[0])) || !bytes.Equal(mustJSON(t, oldHooks.array[2]), mustJSON(t, newHooks.array[1])) {
 				t.Fatalf("handlers changed: %s", read(t, path))
 			}
 			if !equal(oldEntry.get("matcher"), newEntry.get("matcher")) || !equal(oldEntry.get("extra"), newEntry.get("extra")) {
@@ -551,6 +567,7 @@ func TestInstallAndStateUseHarnessConfigLocations(t *testing.T) {
 	for _, tc := range []struct{ harness, variable, hook, link string }{
 		{"claude", "CLAUDE_CONFIG_DIR", "settings.json", "skills/maestro"},
 		{"codex", "CODEX_HOME", "hooks.json", ""},
+		{"grok", "GROK_HOME", "hooks/maestro.json", ""},
 	} {
 		t.Run(tc.harness, func(t *testing.T) {
 			home := testHome(t)

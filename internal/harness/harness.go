@@ -52,6 +52,7 @@ type Launch struct {
 // Command is the built process plus the facts the ledger records.
 type Command struct {
 	Cmd          *exec.Cmd
+	Enforcement  string
 	Flags        []string // the permission flags passed, for the ledger
 	PromptStdin  bool     // the Pointer goes down stdin
 	ReportByText bool     // the Lane cannot write result.md; its final message is the Report

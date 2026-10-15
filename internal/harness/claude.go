@@ -39,10 +39,8 @@ var claudeModelID = regexp.MustCompile(`^claude-[a-z][a-z0-9]*-[0-9]+-[0-9]+(?:-
 // ClaudeModelID reports whether an id has the CLI's full model-id shape.
 func ClaudeModelID(id string) bool { return claudeModelID.MatchString(id) }
 
-// Enforcement: both shapes ignore the user's settings, so only the allowlist
-// and the permission mode decide. A read Lane writes only in its Run folder;
-// an edit Lane writes only in the project and the extra directories, and any
-// other call prompts, which a tab relays and a one-shot denies.
+// Enforcement: both shapes use the sandbox and ignore the user's settings.
+// A launch with claude_auto uses a classifier and is best-effort.
 func (c *Claude) Enforcement(access string) string {
 	if access == "read" || access == "edit" {
 		return Enforced
@@ -123,8 +121,22 @@ func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 		taskID = filepath.Base(l.RunFolder)
 	}
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
+	filesystem := map[string]any{}
+	enforcement := Enforced
+	if l.Access == "edit" {
+		filesystem["allowWrite"] = append([]string{l.RunFolder}, l.Dirs...)
+		filesystem["denyWrite"] = []string{filepath.Join(l.Root, ".git", "config"), filepath.Join(l.Root, ".git", "hooks")}
+		if l.ClaudeAuto {
+			enforcement = BestEffort
+		}
+	}
 	settings, err := json.Marshal(map[string]any{
 		"env": map[string]string{"MAESTRO_TASK_FOLDER": l.RunFolder},
+		"sandbox": map[string]any{
+			"enabled": true, "autoAllowBashIfSandboxed": false,
+			"allowUnsandboxedCommands": false, "failIfUnavailable": true,
+			"filesystem": filesystem, "network": map[string]bool{"allowLocalBinding": true},
+		},
 		"hooks": map[string]any{"PermissionRequest": []any{map[string]any{
 			"hooks": []any{map[string]any{"type": "command", "command": quote(self) + " relay " + quote(taskID), "timeout": 660}},
 		}}},
@@ -132,12 +144,15 @@ func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 	if err != nil {
 		return nil, err
 	}
-	flags = append(flags, "--settings", string(settings))
+	flags = append(flags, "--disallowedTools", fmt.Sprintf("Edit(//%s/.git/**)", l.Root), fmt.Sprintf("Write(//%s/.git/**)", l.Root), "--settings", string(settings))
 	args = append(args, flags...)
 	cmd := exec.Command(c.bin, args...)
 	cmd.Dir = l.Root
+	if l.Access == "read" {
+		cmd.Dir = l.RunFolder
+	}
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Flags: flags, PromptStdin: !tab}, nil
+	return &Command{Cmd: cmd, Enforcement: enforcement, Flags: flags, PromptStdin: !tab}, nil
 }
 
 func (c *Claude) NewParser() Parser { return &claudeParser{out: &Outcome{}} }
