@@ -1,6 +1,7 @@
 package council
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jalendport/maestro/internal/adapter"
@@ -10,6 +11,25 @@ import (
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/roster"
 )
+
+func TestTodoTitle(t *testing.T) {
+	for _, tt := range []struct {
+		name, question, want string
+	}{
+		{"short", "Review this change", "Review this change"},
+		{"at limit", strings.Repeat("a", 200), strings.Repeat("a", 200)},
+		{"300 characters", strings.Repeat("question here ", 21) + "check?", strings.TrimSpace(strings.Repeat("question here ", 14)) + "…"},
+		{"one long word", strings.Repeat("a", 300), strings.Repeat("a", 199) + "…"},
+		{"unicode", strings.Repeat("界 ", 150), strings.TrimSpace(strings.Repeat("界 ", 99)) + "…"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := todoTitle(tt.question)
+			if got != tt.want || len([]rune(got)) > 200 {
+				t.Fatalf("title = %q (%d characters), want %q", got, len([]rune(got)), tt.want)
+			}
+		})
+	}
+}
 
 func TestRequestedAgySeatRequiresHook(t *testing.T) {
 	home := t.TempDir()

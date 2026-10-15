@@ -11,6 +11,18 @@ import (
 	"github.com/jalendport/maestro/internal/router"
 )
 
+func TestStatusWithoutStartTime(t *testing.T) {
+	for _, state := range []string{"running", "ended"} {
+		t.Run(state, func(t *testing.T) {
+			rec := &Record{Task: "never-started", State: state, DurationS: 60, Outcome: Outcome{Outcome: OutcomeCancelled}}
+			got := Status(rec)
+			if !strings.Contains(got, "attempt 0  —  tab no") {
+				t.Fatalf("elapsed time without a start: %s", got)
+			}
+		})
+	}
+}
+
 func TestListStandaloneDispatches(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()

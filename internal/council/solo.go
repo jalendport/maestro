@@ -3,6 +3,8 @@ package council
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/ui"
@@ -26,7 +28,7 @@ func todoFor(env *dispatch.Env, c *Council) {
 		}
 	} else if c.Run == "" {
 		body := fmt.Sprintf("Maestro council `%s`. Question: `%s`.\n\n%s\n", c.Slug, relOrAbs(c.Project, filepath.Join(c.Path, "question.md")), c.Question)
-		id, err := env.Solo.Client.CreateTodo(env.Solo.ProjectID, c.Question, body, []string{"maestro"})
+		id, err := env.Solo.Client.CreateTodo(env.Solo.ProjectID, todoTitle(c.Question), body, []string{"maestro"})
 		if err != nil {
 			ui.Warnf("solo council todo: %v", err)
 			return
@@ -36,6 +38,18 @@ func todoFor(env *dispatch.Env, c *Council) {
 	if err := c.Save(); err != nil {
 		ui.Warnf("solo council todo: %v", err)
 	}
+}
+
+func todoTitle(question string) string {
+	chars := []rune(question)
+	if len(chars) <= 200 {
+		return question
+	}
+	title := string(chars[:199])
+	if boundary := strings.LastIndexFunc(title, unicode.IsSpace); boundary > 0 {
+		title = title[:boundary]
+	}
+	return strings.TrimSpace(title) + "…"
 }
 
 // mergeComment posts one Merge and completes a standalone Council's todo.

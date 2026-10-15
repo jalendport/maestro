@@ -140,14 +140,22 @@ func Status(s *State) string {
 	}
 	now := time.Now()
 	for _, t := range sortedTasks(s) {
+		elapsed := "—"
+		if !t.StartedAt.IsZero() {
+			ended := t.EndedAt
+			if t.State == TaskRunning {
+				ended = now
+			}
+			elapsed = ui.Duration(ended.Sub(t.StartedAt))
+		}
 		var tail string
 		switch t.State {
 		case TaskRunning:
-			tail = fmt.Sprintf("%-4d %s   idle %s", t.Attempt+1, ui.Duration(now.Sub(t.StartedAt)), ui.Duration(now.Sub(t.LastOutput)))
+			tail = fmt.Sprintf("%-4d %s   idle %s", t.Attempt+1, elapsed, ui.Duration(now.Sub(t.LastOutput)))
 		case TaskWaiting:
 			tail = fmt.Sprintf("—    %s", t.Waiting)
 		default:
-			tail = fmt.Sprintf("%-4d %s", t.Attempt, ui.Duration(t.EndedAt.Sub(t.StartedAt)))
+			tail = fmt.Sprintf("%-4d %s", t.Attempt, elapsed)
 		}
 		lane := laneWord(t)
 		if t.Provisional {

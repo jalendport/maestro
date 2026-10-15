@@ -11,23 +11,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added Antigravity edit Lanes and Solo tabs, with command prompts relayed through the Maestro hook
 - Added the Reminder for the Orchestrator in every Harness: a `UserPromptSubmit` hook entry for Claude Code and Codex, a `PreInvocation` hook entry for Antigravity, and the rules file `~/.grok/rules/maestro.md` for Grok; run `maestro adapter install` again, trust the new Codex hook in `/hooks`, and until then `maestro doctor` reports the Adapter as `partial`
 - Added `maestro init` to write the Project file `.agents/maestro.toml`
-- Added custom read-only agents to the spawn rule: a sub-agent whose definition file under `.claude/agents` or `~/.claude/agents` keeps Edit, Write, and NotebookEdit out of its tools may be spawned
+- Added custom read-only agents to the spawn rule: a sub-agent whose definition file under `.claude/agents` or `~/.claude/agents` has a `tools` list of read tools only may be spawned
 
 ### Changed
 - Changed Antigravity read enforcement to the Maestro hook, so it no longer depends on the Antigravity settings file
 - Changed the Antigravity hook entry to cover commands and file writes; run `maestro adapter install agy` again
-- Changed every Harness's edit shape to `enforced`, so a named Lane takes edit work on all four: Claude edit Lanes now ignore the user's own settings like read Lanes do, the Codex sandbox counts as enforcement, and the Maestro hook holds Grok and Antigravity
-- Changed Grok Lane enforcement to the Maestro hook: the `PreToolUse` entry now covers commands, file writes, and spawns, the read shape no longer passes deny rules, and a Grok Lane fails pre-flight until the hook is installed; run `maestro adapter install grok` again
+- Changed edit Enforcement to use the sandbox and Maestro hook for Claude and Grok, the sandbox for Codex, and the Maestro hook for Antigravity; `claude_auto` and Grok edit Lanes with `dirs` outside the project are `best-effort`
+- Changed every Claude Lane, read and edit, to ignore the user, project, and local settings files; `CLAUDE.md` still loads
+- Changed the Grok hook to check every tool call; agy and grok Lanes fail pre-flight when their Maestro hook is missing, wrong, or disabled; run `maestro adapter install agy` and `maestro adapter install grok` again
+- Changed Grok edit Lanes to use `--sandbox workspace` when every writable directory is inside the project; extra `dirs` outside it turn the sandbox off
+- Changed Claude edit Lanes to run shell commands in the Claude sandbox, with no outbound network and writes limited to the project, Run folder, `dirs`, and per-user temp directory
+- Changed Codex Lanes to pin writable roots instead of inheriting extra roots from user settings
+- Changed the Adapter state to `disabled` when an installed agy or grok hook will not run; the pre-flight gate and `maestro doctor` name the cause
+- Changed the Codex Carrier to run `maestro hook codex`; run `maestro adapter install codex` again and trust both hooks in `/hooks`
 - Changed the token-billed rule: a requested Lane on a `metered` Account now takes edit work with a warning instead of a refusal; automatic Routes still give it read work only
-- Changed where Lane control files live: the Lane policy, relay requests, and answer markers now sit in `~/.maestro/control`, outside the project tree
+- Changed where Lane control files live: the Lane policy, Relay requests, and answer markers now sit under a project key in `~/.maestro/control`; let running Lanes finish before the upgrade, because a Lane that is live during the upgrade loses its policy
+- Changed Relay answers to require `maestro answer <task> allow|deny --relay <id>`, with the id from the Relay event; stale answers cannot approve a later request
+- Changed the read-only command list to deny write flags, program execution flags, branch creation, and `uniq` with two operands
 - Changed the deny reasons to name every accepted read token and every read-only agent type
 - Changed the Council brief to tell a Seat what to say when nothing is wrong
 - Changed the skill to be shorter, to name three verbs, and to point at `maestro help` for the formats
 
 ### Fixed
-- Fixed Grok Seats and read Lanes in Solo tabs, which could never write their Report because Grok lets a deny rule beat the Run folder allow rule, and so were dropped as a stall
+- Fixed Grok Seats and read Lanes in Solo tabs so they can write their Report: absolute path grants permit Run folder writes, the Maestro hook holds read Access, and no deny rule blocks the Report grant
 - Fixed the Lane signal for a project-relative Pointer and for Codex context messages of a kind Maestro has not seen
-- Fixed the diff a retried or resumed Task is judged on: it now covers the work of every attempt, so the gate and the end-of-run Council see the whole Task and not the last attempt's slice
+- Fixed the diff a retried or resumed Task is judged on: changes are saved on every exit path, so the gate and the end-of-run Council see every attempt, including deleted untracked files
+- Fixed Relay lock recovery after its owner exits and kept each completed answer with its request id
+- Fixed Council todo titles longer than 200 characters by cutting them at a word boundary with a trailing `…`
+- Fixed `maestro status` to show `—` for a Task's elapsed time when the Task never started
 - Fixed the Homebrew cask so it no longer prints a deprecation warning for `postflight` on install
 - Fixed the README so the Homebrew upgrade command uses the full tap path
 

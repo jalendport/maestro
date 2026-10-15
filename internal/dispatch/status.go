@@ -57,7 +57,9 @@ func Status(rec *Record) string {
 	state := rec.State
 	elapsed := rec.DurationS
 	if state == "running" {
-		elapsed = time.Since(rec.StartedAt).Seconds()
+		if !rec.StartedAt.IsZero() {
+			elapsed = time.Since(rec.StartedAt).Seconds()
+		}
 	} else if rec.Outcome.Outcome != "" {
 		state = rec.Outcome.Outcome
 	}
@@ -68,7 +70,11 @@ func Status(rec *Record) string {
 	if rec.SoloProcess > 0 {
 		tab = "tab yes"
 	}
-	return fmt.Sprintf("  task %s  %s  %s  attempt %d  %s  %s  %s\n", rec.Task, rec.TaskInfo.Title, lane, rec.Attempt, ui.Duration(time.Duration(elapsed*float64(time.Second))), tab, state) + RelayEvents(rec)
+	duration := "—"
+	if !rec.StartedAt.IsZero() {
+		duration = ui.Duration(time.Duration(elapsed * float64(time.Second)))
+	}
+	return fmt.Sprintf("  task %s  %s  %s  attempt %d  %s  %s  %s\n", rec.Task, rec.TaskInfo.Title, lane, rec.Attempt, duration, tab, state) + RelayEvents(rec)
 }
 
 func RelayEvents(rec *Record) string {

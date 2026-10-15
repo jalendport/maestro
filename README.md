@@ -12,7 +12,7 @@ Maestro is a small command-line tool that takes over once you and your coding ag
 - **Checks and a gate** — your project's own verification commands run after every edit, a `touch:` list keeps a task inside the files it was given, and Jev reads the diff against the brief before a task is allowed to close
 - **Subscriptions first** — everyday work spreads across the subscriptions you already pay for, while lanes billed per token get read-only work on their own and edit work only when you ask for them by name; set `[router] orchestrator = "<family>"` in `~/.maestro/config.toml` and the model you are talking to is never spent automatically
 - **Budgets that bind** — usage windows are read from every dispatch (and probed when stale), with a block point, a warning, and a reserve kept back for the session you are in
-- **A permission contract** — a lane gets `read` or `edit` access through its harness's own sandbox or allowlist, and Maestro never passes a bypass flag
+- **A permission contract** — a Lane gets `read` or `edit` Access through a sandbox, a tool allowlist, or the Maestro hook, and Maestro never passes a bypass flag
 - **Solo integration** — inside [Solo](https://soloterm.com), tasks are todos, lanes are tabs, results are comments, and your session is woken when a run ends
 - **Single static binary** — Go, no runtime dependencies, and each harness needs only a skill file, a hook entry or two, and for Grok one rules file
 
@@ -68,6 +68,8 @@ Manual step: start a new Claude Code session. It loads the hook.
 
 A Claude tab in a project you have not opened in Claude Code will wait on its folder trust dialog; open the project in Claude Code once first.
 
+Every Claude Lane ignores the user, project, and local settings files. `CLAUDE.md` still loads. Maestro supplies the Lane hook and sandbox settings at launch. A Claude edit Lane runs shell commands in the Claude sandbox: writes stay in the project, the Run folder, the project's `dirs`, and the per-user temp directory. Shell commands have no outbound network, so a check that must download something fails inside a Claude Lane. Caches already on disk are readable; a check that writes a cache needs that cache in `dirs`. A shell command that names a network host is denied in a one-shot Lane: the sandbox prompts for the host, and a one-shot Lane answers every prompt with a denial. `claude_auto = true` makes Claude edit Lanes `best-effort`.
+
 Verify: `maestro doctor` shows `adapter claude` as `ok`.
 
 Probe the hook. A sub-agent that can write code must get a `deny`:
@@ -87,7 +89,7 @@ maestro adapter install codex
 It writes two paths:
 
 - `~/.agents/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
-- `~/.codex/hooks.json` gets one `PreToolUse` hook entry and one `UserPromptSubmit` hook entry for `maestro hook`; Maestro adds or replaces only its own entries and keeps all other hooks.
+- `~/.codex/hooks.json` gets one `PreToolUse` hook entry and one `UserPromptSubmit` hook entry for `maestro hook codex`; Maestro adds or replaces only its own entries and keeps all other hooks.
 
 Manual step: start Codex, open `/hooks`, and trust both the Maestro `PreToolUse` hook and the Maestro `UserPromptSubmit` hook. This review is a security boundary. Only you cross it. An agent must not trust the hooks for you.
 
@@ -105,11 +107,15 @@ The probe denies only where the hook is in scope: with the default `[hook] scope
 
 ### Connect Grok
 
-Grok takes read and edit work, like the other harnesses. Grok's own permission rules cannot hold a Lane's access on their own: a deny rule beats every allow rule, and an `always-approve` mode in `~/.grok/config.toml` beats the mode on the command line. So the Maestro hook entry carries each Lane's permissions:
+Grok takes read and edit work. Grok's own permission modes and rules do not hold a Lane. In a headless `dontAsk` test, Grok approved a write outside the project and a command outside the allow list. The Maestro hook denies what the Lane may not do, and the workspace sandbox backs it at the kernel level:
 
-- Read-only commands, the checks, and the `allow` list run
-- Other commands are relayed in a tab or denied one-shot
-- Writes stay inside the project and the run folder
+- A read Lane runs the built-in read-only commands and writes only its Report in the Run folder
+- An edit Lane also runs the checks and the project `allow` list, and writes inside the project, the Run folder, and the extra `dirs`; the workspace sandbox also permits writes to temp directories and `~/.grok`
+- Grok never relays: a command outside the allow list is denied; add it to `checks` or the project `allow` list
+
+Grok Lanes run under `--sandbox workspace` when every writable directory is inside the project. For edit Lanes, this includes `dirs`. If a directory lies outside the project, as this repository's Go caches do, the Grok edit Lane runs without the sandbox and its Route is `best-effort`. A read Lane does not use the extra edit `dirs`.
+
+Maestro cannot detect three limits. Grok warns and continues without the kernel sandbox when the OS refuses a built-in profile. A Solo tab whose transcript is not yet on disk at its first tool call runs that call under the Orchestrator rule; the first call of a Lane is the read of its Brief. A check that runs Lane-written code under the Grok workspace sandbox can write `~/.grok`, Grok's own home. Grok's `hashline` file toolset is not supported in a Lane: its write tools are denied as unknown.
 
 The hook entry changed, so an existing install must run `maestro adapter install grok` again.
 
@@ -139,9 +145,9 @@ The probe denies only where the hook is in scope: with the default `[hook] scope
 
 Antigravity takes read and edit work, like the other harnesses. The Maestro hook entry carries each Lane's permissions:
 
-- Commands on the checks and `allow` lists run
-- Other commands are relayed in a tab or denied one-shot
-- Writes stay inside the project and the run folder
+- A read Lane runs read-only commands and writes only its Report in the Run folder
+- An edit Lane also runs commands on the checks and `allow` lists, and writes inside the project, the Run folder, and the extra `dirs`
+- Only an edit Lane in a tab relays other commands; a read Lane or a one-shot Lane denies them
 
 The hook entry changed, so an existing install must run `maestro adapter install agy` again.
 
@@ -172,7 +178,7 @@ You install once and plan with your agent. The agent hands finished plans to Mae
 
 1. Install Maestro and connect the harnesses once. See [Installation](#installation).
 2. Plan with your agent as you do now: a grilling session, a spec, a plan file. The Maestro skill tells the agent what a finished plan looks like.
-3. When the plan is finished, the agent writes the plan file and runs `maestro run` itself. Nobody asks you to type anything.
+3. When you approve the plan, the agent writes the Plan file and runs `maestro run` itself. Nobody asks you to type anything.
 4. Inside Solo, each task is a todo and each result is a comment, and a finished run wakes the agent. Outside Solo, the agent reports from `maestro wait`.
 5. Maestro needs you when a verb exits with code 2: a held breakdown, a paused run, a blocked task, or a single-opinion council. The agent reads the report and either answers or asks you one question.
 
@@ -222,6 +228,8 @@ maestro router stats    # Jev vs rules agreement, verified rates
 ```
 
 Exit codes: `0` ok, `1` failed, `2` needs the orchestrator (a held breakdown, a paused run, a blocked task). `--json` prints one object per verb.
+
+Answer a Relay with `maestro answer <task> allow|deny --relay <id>`. Use the id from the `relay` event printed by `maestro wait` or `maestro status`.
 
 ## Configuration
 
