@@ -17,6 +17,7 @@ func TestInformationCommandsDoNotWrite(t *testing.T) {
 		t.Run(args[0], func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("MAESTRO_HOME", home)
+			t.Setenv("GROK_HOME", t.TempDir())
 			t.Setenv("PATH", "")
 			t.Setenv("SOLO_PROCESS_ID", "")
 			root := (&app{version: "test"}).build()
@@ -35,6 +36,7 @@ func TestInformationCommandsDoNotWrite(t *testing.T) {
 
 func TestDoctorFailsForInstalledHarnessError(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("GROK_HOME", t.TempDir())
 	t.Setenv("PATH", "")
 	t.Setenv("SOLO_PROCESS_ID", "")
 	bin := filepath.Join(t.TempDir(), "claude")
@@ -67,6 +69,7 @@ func TestDoctorWarnsOnceForRemovedUserKeys(t *testing.T) {
 	} {
 		t.Run(tc.key, func(t *testing.T) {
 			t.Setenv("MAESTRO_HOME", t.TempDir())
+			t.Setenv("GROK_HOME", t.TempDir())
 			t.Setenv("PATH", "")
 			t.Setenv("SOLO_PROCESS_ID", "")
 			src := fmt.Sprintf("[%s]\n%s = %s\n", tc.section, tc.key, tc.value)

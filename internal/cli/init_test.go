@@ -199,6 +199,7 @@ func TestInitProjectFileAppearsInDoctor(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("GROK_HOME", t.TempDir())
 	project := t.TempDir()
 	t.Chdir(project)
 	t.Setenv("MAESTRO_HOME", t.TempDir())

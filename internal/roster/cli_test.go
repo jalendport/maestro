@@ -35,6 +35,7 @@ func runCLI(t *testing.T, args ...string) (int, string) {
 func setupCLI(t *testing.T, user, project string) {
 	t.Helper()
 	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("GROK_HOME", t.TempDir())
 	t.Setenv("TYPESAFE_API_KEY", "")
 	t.Setenv("SOLO_PROCESS_ID", "")
 	root := t.TempDir()
