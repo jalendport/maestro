@@ -320,3 +320,18 @@ func TestTabLimitBeforeEarlyExitIsClassified(t *testing.T) {
 		t.Fatalf("outcome: %+v", rec.Outcome)
 	}
 }
+
+func TestTabTitle(t *testing.T) {
+	cases := map[string]string{
+		"Pin Grok home in every try":         "Pin Grok home in",
+		"Startup":                            "Startup",
+		"  spaced   out  words  ":            "spaced out words",
+		"":                                   "task",
+		"Supercalifragilisticexpialidocious": "Supercalifragilist",
+	}
+	for in, want := range cases {
+		if got := tabTitle(in); got != want {
+			t.Errorf("tabTitle(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
