@@ -14,6 +14,7 @@ Maestro is a small command-line tool that takes over once you and your coding ag
 - **Budgets that bind** — usage windows are read from every dispatch (and probed when stale), with a block point, a warning, and a reserve kept back for the session you are in
 - **A permission contract** — a Lane gets `read` or `edit` Access through a sandbox, a tool allowlist, or the Maestro hook; Maestro passes no bypass flag to Claude, Codex, or Antigravity, and a Grok Lane runs in always-approve only because the hook and the sandbox decide before Grok does
 - **Solo integration** — inside [Solo](https://soloterm.com), tasks are todos, lanes are tabs, results are comments, and your session is woken when a run ends
+- **Keeps the Mac awake** — `caffeinate` runs for as long as a dispatch or a run is live, so the machine does not go to sleep under a lane that is still working, and a notice tells you when the run ends; set `[failure] keep_awake = false` to turn it off
 - **Single static binary** — Go, no runtime dependencies, and each harness needs only a skill file, a hook entry or two, and for Grok one rules file
 
 ## Installation
