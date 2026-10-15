@@ -87,6 +87,10 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 		}
 	}
 	write(filepath.Join(fixture, "osascript"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$MAESTRO_LIFECYCLE_MARKERS/notification\"\n", 0o755)
+	// On Linux the Claude pre-flight wants the sandbox tools on PATH.
+	for _, name := range []string{"bwrap", "socat"} {
+		write(filepath.Join(fixture, name), "#!/bin/sh\nexit 0\n", 0o755)
+	}
 	t.Setenv("PATH", fixture+string(os.PathListSeparator)+os.Getenv("PATH"))
 	build := exec.Command("go", "build", "-o", maestro, "../..")
 	if out, err := build.CombinedOutput(); err != nil {

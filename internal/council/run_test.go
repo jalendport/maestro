@@ -29,6 +29,14 @@ func seatTestEnv(t *testing.T, report string) *dispatch.Env {
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// On Linux the Claude pre-flight wants the sandbox tools on PATH.
+	tools := t.TempDir()
+	for _, name := range []string{"bwrap", "socat"} {
+		if err := os.WriteFile(filepath.Join(tools, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
 	d, _, err := config.ParseFile(roster.Defaults)
 	if err != nil {
 		t.Fatal(err)
