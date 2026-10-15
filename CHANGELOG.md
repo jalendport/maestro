@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Changed the skill to be shorter, to name three verbs, and to point at `maestro help` for the formats
 
 ### Fixed
-- Fixed Grok Seats and read Lanes in Solo tabs so they can write their Report: absolute path grants permit Run folder writes, the Maestro hook holds read Access, and no deny rule blocks the Report grant
+- Fixed Grok Seats and read Lanes in Solo tabs so they can write their Report: Grok passes no allow or deny rules, and the Maestro hook permits the Report write in the Run folder and holds read Access
 - Fixed the Lane signal for a project-relative Pointer and for Codex context messages of a kind Maestro has not seen
 - Fixed the diff a retried or resumed Task is judged on: changes are saved on every exit path, so the gate and the end-of-run Council see every attempt, including deleted untracked files
 - Fixed Relay lock recovery after its owner exits and kept each completed answer with its request id
@@ -50,9 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fixed a wake-up for a Relay that was already answered before the tracker saw it
 - Fixed the recorded changed files of a judged attempt so they match what the gate saw, not what the checks created afterwards
 - Fixed a Lane or Seat whose Solo tab was closed by hand: it ends at once instead of at its wall limit
-- Fixed the shell check to accept `2>&1`, which names no file
+- Fixed the shell check to accept `2>&1`, which names no file, and to deny the zsh forms `=(` and an unquoted `(` in a read-only command
+- Fixed the `.git` deny of an edit Lane when `.git` is a symlink into the project: both names are denied
+- Fixed the closed-tab rule to count only a `not found` answer from Solo, so a timeout or a helper restart does not end a Lane
 - Fixed Claude Lane tabs that waited on the sandbox's network prompt: every Claude Lane now denies a host outside the allowlist without a prompt (`strictAllowlist`)
-- Fixed `maestro hook` for Grok and Antigravity to deny an unreadable stdin or payload inside a Lane instead of allowing it
+- Fixed `maestro hook` for Grok and Antigravity to deny an unreadable stdin or payload inside a one-shot Lane instead of allowing it; a Solo tab carries no Lane variable, so there the hook finds the Lane through the transcript only
 - Fixed tests that read the developer's real Grok home or the Lane's own `MAESTRO_TASK_FOLDER`
 - Fixed Council todo titles longer than 200 characters by cutting them at a word boundary with a trailing `…`
 - Fixed `maestro status` to show `—` for a Task's elapsed time when the Task never started

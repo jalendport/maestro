@@ -373,15 +373,15 @@ func insideGitDir(path, root string) bool {
 	if root == "" {
 		return false
 	}
-	abs, err := resolvePath(root)
-	if err != nil {
-		return false
+	// Resolved: `.git` may be a symlink into the project, and the target the
+	// path it points at. Written: the name as the caller typed it, in any case.
+	if inside(path, filepath.Join(root, ".git")) {
+		return true
 	}
-	path, err = resolvePath(path)
-	if err != nil {
-		return false
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
 	}
-	rel, err := filepath.Rel(abs, path)
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
 	if err != nil {
 		return false
 	}
@@ -619,7 +619,8 @@ func shellExpansion(command string) string {
 		switch ch {
 		case '\'', '"':
 			quote = ch
-		case '$', '`', '{', '}', '*', '?', '[':
+		case '$', '`', '{', '}', '*', '?', '[', '(':
+			// `(` covers zsh glob qualifiers such as `file(e:'cmd':)`.
 			return string(ch)
 		}
 	}
@@ -627,7 +628,7 @@ func shellExpansion(command string) string {
 }
 
 func unsafeShell(command string) string {
-	for _, construct := range []string{"\n", "$(", "`", "<(", ">("} {
+	for _, construct := range []string{"\n", "$(", "`", "<(", ">(", "=("} {
 		if strings.Contains(command, construct) {
 			if construct == "\n" {
 				return "shell construct is not allowed: newline"

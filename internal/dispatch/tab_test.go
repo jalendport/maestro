@@ -3,6 +3,7 @@ package dispatch
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -332,6 +333,23 @@ func TestTabTitle(t *testing.T) {
 	for in, want := range cases {
 		if got := tabTitle(in); got != want {
 			t.Errorf("tabTitle(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestTabGoneCountsOnlyANotFoundAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{errors.New("Process ID '385' not found in the requested project scope"), true},
+		{errors.New("process not found"), true},
+		{errors.New("rpc timeout"), false},
+		{errors.New("helper exited"), false},
+	} {
+		if got := tabGone(tc.err); got != tc.want {
+			t.Fatalf("tabGone(%v) = %v, want %v", tc.err, got, tc.want)
 		}
 	}
 }

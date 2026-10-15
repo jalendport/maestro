@@ -185,9 +185,11 @@ func TestHookCommandLanePayloadUnreadable(t *testing.T) {
 	}{
 		{"lane grok", "grok", "deny", true},
 		{"lane agy", "agy", "deny", true},
+		{"lane bare entry", "", "deny", true},
 		{"lane claude", "claude", "", true},
 		{"empty grok", "grok", `{"decision":"allow"}`, false},
 		{"empty agy", "agy", `{"decision":"allow"}`, false},
+		{"empty bare entry", "", "", false},
 		{"empty claude", "claude", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

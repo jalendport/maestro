@@ -33,9 +33,12 @@ func (a *app) hookCmd() *cobra.Command {
 			// Outside a Lane, an unreadable payload still allows so a Harness is
 			// never blocked. Inside a Lane the tool call must not run.
 			unreadable := func(err error, allowGrok bool) {
-				if os.Getenv("MAESTRO_TASK_FOLDER") != "" && (harness == "grok" || harness == "agy") {
+				// The Grok and Antigravity entries run `maestro hook` with no
+				// argument; Claude and Codex Lanes name their Harness. So a bare
+				// call inside a Lane is one of the two, and both read this shape.
+				if os.Getenv("MAESTRO_TASK_FOLDER") != "" && (harness == "" || harness == "grok" || harness == "agy") {
 					reason := "Lane payload unreadable: " + err.Error()
-					fmt.Fprintln(os.Stdout, string(hook.Render(harness, hook.Verdict{Kind: "deny", Reason: reason})))
+					fmt.Fprintln(os.Stdout, string(hook.Render("grok", hook.Verdict{Kind: "deny", Reason: reason})))
 					return
 				}
 				if harness == "agy" || (allowGrok && harness == "grok") {

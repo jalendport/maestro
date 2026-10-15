@@ -33,7 +33,7 @@ Ask the user only when a verb exits 2, or when a Task touches a human gate: push
 
 `maestro wait` prints the status line, the changed files, the checks, the blocked list, and the Report. The Report is `result.md` in the Run folder (`.agents/maestro/runs/<run>/<task>/`); Council folders are `.agents/maestro/councils/<slug>/`. In Solo, every Task is a todo and its Report is a comment.
 
-A Task is accepted when you have read its diff. Outcome `unverified` means the checks passed and the gate saw no fault but did not reach the close threshold: the diff decides.
+A Task is accepted when you have read its diff. Outcome `unverified` means Maestro did not close the Task on its own: the gate did not run, had no checks to run, or did not reach its close threshold. The diff decides.
 
 ## When a Run pauses or a Task is blocked
 

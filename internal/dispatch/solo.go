@@ -209,7 +209,7 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 		if tail, outputErr := l.Client.Output(pid, 40); outputErr == nil && output.observe(tail) {
 			lastOutput = time.Now()
 		}
-		if err != nil {
+		if tabGone(err) {
 			// A closed tab is gone from Solo: three answers in a row say so.
 			if statusErrors++; statusErrors >= 3 {
 				rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "stop", Text: "tab closed: " + err.Error()})
@@ -265,6 +265,12 @@ func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harnes
 	}
 	stop("report ready or tab ended")
 	return &harness.Outcome{}, "", nil
+}
+
+// tabGone reports a status answer that says Solo no longer has the process.
+// A timeout, a helper restart, or any other error says nothing about the tab.
+func tabGone(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
 // tabOutput compares output without reading or interpreting prompt text.

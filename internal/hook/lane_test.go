@@ -547,7 +547,7 @@ func TestDecideLaneUnsafeShell(t *testing.T) {
 	for _, tc := range []struct{ command, reason string }{
 		{"pwd\nrm file", "newline"}, {"pwd & rm file", "single &"},
 		{"echo $(touch file)", "$("}, {`echo "$(touch file)"`, "$("},
-		{"echo `touch file`", "`"}, {"cat <(touch file)", "<("}, {"echo >(touch file)", ">("},
+		{"echo `touch file`", "`"}, {"cat <(touch file)", "<("}, {"echo >(touch file)", ">("}, {"cat =(touch file)", "=("},
 		{"echo x > file", ">"}, {"echo x >> file", ">>"}, {"cat < file", "<"},
 		{"echo x 2> file", "2>"}, {"echo x &> file", "&>"}, {"echo x 2>&1 > file", ">"},
 	} {
@@ -679,6 +679,7 @@ func TestDecideLaneReadOnlyShellExpansion(t *testing.T) {
 		{"cat ?.txt", "?"},
 		{"ls [ab].txt", "["},
 		{"head -n 1 -- $FILE", "$"},
+		{"cat README.md(e:'touch x':)", "("},
 	} {
 		for _, access := range []string{"read", "edit"} {
 			got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": tc.command}}, &Lane{Access: access, Root: "/project", Tab: true})
@@ -689,7 +690,7 @@ func TestDecideLaneReadOnlyShellExpansion(t *testing.T) {
 	}
 	for _, command := range []string{
 		"find . -name '*.go'", "rg 'x*' -g '*.go' src", "echo '$HOME'", `echo \$HOME`, "git log -- '*.go'",
-		"find . -type f -print", `grep -r "a{2}" .`, "cat file 2>&1",
+		"find . -type f -print", `grep -r "a{2}" .`, "cat file 2>&1", `find . \( -name a -o -name b \)`, "grep 'f(x)' main.go",
 	} {
 		for _, access := range []string{"read", "edit"} {
 			if got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": command}}, &Lane{Access: access, Root: "/project"}); got.Kind != "auto_approve" {
@@ -752,6 +753,31 @@ func TestDecideLaneGitDirectoryWrites(t *testing.T) {
 		{"src/x.go", "auto_approve"},
 		{"src/.git/x.go", "auto_approve"},
 		{".gitignore", "auto_approve"},
+	} {
+		got := DecideLane(&Call{Tool: "write", CWD: root, Input: map[string]any{"file_path": tc.target}}, lane)
+		if got.Kind != tc.want {
+			t.Fatalf("%s = %+v, want %s", tc.target, got, tc.want)
+		}
+	}
+}
+
+// A `.git` that is a symlink into the project is still the git directory,
+// through either name.
+func TestDecideLaneGitDirectorySymlink(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "metadata"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "metadata"), filepath.Join(root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	lane := &Lane{Access: "edit", Root: root, RunFolder: filepath.Join(root, ".agents", "run")}
+	for _, tc := range []struct{ target, want string }{
+		{".git/config", "deny"},
+		{root + "/.git/hooks/pre-commit", "deny"},
+		{"metadata/config", "deny"},
+		{root + "/metadata/hooks/pre-commit", "deny"},
+		{"src/x.go", "auto_approve"},
 	} {
 		got := DecideLane(&Call{Tool: "write", CWD: root, Input: map[string]any{"file_path": tc.target}}, lane)
 		if got.Kind != tc.want {
