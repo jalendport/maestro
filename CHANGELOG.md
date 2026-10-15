@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added custom read-only agents to the spawn rule: a sub-agent whose definition file under `.claude/agents` or `~/.claude/agents` has a `tools` list of read tools only may be spawned
 
 ### Changed
+- Changed held Runs to start a plan Council only on request, at `[run] council_tasks` Tasks (default 10), or for a Router question or Council signal; `--no-council` stops it, and approval reads and routes the Plan file again under the same Run id without a second plan Council
 - Changed Antigravity read enforcement to the Maestro hook, so it no longer depends on the Antigravity settings file
 - Changed the Antigravity hook entry to cover commands and file writes; run `maestro adapter install agy` again
 - Changed edit Enforcement to use the sandbox and Maestro hook for Claude and Grok, the sandbox for Codex, and the Maestro hook for Antigravity; `claude_auto` and Grok edit Lanes with `dirs` outside the project are `best-effort`

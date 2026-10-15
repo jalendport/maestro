@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -132,19 +134,23 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 		plan += fmt.Sprintf("\n## Task %d\n- category: implement\n### Goal\nCreate the fixture file.\n### Done\nThe file exists.\n", i)
 	}
 	write(filepath.Join(project, "plan.md"), plan, 0o644)
-	invoke := func(want int, args ...string) string {
+	invokeAt := func(want int, root string, args ...string) string {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, maestro, args...)
-		cmd.Dir = project
+		cmd.Dir = root
 		out, err := cmd.CombinedOutput()
 		if cmd.ProcessState == nil || cmd.ProcessState.ExitCode() != want {
 			t.Fatalf("maestro %v: %v\n%s", args, err, out)
 		}
 		return string(out)
 	}
-	invoke(2, "run", "plan.md", "--level", "significant", "--floor", "heavy", "--ceiling", "heavy")
+	invoke := func(want int, args ...string) string {
+		t.Helper()
+		return invokeAt(want, project, args...)
+	}
+	invoke(2, "run", "plan.md", "--council", "--level", "significant", "--floor", "heavy", "--ceiling", "heavy")
 	runFolder := filepath.Join(config.RunsDir(project), "r-0001")
 	s, err := run.Load(runFolder)
 	if err != nil || s.State != run.StateHeld || len(s.Tasks) != 2 {
@@ -176,11 +182,34 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 	if err != nil || planCouncil.State != "finished" || planCouncil.SingleOpinion {
 		t.Fatalf("collected plan Council = %+v, error = %v", planCouncil, err)
 	}
-	invoke(0, "approve", s.Run)
+	write(filepath.Join(project, "plan.md"), "# Invalid Plan\n", 0o644)
+	if out := invoke(1, "approve", s.Run); !strings.Contains(out, "plan has no") {
+		t.Fatalf("parse error not printed: %s", out)
+	}
+	stillHeld, err := run.Load(runFolder)
+	if err != nil || stillHeld.State != run.StateHeld || len(stillHeld.Tasks) != 2 {
+		t.Fatalf("Run after parse error = %+v, error = %v", stillHeld, err)
+	}
+	plan = strings.ReplaceAll(plan, "Council lifecycle", "Revised Plan")
+	plan = strings.ReplaceAll(plan, "## Task", "## Revised Task")
+	plan += "\n## New Task\n- category: implement\n- blocked_by: [1]\n### Goal\nCreate another fixture file.\n### Done\nThe file exists.\n"
+	write(filepath.Join(project, "plan.md"), plan, 0o644)
+	if out := invoke(0, "approve", s.Run); !strings.Contains(out, "3 tasks") || !strings.Contains(out, "New Task") || !strings.Contains(out, "provisional") {
+		t.Fatalf("new provisional Routes not printed: %s", out)
+	}
 	invoke(0, "wait", s.Run)
 	s, err = run.Load(runFolder)
-	if err != nil || s.State != run.StateFinished {
+	if err != nil || s.State != run.StateFinished || s.Run != "r-0001" || len(s.Tasks) != 3 || s.Title != "Revised Plan" || s.Tasks[2].Title != "New Task" || len(s.Tasks[2].BlockedBy) != 1 || s.Tasks[2].BlockedBy[0] != "Revised Task 1" {
 		t.Fatalf("completed Run = %+v, error = %v", s, err)
+	}
+	planCouncils := 0
+	for _, slug := range s.Councils {
+		if strings.Contains(slug, "-plan") {
+			planCouncils++
+		}
+	}
+	if planCouncils != 1 {
+		t.Fatalf("plan Councils after approval = %v", s.Councils)
 	}
 	for _, task := range s.Tasks {
 		dispatched, err := dispatch.LoadTask(task.Folder)
@@ -213,5 +242,73 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 	review, err = council.Load(reviewFolder)
 	if err != nil || review.State != "finished" || review.SingleOpinion {
 		t.Fatalf("collected end Council = %+v, error = %v", review, err)
+	}
+
+	for _, tc := range []struct {
+		name, config, response string
+		tasks                  int
+		flags                  []string
+		council                bool
+	}{
+		{name: "six Tasks", tasks: 6},
+		{name: "explicit Council", tasks: 6, flags: []string{"--council"}, council: true},
+		{name: "size disabled by flag", tasks: 12, flags: []string{"--no-council"}},
+		{name: "no Council flag wins", tasks: 12, flags: []string{"--council", "--no-council"}},
+		{name: "default threshold", tasks: 10, council: true},
+		{name: "custom threshold", tasks: 6, config: "[run]\ncouncil_tasks = 6\n", council: true},
+		{name: "below custom threshold", tasks: 6, config: "[run]\ncouncil_tasks = 7\n"},
+		{name: "size rule off", tasks: 12, config: "[run]\ncouncil_tasks = 0\n"},
+		{name: "Router question", tasks: 1, response: `"lane":{"choice":"ask_orchestrator","confidence":0.95},"spec_is_concrete":{"noul":1}`, council: true},
+		{name: "Router question disabled", tasks: 1, flags: []string{"--no-council"}, response: `"lane":{"choice":"ask_orchestrator","confidence":0.95},"spec_is_concrete":{"noul":1}`},
+		{name: "Router Council signal", tasks: 1, response: `"spec_is_concrete":{"noul":1},"wants_independent_view":{"noul":1},"needs_write":{"noul":0}`, council: true},
+		{name: "Router Council signal disabled", tasks: 1, flags: []string{"--no-council"}, response: `"spec_is_concrete":{"noul":1},"wants_independent_view":{"noul":1},"needs_write":{"noul":0}`},
+		{name: "fallback Route", tasks: 1, response: `"spec_is_concrete":{"noul":1}`},
+		{name: "medium Route", tasks: 1, response: `"lane":{"choice":"codex-sol","confidence":0.5},"spec_is_concrete":{"noul":1},"judgment_level":{"score":1}`},
+		{name: "level gap", tasks: 1, response: `"lane":{"choice":"codex-sol","confidence":0.95},"spec_is_concrete":{"noul":1},"judgment_level":{"score":3}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, ".agents"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			write(config.ProjectFile(root), "", 0o644)
+			user := settings + tc.config
+			if tc.response != "" {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					fmt.Fprintf(w, `{"answers":{%s}}`, tc.response)
+				}))
+				defer server.Close()
+				user = strings.Replace(user, "backend = \"rules\"", "backend = \"jev\"\nbase_url = "+fmt.Sprintf("%q", server.URL), 1)
+				t.Setenv("TYPESAFE_API_KEY", "fixture-key")
+			}
+			write(config.UserFile(), user, 0o644)
+			src := "---\naccess: edit\nlevel: some\ntouch: ['*.txt']\n---\n# Approval rules\n"
+			for i := 1; i <= tc.tasks; i++ {
+				src += fmt.Sprintf("\n## Task %d\n### Goal\nCreate the fixture file.\n### Done\nThe file exists.\n", i)
+			}
+			write(filepath.Join(root, "plan.md"), src, 0o644)
+			args := append([]string{"run", "plan.md"}, tc.flags...)
+			out := invokeAt(2, root, args...)
+			wantHeld := "run r-0001 held.  Fold any findings into the Plan file, then: maestro approve r-0001"
+			if !strings.Contains(out, wantHeld) {
+				t.Fatalf("held message = %s", out)
+			}
+			held, err := run.Load(filepath.Join(config.RunsDir(root), "r-0001"))
+			if err != nil || held.State != run.StateHeld || len(held.Tasks) != tc.tasks {
+				t.Fatalf("held Run = %+v, error = %v", held, err)
+			}
+			if got := len(held.Councils) > 0; got != tc.council {
+				t.Fatalf("plan Councils = %v, want Council %v\n%s", held.Councils, tc.council, out)
+			}
+			status := invokeAt(0, root, "status", held.Run)
+			if !strings.Contains(status, "held") || (tc.name == "six Tasks" && strings.Contains(strings.ToLower(status), "council")) {
+				t.Fatalf("status = %s", status)
+			}
+			if tc.council {
+				invokeAt(0, root, "wait", held.Councils[0])
+			} else if entries, err := os.ReadDir(config.CouncilsDir(root)); err == nil && len(entries) != 0 {
+				t.Fatalf("unexpected Council folders: %v", entries)
+			}
+		})
 	}
 }

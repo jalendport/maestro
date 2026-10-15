@@ -24,7 +24,7 @@ import (
 
 func (a *app) runCmd() *cobra.Command {
 	var lane, level, floor, ceiling string
-	var wait bool
+	var wait, council, noCouncil bool
 	c := &cobra.Command{
 		Use:     "run <plan.md>",
 		Short:   "Run every Task of a Plan file (one live Run per project)",
@@ -48,7 +48,7 @@ func (a *app) runCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			s, err := run.Create(env, args[0], run.CreateOpts{Lane: lane, Level: lv, Floor: fl, Ceiling: ce})
+			s, err := run.Create(env, args[0], run.CreateOpts{Lane: lane, Level: lv, Floor: fl, Ceiling: ce, Council: council, NoCouncil: noCouncil})
 			if err != nil {
 				return err
 			}
@@ -65,7 +65,7 @@ func (a *app) runCmd() *cobra.Command {
 				for _, ap := range s.Approval {
 					ui.Outf("approval needed: %s", ap)
 				}
-				ui.Outf("run %s held.  Approve with: maestro approve %s   (edit the Plan file and run again to change it)", s.Run, s.Run)
+				ui.Outf("run %s held.  Fold any findings into the Plan file, then: maestro approve %s", s.Run, s.Run)
 				return &proc.ExitError{Code: proc.CodeOrchestrator}
 			}
 			return a.startRun(env, s, wait)
@@ -76,6 +76,8 @@ func (a *app) runCmd() *cobra.Command {
 	c.Flags().StringVar(&floor, "floor", "", "minimum Tier for every Task")
 	c.Flags().StringVar(&ceiling, "ceiling", "", "maximum Tier for every Task")
 	c.Flags().BoolVar(&wait, "wait", false, "keep the supervisor in this process and print the report at the end")
+	c.Flags().BoolVar(&council, "council", false, "start a plan Council when the Run holds for approval")
+	c.Flags().BoolVar(&noCouncil, "no-council", false, "skip the plan Council in every case")
 	return c
 }
 
@@ -187,19 +189,16 @@ func (a *app) approveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			folder, s, err := findRun(env.Root, args[0])
+			_, s, err := findRun(env.Root, args[0])
 			if err != nil {
 				return err
 			}
-			if s.State != run.StateHeld {
-				return fmt.Errorf("run %s is %s, not held", s.Run, s.State)
-			}
-			s.State = run.StateLive
-			s.Approval = nil
-			if err := s.Save(); err != nil {
+			if err := run.Approve(env, s); err != nil {
 				return err
 			}
-			_ = folder
+			if !a.json {
+				printPlan(s)
+			}
 			return a.startRun(env, s, wait)
 		},
 	}

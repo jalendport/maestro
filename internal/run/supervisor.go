@@ -24,16 +24,18 @@ import (
 
 // CreateOpts are the run verb's flags.
 type CreateOpts struct {
-	Lane    string
-	Level   roster.Level
-	Floor   roster.Tier
-	Ceiling roster.Tier
+	Lane      string
+	Level     roster.Level
+	Floor     roster.Tier
+	Ceiling   roster.Tier
+	Council   bool
+	NoCouncil bool
 }
 
 // Create parses the Plan file, lays out the Run folder with one Brief file
 // per Task, routes every Task provisionally, and decides whether the
-// breakdown needs approval. It starts a detached Council for a held Plan,
-// but does not start any Task.
+// breakdown needs approval. A held Plan can start a detached Council when
+// requested, large, or unclear. Create does not start any Task.
 func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 	if idx, live := LiveRunFor(env.Root); live {
 		return nil, fmt.Errorf("Run %s is live; use maestro add", idx.Run)
@@ -54,58 +56,21 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 		return nil, err
 	}
 	s := &State{Run: runID, Project: env.Root, Plan: plan.Path, Title: plan.Title, State: StateHeld, StartedAt: time.Now(), Folder: folder, Lane: o.Lane, Level: o.Level, Floor: o.Floor, Ceiling: o.Ceiling}
-	rt := env.NewRouter()
-	var approval []string
-	for i, b := range plan.Tasks {
-		id := dispatch.NewTaskID(folder)
-		taskDir := filepath.Join(folder, id)
-		if err := os.MkdirAll(taskDir, 0o755); err != nil {
-			return nil, err
-		}
-		bp := filepath.Join(taskDir, "brief.source.md")
-		if err := brief.Write(b, bp); err != nil {
-			return nil, err
-		}
-		ts := &TaskState{Number: i + 1, ID: id, Title: b.Title, BriefPath: bp, Access: b.EffectiveAccess(), Category: b.Category, BlockedBy: b.BlockedBy, State: TaskWaiting, Provisional: true, Folder: taskDir}
-		if ts.BlockedBy == nil {
-			ts.BlockedBy = []string{}
-		}
-		req := router.Request{Brief: b, Access: ts.Access, Root: env.Root, Lane: firstNonEmpty(b.Lane, o.Lane), Level: o.Level, Project: env.Project, InSolo: solo.InSolo()}
-		req.Floor, req.Ceiling = routeBounds(s, b)
-		route, err := rt.Route(req)
-		switch e := err.(type) {
-		case nil:
-			ts.Route = route
-			if route.Band == "fallback" || route.Band == "medium" {
-				approval = append(approval, fmt.Sprintf("task %d routed with %s confidence", i+1, route.Band))
-			}
-			if route.GapFlag {
-				approval = append(approval, fmt.Sprintf("task %d: level estimate %s is two levels from the router's %s", i+1, route.LevelEstimate, route.Level))
-			}
-		case *router.AskOrchestrator:
-			ts.Waiting = e.Reason
-			approval = append(approval, fmt.Sprintf("task %d: %s", i+1, e.Reason))
-		case *router.CouncilSignal:
-			ts.Waiting = e.Reason
-			approval = append(approval, fmt.Sprintf("task %d wants a council: %s", i+1, e.Reason))
-		default:
-			return nil, fmt.Errorf("task %d: %w", i+1, err)
-		}
-		s.Tasks = append(s.Tasks, ts)
+	unclear, err := routePlan(env, s, plan)
+	if err != nil {
+		return nil, err
 	}
-	if len(plan.Tasks) > 4 {
-		approval = append(approval, fmt.Sprintf("%d tasks (more than 4)", len(plan.Tasks)))
-	}
-	s.Approval = approval
-	if len(approval) == 0 {
+	if len(s.Approval) == 0 {
 		s.State = StateLive
 	}
 	if err := s.Save(); err != nil {
 		return nil, err
 	}
-	if len(approval) > 0 {
-		// Plan Council: Heavy, over the Plan file, so the
-		// Orchestrator approves the breakdown with the Merge in hand.
+	limit := 10
+	if env.Roster.Run.CouncilTasks != nil {
+		limit = *env.Roster.Run.CouncilTasks
+	}
+	if s.State == StateHeld && !o.NoCouncil && (o.Council || unclear || (limit > 0 && len(plan.Tasks) >= limit)) {
 		rel, _ := filepath.Rel(env.Root, plan.Path)
 		c, err := council.Create(env, council.Opts{
 			Question: "Review this plan before it runs: are the tasks complete, correctly ordered, and bounded? Name any task whose Goal or Done is too thin to start.",
@@ -124,6 +89,82 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 		}
 	}
 	return s, nil
+}
+
+func routePlan(env *dispatch.Env, s *State, plan *brief.Plan) (bool, error) {
+	rt := env.NewRouter()
+	unclear := false
+	var approval []string
+	for i, b := range plan.Tasks {
+		id := dispatch.NewTaskID(s.Folder)
+		taskDir := filepath.Join(s.Folder, id)
+		if err := os.MkdirAll(taskDir, 0o755); err != nil {
+			return false, err
+		}
+		bp := filepath.Join(taskDir, "brief.source.md")
+		if err := brief.Write(b, bp); err != nil {
+			return false, err
+		}
+		ts := &TaskState{Number: i + 1, ID: id, Title: b.Title, BriefPath: bp, Access: b.EffectiveAccess(), Category: b.Category, BlockedBy: b.BlockedBy, State: TaskWaiting, Provisional: true, Folder: taskDir}
+		if ts.BlockedBy == nil {
+			ts.BlockedBy = []string{}
+		}
+		req := router.Request{Brief: b, Access: ts.Access, Root: env.Root, Lane: firstNonEmpty(b.Lane, s.Lane), Level: s.Level, Project: env.Project, InSolo: solo.InSolo()}
+		req.Floor, req.Ceiling = routeBounds(s, b)
+		route, err := rt.Route(req)
+		switch e := err.(type) {
+		case nil:
+			ts.Route = route
+			if route.Band == "fallback" || route.Band == "medium" {
+				approval = append(approval, fmt.Sprintf("task %d routed with %s confidence", i+1, route.Band))
+			}
+			if route.GapFlag {
+				approval = append(approval, fmt.Sprintf("task %d: level estimate %s is two levels from the router's %s", i+1, route.LevelEstimate, route.Level))
+			}
+		case *router.AskOrchestrator:
+			unclear = true
+			ts.Waiting = e.Reason
+			approval = append(approval, fmt.Sprintf("task %d: %s", i+1, e.Reason))
+		case *router.CouncilSignal:
+			unclear = true
+			ts.Waiting = e.Reason
+			approval = append(approval, fmt.Sprintf("task %d wants a council: %s", i+1, e.Reason))
+		default:
+			return false, fmt.Errorf("task %d: %w", i+1, err)
+		}
+		s.Tasks = append(s.Tasks, ts)
+	}
+	if len(plan.Tasks) > 4 {
+		approval = append(approval, fmt.Sprintf("%d tasks (more than 4)", len(plan.Tasks)))
+	}
+	s.Approval = approval
+	return unclear, nil
+}
+
+// Approve routes the current Plan file under the held Run's id, without
+// another Council. A failed parse or Route leaves the saved Run held.
+func Approve(env *dispatch.Env, s *State) error {
+	if s.State != StateHeld {
+		return fmt.Errorf("run %s is %s, not held", s.Run, s.State)
+	}
+	if idx, live := LiveRunFor(env.Root); live {
+		return fmt.Errorf("Run %s is live; use maestro add", idx.Run)
+	}
+	plan, err := brief.ParsePlan(s.Plan)
+	if err != nil {
+		return err
+	}
+	next := *s
+	next.Title, next.Tasks = plan.Title, nil
+	if _, err := routePlan(env, &next, plan); err != nil {
+		return err
+	}
+	next.State, next.Approval = StateLive, nil
+	if err := next.Save(); err != nil {
+		return err
+	}
+	*s = next
+	return nil
 }
 
 func firstNonEmpty(a, b string) string {

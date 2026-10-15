@@ -208,7 +208,7 @@ maestro wait r-0012                          # the run report
 maestro resume r-0012 --task 4 --lane claude-opus:high   # or --brief <file>, or --skip
 ```
 
-A run holds for approval, with exit code 2, when any one of these is true: the plan has more than four tasks, a task has a medium or fallback route, the level you gave a task is two levels from the router's, the router asks the orchestrator a question, or the router signals a council. A held run starts a plan council over the plan file.
+A run holds for approval, with exit code 2, when any one of these is true: the plan has more than four tasks, a task has a medium or fallback route, the level you gave a task is two levels from the router's, the router asks the orchestrator a question, or the router signals a council. A held Run starts a plan Council only with `--council`, when the Plan has at least `[run] council_tasks` Tasks (default `10`; `0` disables the size rule), or when the Router asks the Orchestrator or signals a Council for a Task. `--no-council` stops the plan Council in every case. Fold any findings into the Plan file, then use `maestro approve <run>`: it reads the file again, routes the current Tasks, and starts under the same Run id, with no second plan Council.
 
 Ask several lanes one question:
 

@@ -26,6 +26,7 @@ type File struct {
 	Budget      Budget             `toml:"budget"`
 	Failure     Failure            `toml:"failure"`
 	Concurrency Concurrency        `toml:"concurrency"`
+	Run         Run                `toml:"run"`
 	Aliases     map[string]string  `toml:"aliases"`
 }
 
@@ -112,6 +113,11 @@ type Failure struct {
 	KeepAwake                *bool               `toml:"keep_awake"`
 	RunPauseAfterEscalations int                 `toml:"run_pause_after_escalations"`
 	RunPauseAfterSameError   int                 `toml:"run_pause_after_same_error"`
+}
+
+// Run is the `run` block. A pointer permits an explicit zero override.
+type Run struct {
+	CouncilTasks *int `toml:"council_tasks"`
 }
 
 // Concurrency is the `concurrency` block.

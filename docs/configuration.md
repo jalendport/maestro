@@ -263,6 +263,18 @@ Default `wall_limit`:
 
 A Brief can raise the Wall limit for one Task. It cannot lower it.
 
+### [run]
+
+These keys control the plan Council for a held Run. The approval hold rules are separate: more than four Tasks, a medium or fallback Route, a Judgment level two steps from the Router's, a Router question, or a Router Council signal.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `council_tasks` | integer | `10` | Starts a plan Council when a held Plan has at least this many Tasks. `0` disables the size rule. |
+
+`maestro run --council <plan>` requests a plan Council for a held Run. A Router question or Council signal for any Task also starts it. `--no-council` stops the plan Council in every case, including when `--council` is set. A hold alone does not start a Council.
+
+Fold any Council findings into the Plan file, then use `maestro approve <run>`. Approval reads the file at the recorded path again, parses it, prints new provisional Routes, and starts the current Tasks under the same Run id. It starts no second plan Council. A parse error leaves the Run held.
+
 ### [concurrency]
 
 These keys set how many Lanes run at the same time.

@@ -242,6 +242,9 @@ keep_awake = true
 run_pause_after_escalations = 3
 run_pause_after_same_error = 2
 
+[run]
+council_tasks = 10
+
 [concurrency]
 max_parallel = 4
 max_per_account = 2

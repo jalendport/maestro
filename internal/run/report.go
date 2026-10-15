@@ -133,7 +133,7 @@ func Status(s *State) string {
 		for _, a := range s.Approval {
 			fmt.Fprintf(&w, "approval needed: %s\n", a)
 		}
-		fmt.Fprintf(&w, "approve with: maestro approve %s   (edit the Plan file first if needed, then run it again)\n", s.Run)
+		fmt.Fprintf(&w, "run %s held.  Fold any findings into the Plan file, then: maestro approve %s\n", s.Run, s.Run)
 	}
 	if s.PauseReason != "" {
 		fmt.Fprintf(&w, "paused: %s\n", s.PauseReason)

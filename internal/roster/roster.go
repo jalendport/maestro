@@ -192,6 +192,7 @@ type Roster struct {
 	Budget         config.Budget
 	Failure        config.Failure
 	Concurrency    config.Concurrency
+	Run            config.Run
 	Warnings       []string
 }
 
@@ -228,6 +229,7 @@ func Merge(d, u *config.File) *Roster {
 		Budget:         d.Budget,
 		Failure:        d.Failure,
 		Concurrency:    d.Concurrency,
+		Run:            d.Run,
 	}
 	userAccounts := map[string]config.Account{}
 	replaced := map[string]bool{}
@@ -319,6 +321,9 @@ func Merge(d, u *config.File) *Roster {
 	mergeBudget(&r.Budget, u.Budget)
 	mergeFailure(&r.Failure, u.Failure)
 	mergeConcurrency(&r.Concurrency, u.Concurrency)
+	if u.Run.CouncilTasks != nil {
+		r.Run.CouncilTasks = u.Run.CouncilTasks
+	}
 	r.bindAccounts()
 	r.checkDrift(d, u)
 	return r
