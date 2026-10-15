@@ -63,6 +63,7 @@ func TestHookCommandScope(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("MAESTRO_HOME", t.TempDir())
+			t.Setenv("MAESTRO_TASK_FOLDER", "")
 			if tc.scope != "" {
 				if err := os.WriteFile(config.UserFile(), []byte("[hook]\nscope = \""+tc.scope+"\"\n"), 0o644); err != nil {
 					t.Fatal(err)
@@ -97,6 +98,7 @@ func TestAdapterPrintsScope(t *testing.T) {
 	for _, scope := range []string{"projects", "all"} {
 		t.Run(scope, func(t *testing.T) {
 			t.Setenv("MAESTRO_HOME", t.TempDir())
+			t.Setenv("MAESTRO_TASK_FOLDER", "")
 			if err := os.WriteFile(config.UserFile(), []byte("[hook]\nscope = \""+scope+"\"\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -112,6 +114,7 @@ func TestAdapterPrintsScope(t *testing.T) {
 
 func TestDoctorSettingsRows(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	t.Setenv("TYPESAFE_API_KEY", "")
 	row := jevRow()
 	if row.Name != "jev" || row.Detail != "no key" || !strings.Contains(row.State, "edits will end unverified") {
@@ -137,6 +140,7 @@ func TestDoctorSettingsRows(t *testing.T) {
 
 func TestBudgetPrintsCodexReserve(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	d, _, err := config.ParseFile(roster.Defaults)
 	if err != nil {
 		t.Fatal(err)

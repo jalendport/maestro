@@ -319,7 +319,8 @@ func TestRelayWaitSerializesAnswers(t *testing.T) {
 
 func TestRelayWaitLockDeadlineDoesNotConsumeAnswer(t *testing.T) {
 	folder := t.TempDir()
-	if err := writeRelayJSON(folder, "relay.lock", relayLock{PID: os.Getpid(), At: time.Now().Add(-time.Hour), ID: "owner"}); err != nil {
+	// A live owner's lock inside the Relay deadline is never taken over.
+	if err := writeRelayJSON(folder, "relay.lock", relayLock{PID: os.Getpid(), At: time.Now().UTC(), ID: "owner"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(folder, "answer-allow"), []byte("owner"), 0o600); err != nil {

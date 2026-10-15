@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fixed the recorded changed files of a judged attempt so they match what the gate saw, not what the checks created afterwards
 - Fixed a Lane or Seat whose Solo tab was closed by hand: it ends at once instead of at its wall limit
 - Fixed the shell check to accept `2>&1`, which names no file
+- Fixed Claude Lane tabs that waited on the sandbox's network prompt: every Claude Lane now denies a host outside the allowlist without a prompt (`strictAllowlist`)
+- Fixed `maestro hook` for Grok and Antigravity to deny an unreadable stdin or payload inside a Lane instead of allowing it
+- Fixed tests that read the developer's real Grok home or the Lane's own `MAESTRO_TASK_FOLDER`
 - Fixed Council todo titles longer than 200 characters by cutting them at a word boundary with a trailing `…`
 - Fixed `maestro status` to show `—` for a Task's elapsed time when the Task never started
 - Fixed the Homebrew cask so it no longer prints a deprecation warning for `postflight` on install

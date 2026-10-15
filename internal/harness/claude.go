@@ -138,7 +138,7 @@ func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 		"sandbox": map[string]any{
 			"enabled": true, "autoAllowBashIfSandboxed": false,
 			"allowUnsandboxedCommands": false, "failIfUnavailable": true,
-			"filesystem": filesystem, "network": map[string]bool{"allowLocalBinding": true},
+			"filesystem": filesystem, "network": map[string]bool{"allowLocalBinding": true, "strictAllowlist": true},
 		},
 		"hooks": map[string]any{
 			// Saved settings are excluded, so each Lane needs its own hook.

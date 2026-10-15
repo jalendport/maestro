@@ -819,7 +819,6 @@ loop:
 
 // judge applies the Report status, the scope guard, the checks, and the gate.
 func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []string, b *brief.Brief, snap attemptBaseline) *Record {
-	rec.judged = true
 	rec.Outcome.Status = report.Status
 	rec.Permission.Blocked = report.Blocked
 	switch report.Status {
@@ -837,6 +836,7 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 	// Verification: changed files, scope guard, commit range, checks.
 	runRel, _ := filepath.Rel(t.Project, config.RunsDir(t.Project))
 	rec.Verification.Changed = without(snap.Changed(t.Project), runRel)
+	rec.judged = true
 	// A read Lane's Enforcement keeps it from writing; tree changes seen during a
 	// read Dispatch belong to the edit Dispatch beside it, so they are recorded
 	// but never counted as violations.

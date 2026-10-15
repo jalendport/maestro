@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -173,6 +174,35 @@ func TestEnvAlwaysStripsJevKey(t *testing.T) {
 		}
 		if !vendor {
 			t.Fatal("vendor key removed from metered Lane")
+		}
+	}
+}
+
+// A host outside the allowlist is denied without a prompt in every Claude Lane,
+// so a tab never waits on the sandbox's network dialog.
+func TestClaudeShapesDenyNetworkWithoutAPrompt(t *testing.T) {
+	c := &Claude{bin: "/bin/claude"}
+	for _, access := range []string{"read", "edit"} {
+		command, err := c.Build(Launch{Access: access, Root: "/project", RunFolder: "/project/report"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var settings struct {
+			Sandbox struct {
+				Network map[string]bool `json:"network"`
+			} `json:"sandbox"`
+		}
+		found := false
+		for i, arg := range command.Cmd.Args {
+			if arg == "--settings" && i+1 < len(command.Cmd.Args) {
+				if err := json.Unmarshal([]byte(command.Cmd.Args[i+1]), &settings); err != nil {
+					t.Fatal(err)
+				}
+				found = true
+			}
+		}
+		if !found || !settings.Sandbox.Network["strictAllowlist"] || !settings.Sandbox.Network["allowLocalBinding"] {
+			t.Fatalf("%s network settings = %+v", access, settings.Sandbox.Network)
 		}
 	}
 }
