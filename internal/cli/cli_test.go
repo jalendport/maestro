@@ -34,6 +34,18 @@ func TestInformationCommandsDoNotWrite(t *testing.T) {
 	}
 }
 
+func TestBriefHelpHasNoPushRule(t *testing.T) {
+	root := (&app{}).build()
+	root.SetArgs([]string{"help", "brief"})
+	out := captureStdout(t, root.Execute)
+	if strings.Contains(strings.ToLower(out), "push") {
+		t.Fatalf("Brief help contains a push rule:\n%s", out)
+	}
+	if !strings.Contains(out, "commit: false") || !strings.Contains(out, "true lets the Lane commit as its own guidance says") {
+		t.Fatalf("Brief help lacks commit guidance:\n%s", out)
+	}
+}
+
 func TestDoctorFailsForInstalledHarnessError(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	t.Setenv("GROK_HOME", t.TempDir())

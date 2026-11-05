@@ -79,6 +79,9 @@ func TestDefaultsParseAndBind(t *testing.T) {
 	if len(r.Warnings) != 0 {
 		t.Fatalf("warnings on a clean merge: %v", r.Warnings)
 	}
+	if got := r.Chain(TierFrontier, "implement"); !slices.Equal(got, []string{"codex-astra", "claude-fable"}) {
+		t.Fatalf("Frontier chain = %v", got)
+	}
 	f := r.Families["codex-sol"]
 	if f.Account != "codex" {
 		t.Fatalf("codex-sol bound to %q", f.Account)

@@ -158,7 +158,7 @@ Default entries:
 | `heavy` | `review` | `["claude-opus", "codex-sol", "grok", "agy-pro"]` |
 | `heavy` | `spec` | `["claude-opus", "codex-sol", "grok", "agy-pro"]` |
 | `heavy` | `"large input"` | `["agy-pro", "claude-opus", "codex-sol", "grok"]` |
-| `frontier` | `default` | `["codex-astra"]` |
+| `frontier` | `default` | `["codex-astra", "claude-fable"]` |
 
 A category name with a space must be in quotes in TOML.
 

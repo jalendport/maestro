@@ -60,9 +60,8 @@ func Render(b *Brief, o RenderOpts) string {
 		w.WriteString("\n")
 	}
 	w.WriteString("## Rules\n\n")
-	w.WriteString("- Do not push.\n")
 	if b.WantsCommit() {
-		w.WriteString("- Commit as your own commit guidance says. Stage explicit paths, never `git add -A`. Never push.\n")
+		w.WriteString("- Commit as your own commit guidance says. Commit only the files that you changed for this Task.\n")
 	} else {
 		w.WriteString("- Do not commit.\n")
 	}

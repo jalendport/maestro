@@ -144,7 +144,7 @@ spec          = ["claude-opus", "codex-sol", "grok", "agy-pro"]
 "large input" = ["agy-pro", "claude-opus", "codex-sol", "grok"]
 
 [rules.frontier]
-default = ["codex-astra"]
+default = ["codex-astra", "claude-fable"]
 
 [prices."claude-fable-5-1"]
 input = 10.00

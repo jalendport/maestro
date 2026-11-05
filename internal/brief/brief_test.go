@@ -118,6 +118,35 @@ func TestParseReport(t *testing.T) {
 	}
 }
 
+func TestRenderCommitRules(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		commit bool
+		rule   string
+	}{
+		{"no commit", false, "- Do not commit.\n"},
+		{"commit", true, "- Commit as your own commit guidance says. Commit only the files that you changed for this Task.\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := ParseText(sample)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.Commit = &tc.commit
+			out := Render(b, RenderOpts{Access: AccessEdit})
+			if strings.Contains(strings.ToLower(out), "push") {
+				t.Fatalf("Brief contains a push rule:\n%s", out)
+			}
+			if !strings.Contains(out, tc.rule) {
+				t.Fatalf("Brief lacks %q:\n%s", tc.rule, out)
+			}
+			if tc.commit && strings.Contains(out, "- Do not commit.\n") {
+				t.Fatal("Brief denies the requested commit")
+			}
+		})
+	}
+}
+
 func TestRenderEditorToolsRule(t *testing.T) {
 	b, err := ParseText(sample)
 	if err != nil {

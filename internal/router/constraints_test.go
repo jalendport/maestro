@@ -62,6 +62,44 @@ func TestRulesEscalateHeavyThroughFrontierChain(t *testing.T) {
 	}
 }
 
+func TestRulesFrontierFallsBackToFable(t *testing.T) {
+	rt := testRouter(t)
+	req := Request{
+		Brief:    &brief.Brief{Fields: brief.Fields{Level: "expert", Category: "implement"}},
+		Access:   brief.AccessEdit,
+		Floor:    roster.TierFrontier,
+		Excluded: []string{"codex-astra"},
+	}
+	route, err := rt.Route(req)
+	if err != nil || route.FamilyID != "claude-fable" || route.Tier != roster.TierFrontier || route.Source != "rules" || route.TieBreak != "chain implement" {
+		t.Fatalf("%+v %v", route, err)
+	}
+}
+
+func TestRulesFrontierExcludesRequestOnlyFable(t *testing.T) {
+	rt := testRouter(t)
+	rt.Roster.Families["claude-fable"].RequestOnly = true
+	req := Request{
+		Brief:  &brief.Brief{Fields: brief.Fields{Level: "expert", Category: "implement"}},
+		Access: brief.AccessEdit,
+		Floor:  roster.TierFrontier,
+	}
+	route, err := rt.Route(req)
+	if err != nil || route.FamilyID != "codex-astra" {
+		t.Fatalf("%+v %v", route, err)
+	}
+	for _, exclusion := range route.Excluded {
+		if exclusion.Family == "claude-fable" && exclusion.Rule == "request only" {
+			req.Excluded = []string{"codex-astra"}
+			if route, err := rt.Route(req); err == nil || route != nil {
+				t.Fatalf("request-only Fable took an automatic Route: %+v %v", route, err)
+			}
+			return
+		}
+	}
+	t.Fatal("Route lacks the request-only exclusion for Fable")
+}
+
 func TestFanOutNeedsExplicitLaneAndEffort(t *testing.T) {
 	for _, effort := range []string{"ultra", "max", "ultracode"} {
 		for _, backend := range []string{"rules", "jev"} {

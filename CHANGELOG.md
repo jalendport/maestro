@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Changed
+- Changed rendered Briefs and Brief format help to leave push rules to the user; a Lane that may commit must commit only the files it changed for that Task
+- Changed the default Frontier chain to try `codex-astra`, then `claude-fable`
 - Changed Claude and Antigravity edit Lanes to relay commands outside the allow list on both the one-shot path and the tab path; Antigravity edit Lanes use Maestro's limits with no vendor print timeout
 
 ### Fixed
