@@ -122,6 +122,32 @@ func TestRelayDecisionsAndCleanup(t *testing.T) {
 	}
 }
 
+func TestRelayDeniesSoloToolsWithoutFiles(t *testing.T) {
+	oldDeadline, oldInterval := relayDeadline, relayPollInterval
+	relayDeadline, relayPollInterval = 25*time.Millisecond, time.Millisecond
+	t.Cleanup(func() { relayDeadline, relayPollInterval = oldDeadline, oldInterval })
+	for _, tool := range []string{"mcp__solo__spawn_agent", "mcp__solo__send_input", "mcp__solo__whoami"} {
+		t.Run(tool, func(t *testing.T) {
+			folder := t.TempDir()
+			if err := os.WriteFile(filepath.Join(folder, "lane.json"), []byte(`{"harness":"claude","access":"edit"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			input := fmt.Sprintf(`{"tool_name":%q,"tool_input":{}}`, tool)
+			if err := Relay(folder, strings.NewReader(input), &output); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output.String(), `"behavior":"deny"`) || !strings.Contains(output.String(), `"hookEventName":"PermissionRequest"`) {
+				t.Fatalf("permission response = %s", output.String())
+			}
+			files, err := os.ReadDir(folder)
+			if err != nil || len(files) != 1 || files[0].Name() != "lane.json" {
+				t.Fatalf("Solo request wrote Relay files: %v, %v", files, err)
+			}
+		})
+	}
+}
+
 func TestRelayWaitAnswersAndCleanup(t *testing.T) {
 	for _, answer := range []string{"allow", "deny"} {
 		t.Run(answer, func(t *testing.T) {

@@ -3,6 +3,7 @@ package harness
 import (
 	"encoding/json"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -39,6 +40,19 @@ func TestClaudePermissionHookForEachAccess(t *testing.T) {
 		}
 		if err := json.Unmarshal([]byte(settings), &value); err != nil {
 			t.Fatal(err)
+		}
+		preTool := value.Hooks["PreToolUse"]
+		if len(preTool) != 1 || preTool[0].Matcher == nil {
+			t.Fatalf("missing Lane hook matcher: %s", settings)
+		}
+		matcher, err := regexp.Compile("^(?:" + *preTool[0].Matcher + ")$")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tool := range []string{"mcp__solo__list_processes", "mcp__solo__search_output", "mcp__solo__send_input", "mcp__solo__spawn_agent", "mcp__solo__future_tool"} {
+			if !matcher.MatchString(tool) {
+				t.Fatalf("Lane hook does not check %s", tool)
+			}
 		}
 		hooks := value.Hooks["PermissionRequest"]
 		if len(hooks) != 1 || hooks[0].Matcher != nil || len(hooks[0].Hooks) != 1 {

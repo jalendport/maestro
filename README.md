@@ -193,7 +193,18 @@ For example, you end a grilling session with a plan for a new probe feature. The
 
 ### Solo
 
-Every Lane runs as a headless child process. Inside Solo, Maestro opens one terminal View per Dispatch. A Lane inside Solo gets no Solo MCP tools or `SOLO_` variables. The View shows Dispatch events, model text, and tool names until the Dispatch ends. The tab name uses the Brief's `tab` field or the first words of its title, followed by the Family. The `close_tabs` setting controls when the View tab closes, including a View that opens after the Dispatch ends. The Lane gets its Pointer and runs without a wait for Solo. If Solo cannot open the terminal or start the View, Maestro prints one warning and the Dispatch continues. Closing a View tab does not stop the Lane.
+Every Lane runs as a headless child process. Inside Solo, Maestro opens one terminal View per Dispatch. The View shows Dispatch events, model text, and tool names until the Dispatch ends. The tab name uses the Brief's `tab` field or the first words of its title, followed by the Family. The `close_tabs` setting controls when the View tab closes, including a View that opens after the Dispatch ends. The Lane gets its Pointer and runs without a wait for Solo. If Solo cannot open the terminal or start the View, Maestro prints one warning and the Dispatch continues. Closing a View tab does not stop the Lane.
+
+With a Solo link, Maestro passes Solo's MCP server to a Claude Lane through `--mcp-config`. Read and edit Lanes get the same read-only set, which also permits a todo comment:
+
+- `mcp__solo__list_processes`
+- `mcp__solo__get_process_status`
+- `mcp__solo__get_process_output`
+- `mcp__solo__search_output`
+- `mcp__solo__get_process_ports`
+- `mcp__solo__todo_comment_create`
+
+The Brief gives the Solo project id. Each Solo tool call needs this id in `project_id`. A Claude Lane can read dev server or test watcher output and add a todo comment. Other Solo tools are denied without a Relay. A Lane has no Solo identity, so Solo could treat its action as an action of the Orchestrator. All `SOLO_` variables stay removed. With no Solo link, a Claude Lane gets no MCP config. Other Harnesses and the Canary get no Solo MCP tools.
 
 `maestro watch <task>` opens the same View in any terminal. You can also give it a Run folder path. Unknown stream lines are skipped. Antigravity reports its text when its final JSON response is available.
 

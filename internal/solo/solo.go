@@ -63,6 +63,9 @@ type Client struct {
 	done   chan struct{}
 }
 
+// Command is the server command used by this session.
+func (c *Client) Command() string { return c.cmd.Path }
+
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`

@@ -504,6 +504,11 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 			"MAESTRO_TASK_FOLDER":              t.Folder,
 		}),
 	}
+	soloProjectID := 0
+	if h.Name() == "claude" && env.Solo != nil {
+		launch.SoloMCPCommand = env.Solo.Client.Command()
+		soloProjectID = env.Solo.ProjectID
+	}
 	renderBrief := b
 	if t.Access == brief.AccessRead && h.Name() == "claude" {
 		launch.Pointer = brief.Pointer(filepath.Join(t.Folder, FileBrief))
@@ -532,6 +537,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	rendered := brief.Render(renderBrief, brief.RenderOpts{
 		TaskID: t.Task, RunID: t.Run, Access: t.Access, ProjectChecks: projectChecks, BriefChecks: briefChecks,
 		ReportPath: reportRel, Retry: retry, ReportByMessage: command.ReportByText, Council: t.Council,
+		SoloProjectID: soloProjectID,
 	})
 	if err := os.WriteFile(filepath.Join(t.Folder, FileBrief), []byte(rendered), 0o644); err != nil {
 		return fail(FailLane, err.Error())

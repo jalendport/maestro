@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -114,13 +115,17 @@ func Relay(folder string, input io.Reader, output io.Writer) error {
 	if err := json.NewDecoder(input).Decode(&request); err != nil {
 		return err
 	}
-	answer, err := RelayWait(folder, request)
-	if err != nil {
-		return err
-	}
 	behavior := "deny"
-	if answer == "allow" {
-		behavior = "allow"
+	// The allowed Solo tools need no permission request. A Lane has no Solo
+	// identity, so any other Solo action must not reach the Orchestrator.
+	if !strings.HasPrefix(request.ToolName, "mcp__solo__") {
+		answer, err := RelayWait(folder, request)
+		if err != nil {
+			return err
+		}
+		if answer == "allow" {
+			behavior = "allow"
+		}
 	}
 	return json.NewEncoder(output).Encode(map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "PermissionRequest", "decision": map[string]string{"behavior": behavior},

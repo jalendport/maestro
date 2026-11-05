@@ -833,6 +833,30 @@ func TestDecideLaneKnownReadTools(t *testing.T) {
 	}
 }
 
+func TestClaudeLaneSoloAllowList(t *testing.T) {
+	for _, access := range []string{"read", "edit"} {
+		lane := &Lane{Harness: "claude", Access: access, Allow: []string{"mcp__solo__*"}}
+		for _, tool := range []string{
+			"mcp__solo__list_processes", "mcp__solo__get_process_status",
+			"mcp__solo__get_process_output", "mcp__solo__search_output",
+			"mcp__solo__get_process_ports", "mcp__solo__todo_comment_create",
+		} {
+			if got := DecideLane(&Call{Harness: "claude", Tool: tool}, lane); got.Kind != "allow" {
+				t.Fatalf("%s %s = %+v", access, tool, got)
+			}
+		}
+		for _, tool := range []string{
+			"mcp__solo__spawn_agent", "mcp__solo__spawn_process", "mcp__solo__send_input",
+			"mcp__solo__close_process", "mcp__solo__whoami", "mcp__solo__list_projects",
+			"mcp__solo__todo_create", "mcp__solo__todo_comment_create_extra",
+		} {
+			if got := DecideLane(&Call{Harness: "claude", Tool: tool, Input: map[string]any{"extra_args": []any{"dontAsk"}}}, lane); got.Kind != "deny" {
+				t.Fatalf("%s %s = %+v", access, tool, got)
+			}
+		}
+	}
+}
+
 func TestDecideLaneGitDirectoryWrites(t *testing.T) {
 	root := t.TempDir()
 	lane := &Lane{Access: "edit", Root: root, RunFolder: filepath.Join(root, ".agents", "run")}

@@ -73,12 +73,15 @@ func TestRelayCommandUsesEnvironmentAndProjectLookup(t *testing.T) {
 		if err := os.MkdirAll(control, 0o700); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(`{"harness":"claude","access":"edit"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		reply := answerOpenRelay(control, "allow")
 		cmd := (&app{}).relayCmd()
 		if !cmd.Hidden {
 			t.Fatal("relay is visible")
 		}
-		cmd.SetIn(strings.NewReader(`{"tool_name":"Bash","tool_input":{}}`))
+		cmd.SetIn(strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"make deploy"}}`))
 		var out bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetArgs([]string{id})

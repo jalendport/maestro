@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/adapter"
+	"github.com/jalendport/maestro/internal/solo"
 )
 
 // Claude is the Claude Code adapter.
@@ -72,6 +73,9 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 	case "read":
 		tools := append([]string{}, readTools...)
 		tools = append(tools, fmt.Sprintf("Write(//%s/**)", l.RunFolder), fmt.Sprintf("Edit(//%s/**)", l.RunFolder))
+		if l.SoloMCPCommand != "" {
+			tools = append(tools, solo.LaneTools()...)
+		}
 		flags = append(flags, "--setting-sources", "", "--permission-mode", "dontAsk", "--allowedTools")
 		flags = append(flags, tools...)
 	case "edit":
@@ -80,12 +84,19 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 			mode = "auto"
 		}
 		tools := []string{"Bash(git diff *)", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git blame *)", "Bash(git status)", "Bash(git diff)", "Bash(ls *)", "Bash(cat *)", "WebFetch", "WebSearch"}
-		tools = append(tools, l.AllowRules...)
+		for _, rule := range l.AllowRules {
+			if rule != "mcp__solo" && !strings.HasPrefix(rule, "mcp__solo__") {
+				tools = append(tools, rule)
+			}
+		}
 		for _, cmd := range l.AllowedCommands {
 			tools = append(tools, "Bash("+cmd+")", "Bash("+cmd+" *)")
 		}
 		if l.AllowCommit {
 			tools = append(tools, "Bash(git add *)", "Bash(git commit *)")
+		}
+		if l.SoloMCPCommand != "" {
+			tools = append(tools, solo.LaneTools()...)
 		}
 		// The user's own settings could widen the allowlist with write-capable
 		// commands, so the edit shape ignores them like the read shape does.
@@ -96,6 +107,15 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 		}
 	default:
 		return nil, fmt.Errorf("claude has no %q shape", l.Access)
+	}
+	if l.SoloMCPCommand != "" {
+		mcp, err := json.Marshal(map[string]any{
+			"mcpServers": map[string]any{"solo": map[string]string{"command": l.SoloMCPCommand}},
+		})
+		if err != nil {
+			return nil, err
+		}
+		flags = append(flags, "--mcp-config", string(mcp))
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -116,6 +136,13 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 		}
 	}
 	hookSpec, _ := adapter.Spec("claude")
+	var matchers []string
+	for _, matcher := range strings.Split(hookSpec.Matcher, "|") {
+		if !strings.HasPrefix(matcher, "mcp__solo__") {
+			matchers = append(matchers, matcher)
+		}
+	}
+	matchers = append(matchers, "mcp__solo__.*")
 	settings, err := json.Marshal(map[string]any{
 		"env": map[string]string{"MAESTRO_TASK_FOLDER": l.RunFolder},
 		"sandbox": map[string]any{
@@ -126,7 +153,7 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 		"hooks": map[string]any{
 			// Saved settings are excluded, so each Lane needs its own hook.
 			"PreToolUse": []any{map[string]any{
-				"matcher": hookSpec.Matcher,
+				"matcher": strings.Join(matchers, "|"),
 				"hooks":   []any{map[string]any{"type": "command", "command": quote(self) + " hook claude", "timeout": hookSpec.Timeout}},
 			}},
 			"PermissionRequest": []any{map[string]any{

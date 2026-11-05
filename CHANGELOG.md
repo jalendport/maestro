@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Changed the default of `max_per_account` to no Account cap; `max_total` still applies across Runs
 - Changed `solo_tool` to a key with no effect; old user files still load, and `maestro doctor` reports the key
-- Changed every Lane to run as a headless child process on the one-shot path, inside Solo and outside it, with the same launch arguments, environment, Brief, and Report rules; a Lane inside Solo no longer gets Solo MCP tools or `SOLO_` variables
+- Changed every Lane to run as a headless child process inside Solo and outside it. Claude Lanes with a Solo link get a read-only Solo MCP set for process data and todo comments. The Brief gives the required `project_id`. Other Solo tools are denied without a Relay, and all `SOLO_` variables stay removed
 - Changed rendered Briefs and Brief format help to leave push rules to the user; a Lane that may commit must commit only the files it changed for that Task
 - Changed the default Frontier chain to try `codex-astra`, then `claude-fable`
 - Changed Claude and Antigravity edit Lanes to relay commands outside the allow list on the one-shot path; Antigravity edit Lanes use Maestro's limits with no vendor print timeout

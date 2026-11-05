@@ -14,6 +14,7 @@ type RenderOpts struct {
 	BriefChecks   []string
 	ReportPath    string
 	Retry         *Retry
+	SoloProjectID int // Claude Lane with a Solo link only
 	// ReportByMessage: the Lane cannot write files (Codex read-only sandbox);
 	// its final message is the Report and the Harness writes it to the path.
 	ReportByMessage bool
@@ -43,6 +44,9 @@ func Render(b *Brief, o RenderOpts) string {
 	fmt.Fprintf(&w, "## Done\n\n%s\n\n", strings.TrimSpace(b.Done))
 	if strings.TrimSpace(b.Context) != "" {
 		fmt.Fprintf(&w, "## Context\n\n%s\n\n", strings.TrimSpace(b.Context))
+	}
+	if o.SoloProjectID != 0 {
+		fmt.Fprintf(&w, "## Solo\n\nThe Solo project id is `%d`. Each Solo tool call needs this id in `project_id`.\n\n", o.SoloProjectID)
 	}
 	if len(b.Files) > 0 {
 		w.WriteString("## Files\n\nRead these first.\n\n")

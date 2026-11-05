@@ -45,6 +45,7 @@ type Launch struct {
 	Pointer         string
 	Env             []string
 	ClaudeAuto      bool
+	SoloMCPCommand  string        // Solo client's server command; Claude only
 	WallLimit       time.Duration // agy takes a print timeout
 }
 

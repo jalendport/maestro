@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/jalendport/maestro/internal/solo"
 )
 
 type Lane struct {
@@ -300,6 +302,14 @@ func actionOf(c *Call) laneAction {
 }
 
 func DecideLane(c *Call, lane *Lane) Verdict {
+	if c.Harness == "claude" && strings.HasPrefix(c.Tool, "mcp__solo__") {
+		for _, tool := range solo.LaneTools() {
+			if c.Tool == tool {
+				return Verdict{Kind: "allow"}
+			}
+		}
+		return Verdict{Kind: "deny", Reason: "outside the Claude Lane's Solo allow list: " + c.Tool}
+	}
 	action := actionOf(c)
 	switch action.kind {
 	case "spawn":

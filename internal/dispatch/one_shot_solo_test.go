@@ -76,13 +76,15 @@ func TestOneShotLaneHelper(t *testing.T) {
 	os.Exit(0)
 }
 
-func TestOneShotLaunchAndBriefDoNotDependOnSolo(t *testing.T) {
+func TestOneShotLaunchAndBriefWithSolo(t *testing.T) {
 	for _, name := range []string{"claude", "codex", "grok", "agy"} {
 		for _, access := range []string{brief.AccessRead, brief.AccessEdit} {
 			t.Run(name+"/"+access, func(t *testing.T) {
 				t.Setenv("MAESTRO_HOME", t.TempDir())
 				t.Setenv("CODEX_HOME", t.TempDir())
 				client, callsPath := deferredSoloClient(t)
+				soloCommand := os.Getenv("MAESTRO_SOLO_MCP")
+				t.Setenv("MAESTRO_SOLO_MCP", "/unused-solo-command")
 				root := t.TempDir()
 				if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
 					t.Fatalf("git init: %v: %s", err, out)
@@ -102,6 +104,9 @@ func TestOneShotLaunchAndBriefDoNotDependOnSolo(t *testing.T) {
 				r := &roster.Roster{Harness: map[string]config.Harness{name: {}}}
 				r.Router.Backend = "rules"
 				env := &Env{Root: root, Roster: r, Reg: harness.New(map[string]string{name: bin})}
+				if name == "claude" {
+					env.Project = &config.Project{Allow: []string{"mcp__solo", "mcp__solo__*", "mcp__solo__spawn_agent"}}
+				}
 				task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: access,
 					Route: &router.Route{Harness: name, Model: "test-model", Effort: "high"}, WallLimit: "1m", IdleLimit: "1m"}
 				b := &brief.Brief{Title: "Same Brief", Goal: "Read the files.", Done: "Write the Report.", Files: []string{"main.go"}}
@@ -144,11 +149,54 @@ func TestOneShotLaunchAndBriefDoNotDependOnSolo(t *testing.T) {
 							t.Fatalf("Lane has Solo identity variable %s", key)
 						}
 					}
-					for _, arg := range got.Args {
-						if strings.HasPrefix(arg, "mcp__solo__") {
-							t.Fatalf("Lane has Solo launch argument %s", arg)
+					var soloTools, baseArgs []string
+					mcpConfig := ""
+					allowed := false
+					for i := 0; i < len(got.Args); i++ {
+						arg := got.Args[i]
+						if arg == "--mcp-config" {
+							if mcpConfig != "" || i+1 == len(got.Args) {
+								t.Fatal("invalid MCP config arguments")
+							}
+							mcpConfig = got.Args[i+1]
+							i++
+							continue
 						}
+						if strings.HasPrefix(arg, "--") {
+							allowed = arg == "--allowedTools"
+						}
+						if strings.HasPrefix(arg, "mcp__solo__") {
+							if !allowed {
+								t.Fatalf("Solo tool is outside the allow list: %s", arg)
+							}
+							soloTools = append(soloTools, arg)
+							continue
+						}
+						if arg == "mcp__solo" {
+							t.Fatal("Solo server rule permits tools outside the allow list")
+						}
+						baseArgs = append(baseArgs, arg)
 					}
+					withSoloTools := inSolo && name == "claude"
+					if withSoloTools {
+						wantTools := []string{
+							"mcp__solo__list_processes", "mcp__solo__get_process_status",
+							"mcp__solo__get_process_output", "mcp__solo__search_output",
+							"mcp__solo__get_process_ports", "mcp__solo__todo_comment_create",
+						}
+						if !reflect.DeepEqual(soloTools, wantTools) {
+							t.Fatalf("Solo allow list = %v, want %v", soloTools, wantTools)
+						}
+						var servers struct {
+							MCPServers map[string]struct{ Command string } `json:"mcpServers"`
+						}
+						if err := json.Unmarshal([]byte(mcpConfig), &servers); err != nil || len(servers.MCPServers) != 1 || servers.MCPServers["solo"].Command != soloCommand {
+							t.Fatalf("Solo server config = %s, error = %v", mcpConfig, err)
+						}
+					} else if mcpConfig != "" || len(soloTools) != 0 {
+						t.Fatalf("unexpected Solo launch arguments: %s, %v", mcpConfig, soloTools)
+					}
+					got.Args = baseArgs
 					policy, ok := hook.LoadLane(controlFolder(t, folder))
 					if !ok {
 						t.Fatalf("wrong Lane policy: %+v", policy)
@@ -161,6 +209,14 @@ func TestOneShotLaunchAndBriefDoNotDependOnSolo(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					soloContext := "## Solo\n\nThe Solo project id is `1`. Each Solo tool call needs this id in `project_id`.\n\n"
+					if strings.Contains(string(rendered), soloContext) != withSoloTools {
+						t.Fatalf("wrong Solo context in Brief: %s", rendered)
+					}
+					if !withSoloTools && (strings.Contains(string(rendered), "Solo project id") || strings.Contains(string(rendered), "`project_id`")) {
+						t.Fatalf("Solo context in a Brief with no Solo tools: %s", rendered)
+					}
+					rendered = []byte(strings.ReplaceAll(string(rendered), soloContext, ""))
 					got.PID = 0
 					if !inSolo {
 						outside, outsideBrief = got, rendered

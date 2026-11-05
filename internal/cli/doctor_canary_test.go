@@ -37,6 +37,11 @@ func TestDoctorCanaryHarness(t *testing.T) {
 		fmt.Println(`{"models":[{"slug":"canary-cheap","supported_reasoning_levels":[{"effort":"low"}]},{"slug":"canary-costly","supported_reasoning_levels":[{"effort":"low"}]}]}`)
 		os.Exit(0)
 	}
+	for _, arg := range args {
+		if arg == "--mcp-config" || strings.HasPrefix(arg, "mcp__solo__") {
+			t.Fatalf("Canary has a Solo MCP argument: %s", arg)
+		}
+	}
 	folder := os.Getenv("MAESTRO_TASK_FOLDER")
 	if err := os.WriteFile(os.Getenv("MAESTRO_TEST_CANARY_STARTED"), []byte(folder), 0o600); err != nil {
 		t.Fatal(err)
@@ -279,6 +284,7 @@ func TestCanaryWithEachHarness(t *testing.T) {
 				}}
 				env := &dispatch.Env{
 					Roster: r, Reg: harness.New(map[string]string{name: bin}),
+					Solo: &dispatch.SoloLink{ProjectID: 1},
 					Disc: &discovery.Cache{Harness: map[string]discovery.Record{name: {
 						Path: bin, Version: "9.0.0", Models: []harness.Model{{ID: "canary-cheap"}},
 					}}},
