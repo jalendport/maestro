@@ -439,6 +439,7 @@ func TestHookCommandReminderFirstUserPrompt(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	t.Setenv("MAESTRO_LANE", "")
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
+	cwd := t.TempDir()
 	if err := os.WriteFile(config.UserFile(), []byte("[hook]\nscope = \"all\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -464,11 +465,11 @@ func TestHookCommandReminderFirstUserPrompt(t *testing.T) {
 				if err := os.WriteFile(transcript, []byte(tc.transcript), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				payload, err := json.Marshal(map[string]any{"hook_event_name": "UserPromptSubmit", "prompt": tc.prompt, "transcript_path": transcript})
+				payload, err := json.Marshal(map[string]any{"hook_event_name": "UserPromptSubmit", "cwd": cwd, "prompt": tc.prompt, "transcript_path": transcript})
 				if err != nil {
 					t.Fatal(err)
 				}
-				want := string(hook.RenderReminder(&hook.Call{Harness: harness}, "all"))
+				want := string(hook.RenderReminder(&hook.Call{Harness: harness}, "all", nil))
 				if tc.lane {
 					want = ""
 				}

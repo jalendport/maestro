@@ -999,18 +999,13 @@ func TestInsideResolvesSymlinksAndMissingParents(t *testing.T) {
 }
 
 func TestInsideTmpAndPrivateTmp(t *testing.T) {
-	resolved, err := filepath.EvalSymlinks("/tmp")
-	if err != nil || resolved != "/private/tmp" {
-		t.Skip("/tmp is not a symlink to /private/tmp")
+	root := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "temp-link")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("cannot make a symlink in the temp folder: %v", err)
 	}
-	root, err := os.MkdirTemp("/tmp", "maestro-inside-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
-	private := filepath.Join("/private/tmp", filepath.Base(root))
-	if !inside(filepath.Join(private, "new", "file"), root) || !inside(filepath.Join(root, "new", "file"), private) {
-		t.Fatal("/tmp and /private/tmp did not match")
+	if !inside(filepath.Join(alias, "new", "file"), root) || !inside(filepath.Join(root, "new", "file"), alias) {
+		t.Fatal("temp path and its symlink did not match")
 	}
 }
 

@@ -340,20 +340,24 @@ func nonEmpty(a, b string) string {
 
 // inProject walks past repository markers to find a project file.
 func inProject(cwd string) bool {
+	return projectRoot(cwd) != ""
+}
+
+func projectRoot(cwd string) string {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
 	dir, err := filepath.Abs(cwd)
 	if err != nil {
-		return false
+		return ""
 	}
 	for {
 		if info, err := os.Stat(config.ProjectFile(dir)); err == nil && !info.IsDir() {
-			return true
+			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return false
+			return ""
 		}
 		dir = parent
 	}

@@ -188,6 +188,7 @@ type Supervisor struct {
 	errorTexts        map[string]int
 	paused            bool
 	cancelled         bool
+	ownsRun           bool
 }
 
 type pendingDispatch struct {
@@ -207,15 +208,26 @@ func Start(env *dispatch.Env, folder string) error {
 	if err != nil {
 		return err
 	}
-	if s.State == StateHeld {
-		if _, err := os.Stat(filepath.Join(folder, "control", "cancel")); err != nil {
+	if err := withControlLock(folder, func() error {
+		var err error
+		s, err = Load(folder)
+		if err != nil {
+			return err
+		}
+		if s.State == StateHeld && !fileExists(filepath.Join(folder, "control", "cancel")) {
 			return fmt.Errorf("Run %s is held for approval; run maestro approve %s", s.Run, s.Run)
 		}
+		if s.State == StateFinished || s.State == StateCancelled {
+			return fmt.Errorf("Run %s is %s", s.Run, s.State)
+		}
+		if SupervisorAlive(s) {
+			return fmt.Errorf("Run %s already has a live supervisor", s.Run)
+		}
+		return WriteIndex(s)
+	}); err != nil {
+		return err
 	}
-	if s.State == StateFinished || s.State == StateCancelled {
-		return fmt.Errorf("Run %s is %s", s.Run, s.State)
-	}
-	sup := &Supervisor{Env: env, State: s, running: map[string]chan struct{}{}, results: make(chan result, 16), errorTexts: map[string]int{}}
+	sup := &Supervisor{Env: env, State: s, running: map[string]chan struct{}{}, results: make(chan result, 16), errorTexts: map[string]int{}, ownsRun: true}
 	return sup.loop()
 }
 
@@ -225,10 +237,11 @@ func (sup *Supervisor) loop() error {
 	s.Pid = os.Getpid()
 	s.PauseReason = ""
 	s.EndedAt = time.Time{}
-	if err := WriteIndex(s); err != nil {
-		return err
-	}
-	defer RemoveIndex(s.Project, s.Run)
+	defer func() {
+		if sup.ownsRun {
+			RemoveIndex(s.Project, s.Run)
+		}
+	}()
 	stopAwake := proc.KeepAwake(sup.Env.Roster.KeepAwake())
 	s.Awake = stopAwake != nil
 	defer func() {
@@ -249,14 +262,26 @@ func (sup *Supervisor) loop() error {
 			sup.schedule()
 		}
 		if len(sup.running) == 0 {
+			state := ""
 			if sup.cancelled {
-				return sup.end(StateCancelled)
+				state = StateCancelled
+			} else if sup.paused {
+				state = StatePaused
+			} else if !sup.anyStartable() {
+				state = sup.completionState()
 			}
-			if sup.paused {
-				return sup.end(StatePaused)
-			}
-			if !sup.anyStartable() {
-				return sup.end(sup.completionState())
+			if state != "" {
+				if err := sup.end(state); err != nil {
+					return err
+				}
+				resumed, err := sup.finishOwnership(state)
+				if err != nil {
+					return err
+				}
+				if resumed {
+					continue
+				}
+				return nil
 			}
 		}
 		select {
@@ -719,6 +744,10 @@ func (sup *Supervisor) consumeControl() {
 			}
 		case strings.HasPrefix(name, "resume-"):
 			sup.applyResume(path)
+			if err := sup.State.Save(); err != nil {
+				ui.Warnf("resume state: %v", err)
+				continue
+			}
 		default:
 			continue
 		}
@@ -788,6 +817,9 @@ func (sup *Supervisor) applyResume(path string) {
 		ui.Warnf("resume: no task %q", r.Task)
 		return
 	}
+	if t.State == TaskRunning || t.State == TaskDone || t.State == TaskSkipped || sup.running[t.ID] != nil {
+		return
+	}
 	delete(sup.pending, t)
 	switch {
 	case r.Skip:
@@ -821,6 +853,9 @@ func (sup *Supervisor) applyResume(path string) {
 	sup.errorTexts = map[string]int{}
 	sup.paused = false
 	sup.State.PauseReason = ""
+	if sup.State.State == StatePaused {
+		sup.State.State, sup.State.Pid, sup.State.EndedAt = StateLive, os.Getpid(), time.Time{}
+	}
 	ui.Eventf("resume", "task %d  %s", t.Number, t.Waiting)
 }
 
@@ -863,17 +898,23 @@ func (sup *Supervisor) end(state string) error {
 	}
 	ui.Eventf(state, "%s  → %s", summary, filepath.Join(s.Folder, FileReport))
 	notify(summary)
+	if err := s.Save(); err != nil {
+		return err
+	}
 	if sup.Env.Solo != nil {
 		title := s.Title
 		if review != nil {
 			title += "; council " + review.Slug
 		}
-		sup.Env.Solo.Wake("run end", s.Run, title, "", "")
+		kind, command := "run end", "maestro wait "+s.Run
+		if state == StatePaused {
+			kind, command = "run pause", ResumeCommand(s, ResumeTask(s))
+		}
+		sup.Env.Solo.WakeIf(kind, s.Run, title, "", "", command, func() bool {
+			current, err := Load(s.Folder)
+			return err == nil && current.State == state && current.EndedAt.Equal(s.EndedAt) && (state != StatePaused || !PendingResume(s.Folder, ""))
+		})
 	}
-	if err := s.Save(); err != nil {
-		return err
-	}
-	RemoveIndex(s.Project, s.Run)
 	if review != nil {
 		if err := council.Detach(review.Path); err != nil {
 			ui.Warnf("end-of-run council: %v", err)

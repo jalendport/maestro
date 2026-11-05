@@ -352,6 +352,7 @@ attempts:
 		}
 		archiveAttempt(t.Folder, attempt)
 	}
+	env.Solo.dispatchEnded(t, rec)
 	return rec, nil
 }
 
@@ -599,6 +600,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	outFile, _ := os.Create(filepath.Join(t.Folder, FileOutput))
 	var mu sync.Mutex
 	lastOutput := time.Now()
+	toolInProgress := false
 	pumpDone := make(chan struct{})
 	var streamEvents []Event
 	go func() {
@@ -606,6 +608,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		streamEvents = pumpStream(stdout, outFile, parser, func() {
 			mu.Lock()
 			lastOutput = time.Now()
+			toolInProgress = parser.ToolInProgress()
 			mu.Unlock()
 		})
 	}()
@@ -659,11 +662,12 @@ loop:
 			}
 			mu.Lock()
 			idleFor := now.Sub(lastOutput)
+			toolOpen := toolInProgress
 			mu.Unlock()
 			switch {
 			case wall > 0 && now.Sub(rec.StartedAt)-relays.elapsed(now) > wall:
 				timer = "wall"
-			case !relays.open() && idle > 0 && idleFor > idle:
+			case !relays.open() && !toolOpen && idle > 0 && idleFor > idle:
 				timer = "idle"
 			}
 			if timer != "" {

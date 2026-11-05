@@ -558,6 +558,9 @@ func TestRelayTrackerDoesNotWakeForAnAnsweredRelay(t *testing.T) {
 	if err := writeRelayJSON(control, "relay.json", open); err != nil {
 		t.Fatal(err)
 	}
+	if err := writeRelayJSON(control, "relay.lock", relayLock{PID: os.Getpid(), At: time.Now(), ID: open.ID}); err != nil {
+		t.Fatal(err)
+	}
 	tracker.poll(&Env{Solo: link}, task, rec, "claude", open.AskedAt)
 	calls, err := os.ReadFile(callsPath)
 	if err != nil || !strings.Contains(string(calls), "Maestro relay") {

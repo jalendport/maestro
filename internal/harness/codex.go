@@ -101,6 +101,7 @@ func (c *Codex) Build(l Launch) (*Command, error) {
 func (c *Codex) NewParser() Parser { return &codexParser{out: &Outcome{}} }
 
 type codexParser struct {
+	toolCalls
 	out *Outcome
 }
 
@@ -111,6 +112,7 @@ func (p *codexParser) Line(line []byte) bool {
 		Type     string `json:"type"`
 		ThreadID string `json:"thread_id"`
 		Item     struct {
+			ID   string `json:"id"`
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"item"`
@@ -133,6 +135,15 @@ func (p *codexParser) Line(line []byte) bool {
 		p.out.SessionID = ev.ThreadID
 		return false
 	case "item.completed", "item.started", "item.updated":
+		switch ev.Item.Type {
+		case "command_execution", "mcp_tool_call", "web_search", "file_change":
+			if ev.Type == "item.started" {
+				p.start(ev.Item.ID)
+			}
+		}
+		if ev.Type == "item.completed" {
+			p.finish(ev.Item.ID)
+		}
 		if ev.Item.Type == "agent_message" && ev.Item.Text != "" {
 			p.out.Text = ev.Item.Text
 		}

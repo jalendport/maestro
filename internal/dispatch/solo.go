@@ -117,9 +117,6 @@ func failed(rec *Record) int {
 
 // Wake types a fixed Maestro message into the Orchestrator's session.
 func (l *SoloLink) Wake(kind, id, title, harnessName, relayID string) {
-	if l == nil || l.Orchestrator == 0 {
-		return
-	}
 	verb := "maestro wait " + id
 	switch kind {
 	case "relay":
@@ -128,13 +125,50 @@ func (l *SoloLink) Wake(kind, id, title, harnessName, relayID string) {
 	default:
 		return
 	}
+	l.WakeIf(kind, id, title, harnessName, relayID, verb, nil)
+}
+
+// WakeIf checks the item after the delay, before Solo receives the timer.
+// The delay stays here because a detached supervisor can exit after this call.
+func (l *SoloLink) WakeIf(kind, id, title, harnessName, relayID, verb string, pending func() bool) {
+	if l == nil || l.Orchestrator == 0 {
+		return
+	}
+	if pending != nil && !pending() {
+		return
+	}
+	time.Sleep(time.Second)
+	if pending != nil && !pending() {
+		return
+	}
 	body := fmt.Sprintf("Maestro %s: id=%q title=%q harness=%q. Run: %s", kind, id, title, harnessName, verb)
 	if kind == "relay" {
 		body = fmt.Sprintf("Maestro %s: id=%q title=%q harness=%q relay=%q. Run: %s", kind, id, title, harnessName, relayID, verb)
 	}
-	if err := l.Client.Timer(l.ProjectID, l.Orchestrator, time.Second, body); err != nil {
+	if err := l.Client.Timer(l.ProjectID, l.Orchestrator, 0, body); err != nil {
 		ui.Warnf("solo wake-up: %v", err)
 	}
+}
+
+func (l *SoloLink) dispatchEnded(t *Task, rec *Record) {
+	if l == nil || t.LedgerByRun || t.Council || t.Canary || !needsDecision(rec) {
+		return
+	}
+	l.WakeIf("dispatch end", t.Task, t.Title, t.Route.Harness, "", "maestro wait "+t.Task, func() bool {
+		current, err := LoadRecord(t.Folder)
+		return err == nil && current.State == "ended" && current.Attempt == rec.Attempt && current.EndedAt.Equal(rec.EndedAt) && needsDecision(current)
+	})
+}
+
+func needsDecision(rec *Record) bool {
+	if rec.Outcome.Status == brief.StatusUnshaped {
+		return true
+	}
+	switch rec.Outcome.Outcome {
+	case OutcomeFailed, OutcomeBlocked, OutcomeTimedOut:
+		return true
+	}
+	return false
 }
 
 // Only the Relay lock holder may consume a control folder's answer marker.

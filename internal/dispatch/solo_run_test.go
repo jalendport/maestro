@@ -2,6 +2,7 @@ package dispatch_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,21 @@ import (
 )
 
 func TestSoloRunKeepsTaskTodoReportAndEndWake(t *testing.T) {
+	testSoloRunWake(t, "done", false)
+}
+
+func TestSoloFailedRunTaskSendsOnlyRunPauseWake(t *testing.T) {
+	testSoloRunWake(t, "partial", false)
+}
+
+func TestSoloRunAnsweredDuringDelaySendsOnlyEndWake(t *testing.T) {
+	testSoloRunWake(t, "partial", true)
+}
+
+func testSoloRunWake(t *testing.T, status string, answered bool) {
+	t.Helper()
 	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("MAESTRO_TEST_STATUS", status)
 	t.Setenv("SOLO_PROCESS_ID", "42")
 	t.Setenv("MAESTRO_TEST_SOLO_HELPER", "1")
 	callsPath := filepath.Join(t.TempDir(), "calls")
@@ -39,7 +54,7 @@ func TestSoloRunKeepsTaskTodoReportAndEndWake(t *testing.T) {
 	}
 	defer client.Close()
 	bin := filepath.Join(t.TempDir(), "codex")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat >/dev/null\nprintf '## Answer\\nTask complete\\nSTATUS: done\\n' > \"$MAESTRO_TASK_FOLDER/result.md\"\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat >/dev/null\nprintf '## Answer\\nTask complete\\nSTATUS: %s\\n' \"$MAESTRO_TEST_STATUS\" > \"$MAESTRO_TASK_FOLDER/result.md\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	d, _, err := config.ParseFile(roster.Defaults)
@@ -51,6 +66,7 @@ func TestSoloRunKeepsTaskTodoReportAndEndWake(t *testing.T) {
 	r.Harness["codex"] = config.Harness{}
 	off := false
 	r.Failure.KeepAwake = &off
+	r.Failure.MaxDispatches = 1
 	root := t.TempDir()
 	env := &dispatch.Env{Root: root, Roster: r, Solo: &dispatch.SoloLink{Client: client, ProjectID: 1, Orchestrator: 42},
 		Reg: harness.New(map[string]string{"codex": bin}),
@@ -65,11 +81,45 @@ func TestSoloRunKeepsTaskTodoReportAndEndWake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var reply chan error
+	if answered {
+		reply = make(chan error, 1)
+		go func() {
+			until := time.Now().Add(10 * time.Second)
+			for time.Now().Before(until) {
+				current, err := run.Load(s.Folder)
+				if err == nil && current.State == run.StatePaused {
+					body, err := json.Marshal(run.Resume{Task: current.Tasks[0].ID, Skip: true})
+					if err == nil {
+						err = os.WriteFile(filepath.Join(s.Folder, "control", "resume-"+current.Tasks[0].ID+".json"), body, 0o644)
+					}
+					reply <- err
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			reply <- fmt.Errorf("Run did not pause")
+		}()
+	}
 	if err := run.Start(env, s.Folder); err != nil {
 		t.Fatal(err)
 	}
+	if reply != nil {
+		if err := <-reply; err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantRun, wantTask, wantKind, wantCommand, wantComplete := run.StateFinished, run.TaskDone, "run end", "maestro wait "+s.Run, 1
+	if status == "partial" {
+		wantRun, wantTask, wantKind, wantComplete = run.StatePaused, run.TaskFailed, "run pause", 0
+		wantCommand = "maestro resume " + s.Run + " --task 1 (--lane <family[:effort]> | --brief <file> | --skip)"
+	}
+	if answered {
+		wantRun, wantTask, wantKind = run.StateFinished, run.TaskSkipped, "run end"
+		wantCommand = "maestro wait " + s.Run
+	}
 	s, err = run.Load(s.Folder)
-	if err != nil || s.State != run.StateFinished || len(s.Tasks) != 1 || s.Tasks[0].State != run.TaskDone {
+	if err != nil || s.State != wantRun || len(s.Tasks) != 1 || s.Tasks[0].State != wantTask {
 		t.Fatalf("Run did not finish: %+v, %v", s, err)
 	}
 	task, err := dispatch.LoadTask(s.Tasks[0].Folder)
@@ -80,7 +130,7 @@ func TestSoloRunKeepsTaskTodoReportAndEndWake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]int{"todo_create": 1, "todo_comment_create": 1, "todo_complete": 1, "timer_set": 1, "spawn_agent": 0} {
+	for name, want := range map[string]int{"todo_create": 1, "todo_comment_create": 1, "todo_complete": wantComplete, "timer_set": 1, "spawn_agent": 0} {
 		if got := strings.Count(string(calls), `"name":"`+name+`"`); got != want {
 			t.Fatalf("%s count=%d, want %d: %s", name, got, want, calls)
 		}
@@ -101,8 +151,8 @@ func TestSoloRunKeepsTaskTodoReportAndEndWake(t *testing.T) {
 		if call.Params.Name == "todo_comment_create" && !strings.Contains(call.Params.Arguments.Body, "Task complete") {
 			t.Fatalf("Report comment: %s", line)
 		}
-		if call.Params.Name == "timer_set" && (call.Params.Arguments.Process != 42 || !strings.Contains(call.Params.Arguments.Body, "Maestro run end:") || !strings.Contains(call.Params.Arguments.Body, "maestro wait "+s.Run)) {
-			t.Fatalf("Run end wake-up: %s", line)
+		if call.Params.Name == "timer_set" && (call.Params.Arguments.Process != 42 || !strings.Contains(call.Params.Arguments.Body, "Maestro "+wantKind+":") || !strings.HasSuffix(call.Params.Arguments.Body, ". Run: "+wantCommand)) {
+			t.Fatalf("Run wake-up: %s", line)
 		}
 	}
 }

@@ -16,6 +16,15 @@ import (
 	"github.com/jalendport/maestro/internal/ui"
 )
 
+// RelayInput limits tool input to 300 characters for the Orchestrator.
+func RelayInput(input json.RawMessage) string {
+	chars := []rune(string(input))
+	if len(chars) > 300 {
+		chars = chars[:300]
+	}
+	return string(chars)
+}
+
 var relayDeadline = 10 * time.Minute
 var relayPollInterval = time.Second
 
@@ -75,6 +84,51 @@ type relayAnswer struct {
 	Request    RelayRequest `json:"request"`
 	Answer     string       `json:"answer"`
 	AnsweredAt time.Time    `json:"answered_at"`
+}
+
+// PendingRelay reads the current request, not the Dispatch's event history.
+// Answer markers stay owned by RelayWait; this query never consumes them.
+func PendingRelay(folder string) (*RelayRequest, error) {
+	control, err := config.ControlDirForFolder(folder)
+	if err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(filepath.Join(control, "relay.json"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var request RelayRequest
+	if err := json.Unmarshal(b, &request); err != nil {
+		return nil, err
+	}
+	owner, ok := readRelayLock(filepath.Join(control, "relay.lock"))
+	if request.ID == "" || !ok || owner.ID != request.ID || syscall.Kill(owner.PID, 0) == syscall.ESRCH || time.Since(request.AskedAt) >= relayDeadline {
+		return nil, nil
+	}
+	for _, answer := range []string{"allow", "deny"} {
+		b, err := os.ReadFile(filepath.Join(control, "answer-"+answer))
+		if err == nil && string(b) == request.ID {
+			return nil, nil
+		}
+	}
+	if _, err := os.Stat(filepath.Join(control, "relay-answer-"+request.ID+".json")); err == nil {
+		return nil, nil
+	}
+	// The tracker removes the answer file only after it saves the decision.
+	if rec, err := LoadRecord(folder); err == nil {
+		for _, saved := range rec.Permission.Relays {
+			var answer struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(saved, &answer) == nil && answer.ID == request.ID {
+				return nil, nil
+			}
+		}
+	}
+	return &request, nil
 }
 
 func writeRelayJSON(folder, name string, value any) error {
@@ -229,7 +283,11 @@ func relayText(request RelayRequest) string {
 
 func (r *relayTracker) start(env *Env, t *Task, rec *Record, name string, request RelayRequest) {
 	r.record(t, rec, name, request)
-	env.Solo.Wake("relay", t.Task, t.Title, name, request.ID)
+	command := fmt.Sprintf("maestro answer %s allow|deny --relay %s", t.Task, request.ID)
+	env.Solo.WakeIf("relay", t.Task, t.Title, name, request.ID, command, func() bool {
+		current, err := PendingRelay(t.Folder)
+		return err == nil && current != nil && current.ID == request.ID
+	})
 }
 
 // record notes an open Relay without a wake-up: a Relay that is already
@@ -245,7 +303,7 @@ func (r *relayTracker) record(t *Task, rec *Record, name string, request RelayRe
 func (r *relayTracker) finish(rec *Record, answer string, now time.Time) {
 	seconds := now.Sub(r.request.AskedAt).Seconds()
 	rec.Events = append(rec.Events, Event{At: now, Kind: "relay-answer", Text: answer})
-	b, _ := json.Marshal(map[string]any{"id": r.request.ID, "tool": r.request.ToolName, "input": cut(string(r.request.ToolInput), 300), "answer": answer, "seconds": seconds})
+	b, _ := json.Marshal(map[string]any{"id": r.request.ID, "tool": r.request.ToolName, "input": RelayInput(r.request.ToolInput), "answer": answer, "seconds": seconds})
 	rec.Permission.Relays = append(rec.Permission.Relays, b)
 	r.total += now.Sub(r.request.AskedAt)
 	r.request = nil

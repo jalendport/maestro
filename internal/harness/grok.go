@@ -122,6 +122,7 @@ func (g *Grok) NewParser() Parser { return &grokParser{out: &Outcome{}} }
 
 // Grok's event list is open, so every non-empty line counts as progress.
 type grokParser struct {
+	toolCalls
 	out           *Outcome
 	text          strings.Builder
 	thought       strings.Builder
@@ -137,7 +138,9 @@ func (p *grokParser) Line(line []byte) bool {
 		return false
 	}
 	var event struct {
-		Type string `json:"type"`
+		Type       string `json:"type"`
+		ToolCallID string `json:"toolCallId"`
+		Status     string `json:"status"`
 	}
 	if err := json.Unmarshal(line, &event); err != nil {
 		p.out.IsError = true
@@ -147,7 +150,15 @@ func (p *grokParser) Line(line []byte) bool {
 	}
 	switch event.Type {
 	case "text", "thought", "end", "error":
+	case "tool_call_update":
+		if event.Status == "completed" || event.Status == "failed" {
+			p.finish(event.ToolCallID)
+		}
+		return true
 	case "tool_call", "usage":
+		if event.Type == "tool_call" {
+			p.start(event.ToolCallID)
+		}
 		// A tool call or a response boundary ends one stretch of text. Other
 		// events can arrive in the middle of a response and must not split it.
 		p.textBreak = true

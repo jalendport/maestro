@@ -85,7 +85,7 @@ func TestReminderPromptPointer(t *testing.T) {
 					if call.Prompt != tc.prompt {
 						t.Fatalf("prompt = %q, want %q", call.Prompt, tc.prompt)
 					}
-					out := RenderReminder(call, "all")
+					out := RenderReminder(call, "all", nil)
 					if tc.lane && out != nil || !tc.lane && !strings.Contains(string(out), adapter.Reminder) {
 						t.Fatalf("Lane = %v, output = %s", tc.lane, out)
 					}
@@ -155,7 +155,7 @@ func TestReminderShapesAndScope(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					out := RenderReminder(call, tc.scope)
+					out := RenderReminder(call, tc.scope, nil)
 					var want any
 					if call.Harness == "agy" {
 						want = map[string]any{}
@@ -196,7 +196,7 @@ func TestReminderAntigravityProcessDirectory(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := string(RenderReminder(call, "projects")); got != `{}` {
+		if got := string(RenderReminder(call, "projects", nil)); got != `{}` {
 			t.Fatalf("outside project: %s", got)
 		}
 	}
@@ -208,7 +208,7 @@ func TestReminderAntigravityProcessDirectory(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := string(RenderReminder(call, "projects")); !strings.Contains(got, `"injectSteps"`) {
+		if got := string(RenderReminder(call, "projects", nil)); !strings.Contains(got, `"injectSteps"`) {
 			t.Fatalf("inside project: %s", got)
 		}
 	}
@@ -249,7 +249,7 @@ func TestReminderTranscriptError(t *testing.T) {
 		if harness == "agy" {
 			want = "{}"
 		}
-		if got := string(RenderReminder(call, "all")); got != want {
+		if got := string(RenderReminder(call, "all", nil)); got != want {
 			t.Fatalf("%s = %q, want %q", harness, got, want)
 		}
 	}

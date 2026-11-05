@@ -104,8 +104,29 @@ type Outcome struct {
 type Parser interface {
 	// Line reports whether the line counts as new output (resets the Idle limit).
 	Line(line []byte) bool
+	// ToolInProgress reports whether any tool call has started but not ended.
+	ToolInProgress() bool
 	Outcome() *Outcome
 }
+
+// toolCalls tracks calls by id so overlapping calls and repeated lines are safe.
+type toolCalls struct {
+	pending map[string]struct{}
+}
+
+func (t *toolCalls) start(id string) {
+	if id == "" {
+		return
+	}
+	if t.pending == nil {
+		t.pending = make(map[string]struct{})
+	}
+	t.pending[id] = struct{}{}
+}
+
+func (t *toolCalls) finish(id string) { delete(t.pending, id) }
+
+func (t *toolCalls) ToolInProgress() bool { return len(t.pending) > 0 }
 
 // Harness is one adapter.
 type Harness interface {

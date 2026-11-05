@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/jalendport/maestro/internal/adapter"
+	"github.com/jalendport/maestro/internal/config"
 )
 
 func isReminderEvent(c *Call, raw map[string]any) bool {
@@ -22,8 +23,9 @@ func isReminderEvent(c *Call, raw map[string]any) bool {
 }
 
 // RenderReminder writes the Reminder in the Harness's shape. An empty scope
-// keeps a Reminder event out of scope when the Roster cannot load.
-func RenderReminder(c *Call, scope string) []byte {
+// keeps a Reminder event out of scope when the Roster cannot load. liveItems
+// reads project state only after the prompt is in scope and outside a Lane.
+func RenderReminder(c *Call, scope string, liveItems func(string) string) []byte {
 	if c.Harness == "grok" {
 		return nil
 	}
@@ -48,12 +50,25 @@ func RenderReminder(c *Call, scope string) []byte {
 		}
 		return nil
 	}
+	reminder := adapter.Reminder
+	if liveItems != nil {
+		cwd := c.CWD
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
+		root := config.FindProjectRoot(cwd)
+		if root != "" {
+			if items := liveItems(root); items != "" {
+				reminder += "\n" + items
+			}
+		}
+	}
 	var out any
 	switch c.Harness {
 	case "claude", "codex":
-		out = map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "UserPromptSubmit", "additionalContext": adapter.Reminder}}
+		out = map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "UserPromptSubmit", "additionalContext": reminder}}
 	case "agy":
-		out = map[string]any{"injectSteps": []any{map[string]any{"ephemeralMessage": adapter.Reminder}}}
+		out = map[string]any{"injectSteps": []any{map[string]any{"ephemeralMessage": reminder}}}
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

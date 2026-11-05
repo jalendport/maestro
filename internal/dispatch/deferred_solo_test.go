@@ -173,13 +173,27 @@ func TestDispatchAdoptsNamedSoloTodo(t *testing.T) {
 }
 
 func TestWakeUsesOnlyFixedFields(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	client, callsPath := deferredSoloClient(t)
 	link := &SoloLink{Client: client, ProjectID: 1, Orchestrator: 42}
 	folder := t.TempDir()
 	task := &Task{Task: "abcd", Title: "Brief title", Folder: folder}
 	rec := &Record{Path: folder}
 	tracker := &relayTracker{}
-	tracker.start(&Env{Solo: link}, task, rec, "claude", RelayRequest{ID: "0123456789abcdef", AskedAt: time.Now(), ToolName: "LANE_TOOL", ToolInput: json.RawMessage(`{"command":"LANE_TEXT"}`)})
+	request := RelayRequest{ID: "0123456789abcdef", AskedAt: time.Now(), ToolName: "LANE_TOOL", ToolInput: json.RawMessage(`{"command":"LANE_TEXT"}`)}
+	control := controlFolder(t, folder)
+	if err := os.MkdirAll(control, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRelayJSON(control, "relay.json", request); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRelayJSON(control, "relay.lock", relayLock{PID: os.Getpid(), At: time.Now(), ID: request.ID}); err != nil {
+		t.Fatal(err)
+	}
+	tracker.start(&Env{Solo: link}, task, rec, "claude", request)
+	tracker.poll(&Env{Solo: link}, task, rec, "claude", time.Now())
+	tracker.poll(&Env{Solo: link}, task, rec, "claude", time.Now())
 	link.Wake("run end", "r-test", "Run title", "", "")
 	link.Wake("council end", "c-test", "Council title", "codex", "")
 	calls, err := os.ReadFile(callsPath)

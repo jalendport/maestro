@@ -247,8 +247,8 @@ func (a *app) resumeCmd() *cobra.Command {
 				}
 			}
 			ans := run.Resume{Task: t.ID, Lane: lane, Brief: briefPath, Skip: skip}
-			b, _ := json.Marshal(ans)
-			if err := os.WriteFile(filepath.Join(folder, "control", fmt.Sprintf("resume-%s-%d.json", t.ID, time.Now().UnixNano())), b, 0o644); err != nil {
+			live, err := run.QueueResume(folder, ans)
+			if err != nil {
 				return err
 			}
 			if !a.json {
@@ -261,7 +261,7 @@ func (a *app) resumeCmd() *cobra.Command {
 					ui.Outf("task %s will restart with the brief %s", t.ID, briefPath)
 				}
 			}
-			if _, live := run.LiveRunFor(env.Root); live {
+			if live {
 				return a.result(map[string]any{"run": s.Run, "state": s.State, "task": t.ID, "resume": ans}, "run %s is live; the supervisor picks the answer up", s.Run)
 			}
 			if !a.json {
@@ -585,30 +585,25 @@ func (a *app) printRunReport(folder string) error {
 	return nil
 }
 
-// waitRun blocks until a Run ends or pauses, then prints its report.
+// waitRun returns when a Run ends or needs the Orchestrator.
 func (a *app) waitRun(folder string) error {
 	started := time.Now()
-	seen := map[string]bool{}
 	for {
 		s, err := run.Load(folder)
 		if err != nil {
 			return err
 		}
-		if !a.json {
-			for _, task := range s.Tasks {
-				if rec, err := dispatch.LoadRecord(filepath.Join(s.Folder, task.ID)); err == nil {
-					printRelayEvents(rec, seen)
-				}
-			}
-		}
 		switch s.State {
-		case run.StateFinished, run.StatePaused, run.StateCancelled:
+		case run.StateFinished, run.StateCancelled:
 			return a.printRunReport(folder)
-		case run.StateHeld:
-			return &proc.ExitError{Code: proc.CodeOrchestrator, Message: fmt.Sprintf("run %s is held for approval (maestro approve %s)", s.Run, s.Run)}
+		}
+		if item, err := runWaitItem(s); err != nil {
+			return err
+		} else if item != nil {
+			return a.printWaitItem(item)
 		}
 		if time.Since(started) > 5*time.Second {
-			if _, live := run.LiveRunFor(s.Project); !live {
+			if !run.SupervisorAlive(s) {
 				return &proc.ExitError{Code: proc.CodeFailed, Message: fmt.Sprintf("run %s: its supervisor is gone before the run ended; see %s", s.Run, filepath.Join(folder, "supervisor.log"))}
 			}
 		}

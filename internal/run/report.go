@@ -128,7 +128,12 @@ func Status(s *State) string {
 	if s.Awake {
 		awake = "  caffeinate on"
 	}
-	fmt.Fprintf(&w, "run %s  %s  started %s  %s  %d of %d done%s\n", s.Run, s.Title, s.StartedAt.Format("15:04"), s.State, done, len(s.Tasks), awake)
+	state := s.State
+	stale := s.State == StateLive && !SupervisorAlive(s)
+	if stale {
+		state = "stale (process gone)"
+	}
+	fmt.Fprintf(&w, "run %s  %s  started %s  %s  %d of %d done%s\n", s.Run, s.Title, s.StartedAt.Format("15:04"), state, done, len(s.Tasks), awake)
 	if s.State == StateHeld {
 		for _, a := range s.Approval {
 			fmt.Fprintf(&w, "approval needed: %s\n", a)
@@ -161,7 +166,14 @@ func Status(s *State) string {
 		if t.Provisional {
 			lane += " (provisional)"
 		}
-		fmt.Fprintf(&w, "  %-2d %-32s %-9s %-26s %s\n", t.Number, cutTitle(t.Title, 32), stateWord(t), lane, tail)
+		taskState := stateWord(t)
+		if t.State == TaskRunning {
+			rec, err := dispatch.LoadRecord(filepath.Join(s.Folder, t.ID))
+			if stale || (err == nil && rec.State == "running" && !dispatch.ProcessAlive(rec)) {
+				taskState = "stale (process gone)"
+			}
+		}
+		fmt.Fprintf(&w, "  %-2d %-32s %-9s %-26s %s\n", t.Number, cutTitle(t.Title, 32), taskState, lane, tail)
 		if rec, err := dispatch.LoadRecord(filepath.Join(s.Folder, t.ID)); err == nil {
 			w.WriteString(dispatch.RelayEvents(rec))
 		}

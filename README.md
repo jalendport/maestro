@@ -187,15 +187,26 @@ You install once and plan with your agent. The agent hands finished plans to Mae
 2. Plan with your agent as you do now: a grilling session, a spec, a plan file. The Maestro skill tells the agent what a finished plan looks like.
 3. When you approve the plan, the agent writes the Plan file and runs `maestro run` itself. Nobody asks you to type anything.
 4. Inside Solo, each task is a todo and each result is a comment, and a finished run wakes the agent. Outside Solo, the agent reports from `maestro wait`.
-5. Maestro needs you when a verb exits with code 2: a held breakdown, a paused run, a blocked task, or a single-opinion council. The agent reads the report and either answers or asks you one question.
+5. Maestro needs you when a verb exits with code 2: an open Relay, a held breakdown, a paused Run, a blocked or failed Task, or a single-opinion Council. The agent reads the item or report and either answers or asks you one question.
 
-Inside hook scope, the Orchestrator gets a one-line Reminder on every prompt in Claude Code and Codex, and before every model call in Antigravity. In Grok, the rules file loads in every session and states the scope condition in words, so there the scope is best-effort.
+Inside hook scope, the Orchestrator gets a Reminder on every prompt in Claude Code and Codex, and before every model call in Antigravity. Its fixed text comes first. Each live item of the project follows on its own line: an open Relay with its Task, tool, input, and answer command; a paused Run with its reason and resume command; a blocked or failed Task of a live Run; or a running Lane with its Task, Family, effort, and elapsed time. Relay input is limited to 300 characters. The hook reads local Run and control folders, with no Solo or network call. It uses the same project root as the CLI, including from a nested git folder. It leaves out a live Run or running Dispatch whose process is gone; `maestro status` marks it `stale (process gone)`. With no live items, it sends only the fixed text.
+
+In Grok, the rules file loads at the start of each session and states the scope condition in words, so there the scope is best-effort. A Grok Orchestrator does not get the live items through the Reminder; use `maestro status` to read them.
 
 For example, you end a grilling session with a plan for a new probe feature. The agent writes `.agents/plans/probe-feature.md` and starts the run. Some minutes later it tells you that the three tasks are done and the checks pass. If a lane needs an answer, the agent asks you one question and passes your answer on.
 
 ### Solo
 
 Every Lane runs as a headless child process. Inside Solo, Maestro creates todos, adds Report and Merge comments, and sends wake-ups.
+
+Maestro wakes the Orchestrator once for each item that needs it:
+
+- A Relay opens: `maestro answer <task> allow|deny --relay <id>`.
+- A Run pauses: `maestro resume <run> --task <n> (--lane <family[:effort]> | --brief <file> | --skip)`.
+- A single Dispatch ends failed, blocked, timed out, or with an unshaped Report: `maestro wait <task>`.
+- A Run ends: `maestro wait <run>`.
+
+Each wake-up gives the same next command as `maestro wait`. An item resolved during the wake-up delay sends no wake-up. A Task of a Run uses the Run's pause or end wake-up. A single Dispatch that ends verified, answered, or unverified with a shaped Report sends no wake-up.
 
 With a Solo link, Maestro passes Solo's MCP server to a Claude Lane through `--mcp-config`. Read and edit Lanes get the same read-only set, which also permits a todo comment:
 
@@ -249,7 +260,9 @@ maestro budget          # usage per account
 maestro router stats    # Jev vs rules agreement, verified rates
 ```
 
-Exit codes: `0` ok, `1` failed, `2` needs the orchestrator (a held breakdown, a paused run, a blocked task). `--json` prints one object per verb.
+`maestro wait <task|run>` returns with exit code `2` as soon as a Relay opens, a Run pauses, or a Task of a Run is blocked or failed and waits for the Orchestrator. It prints the item, the reason, and the next `maestro answer` or `maestro resume` command. Relay input in the reason is limited to 300 characters. Answer, then use `maestro wait` with the same id to continue. Answered or resolved items do not stop it again. At the end, `wait` prints the report and returns the outcome's exit code. For an early return, `--json` prints one object with `kind`, `run` or `task`, and `next_command`. A failed Task has the kind `task_failed`. A paused Run also gives the path to `report.md`, in text and in the JSON field `report_path`.
+
+Exit codes: `0` ok, `1` failed, `2` needs the Orchestrator (an open Relay, a held breakdown, a paused Run, a blocked or failed Task, or a single-opinion Council). `--json` prints one object per verb.
 
 Claude and Antigravity edit Lanes relay commands outside the allow list. Read Lanes, Grok Lanes, and Codex Lanes do not relay. An open Relay pauses the Idle limit and the Wall limit; an unanswered Relay is denied after 10 minutes and the Lane continues. Antigravity edit Lanes use Maestro's limits with no vendor print timeout.
 

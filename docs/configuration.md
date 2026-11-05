@@ -248,7 +248,7 @@ These keys set when Maestro stops a Dispatch and when it stops a Run. A duration
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `idle_limit` | duration | `"10m"` | Sets the longest time that a Dispatch may run with no new output before Maestro stops it. |
+| `idle_limit` | duration | `"10m"` | Sets the longest time that a Dispatch may run with no new output before Maestro stops it. Time with a tool call in progress does not count; the Wall limit still applies. |
 | `wall_limit` | table of durations | see below | Sets the longest total time of a Dispatch for each Tier. |
 | `max_dispatches` | integer | `6` | Sets how many Dispatches a Task may use before Maestro fails it instead of re-routing it. |
 | `keep_awake` | boolean | `true` | Keeps the Mac awake with `caffeinate` while a Dispatch or a Run is live. |

@@ -97,6 +97,9 @@ type agyParser struct {
 	buf strings.Builder
 }
 
+// Antigravity has no tool call events in its one-shot output.
+func (p *agyParser) ToolInProgress() bool { return false }
+
 func (p *agyParser) Outcome() *Outcome {
 	text := strings.TrimSpace(p.buf.String())
 	if text == "" {

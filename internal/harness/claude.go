@@ -177,7 +177,10 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 
 func (c *Claude) NewParser() Parser { return &claudeParser{out: &Outcome{}} }
 
-type claudeParser struct{ out *Outcome }
+type claudeParser struct {
+	toolCalls
+	out *Outcome
+}
 
 func (p *claudeParser) Outcome() *Outcome { return p.out }
 
@@ -189,7 +192,10 @@ func (p *claudeParser) Line(line []byte) bool {
 		Model     string `json:"model"`
 		IsError   bool   `json:"is_error"`
 		Result    string `json:"result"`
-		Usage     struct {
+		Message   struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+		Usage struct {
 			Input         *int `json:"input_tokens"`
 			CacheRead     *int `json:"cache_read_input_tokens"`
 			CacheCreation *int `json:"cache_creation_input_tokens"`
@@ -248,7 +254,24 @@ func (p *claudeParser) Line(line []byte) bool {
 			p.out.Signals = append(p.out.Signals, Signal{Class: "limit", Text: "rate_limit_event rejected"})
 		}
 		return false
-	case "assistant", "user", "tool_use", "tool_result", "stream_event":
+	case "assistant", "user":
+		var blocks []struct {
+			Type      string `json:"type"`
+			ID        string `json:"id"`
+			ToolUseID string `json:"tool_use_id"`
+		}
+		// A user message can contain plain text instead of content blocks.
+		_ = json.Unmarshal(ev.Message.Content, &blocks)
+		for _, block := range blocks {
+			if ev.Type == "assistant" && block.Type == "tool_use" {
+				p.start(block.ID)
+			}
+			if ev.Type == "user" && block.Type == "tool_result" {
+				p.finish(block.ToolUseID)
+			}
+		}
+		return true
+	case "tool_use", "tool_result", "stream_event":
 		return true
 	case "result":
 		p.out.IsError = ev.IsError || (ev.Subtype != "" && ev.Subtype != "success")

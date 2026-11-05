@@ -97,29 +97,6 @@ func TestRelayCommandUsesEnvironmentAndProjectLookup(t *testing.T) {
 	}
 }
 
-func TestWaitRelayEventsPrintOnce(t *testing.T) {
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := os.Stdout
-	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = old })
-	rec := &dispatch.Record{Task: "abcd", Events: []dispatch.Event{{Kind: "relay", Text: "0123456789abcdef Bash pwd"}, {Kind: "relay-answer", Text: "deny"}}}
-	seen := map[string]bool{}
-	printRelayEvents(rec, seen)
-	printRelayEvents(rec, seen)
-	w.Close()
-	var out bytes.Buffer
-	if _, err := out.ReadFrom(r); err != nil {
-		t.Fatal(err)
-	}
-	r.Close()
-	if strings.Count(out.String(), "maestro answer abcd allow|deny --relay 0123456789abcdef") != 1 || strings.Count(out.String(), "relay-answer") != 1 {
-		t.Fatalf("output: %s", out.String())
-	}
-}
-
 func TestCleanRemovesRunAndCouncilControlFolders(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	root := t.TempDir()

@@ -12,11 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/dispatch"
+	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
 )
@@ -205,13 +205,23 @@ func LiveRuns() []Index {
 		if json.Unmarshal(b, &idx) != nil || idx.Pid == 0 {
 			continue
 		}
-		if syscall.Kill(idx.Pid, 0) != nil {
+		if !proc.Alive(idx.Pid) {
 			_ = os.Remove(filepath.Join(config.RunsIndexDir(), e.Name()))
 			continue
 		}
 		out = append(out, idx)
 	}
 	return out
+}
+
+// SupervisorAlive checks the Run's process, including a pause wake-up delay.
+func SupervisorAlive(s *State) bool {
+	if proc.Alive(s.Pid) {
+		return true
+	}
+	b, err := os.ReadFile(indexPath(s.Project, s.Run))
+	var idx Index
+	return err == nil && json.Unmarshal(b, &idx) == nil && proc.Alive(idx.Pid)
 }
 
 // LiveRunFor returns the live Run of a project, if any.

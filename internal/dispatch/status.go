@@ -5,12 +5,24 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/ui"
 )
+
+// ProcessAlive checks the standalone supervisor, or the process in the record.
+func ProcessAlive(rec *Record) bool {
+	if b, err := os.ReadFile(filepath.Join(rec.Path, "supervisor.pid")); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
+			return proc.Alive(pid)
+		}
+	}
+	return proc.Alive(rec.Pid)
+}
 
 // List lists standalone Dispatches that are running or ended in the last hour.
 // Tasks in a Run are shown by the Run, and Council Seats live elsewhere.
@@ -57,6 +69,9 @@ func Status(rec *Record) string {
 	state := rec.State
 	elapsed := rec.DurationS
 	if state == "running" {
+		if !ProcessAlive(rec) {
+			state = "stale (process gone)"
+		}
 		if !rec.StartedAt.IsZero() {
 			elapsed = time.Since(rec.StartedAt).Seconds()
 		}

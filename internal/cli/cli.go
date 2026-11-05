@@ -176,7 +176,7 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, "  "+ui.Name.Render("run <plan.md>")+"            Run every Task of a Plan file (one live Run per project)")
 	ui.Fprintln(out, "  "+ui.Name.Render("dispatch <brief.md>")+"      Route and dispatch one Task (returns at once; --wait to block)")
 	ui.Fprintln(out, "  "+ui.Name.Render("council <question>")+"       Ask several Lanes the same question in parallel")
-	ui.Fprintln(out, "  "+ui.Name.Render("wait <run|task|council>")+"  Block until a Run, Task, or Council ends; print its report")
+	ui.Fprintln(out, "  "+ui.Name.Render("wait <run|task|council>")+"  Wait until work ends or needs the Orchestrator")
 	ui.Fprintln(out, "  "+ui.Name.Render("status [run|task|council]")+" Show Runs, Dispatches, and Councils")
 	ui.Fprintln(out, "")
 	ui.Fprintln(out, ui.Section.Render("Mid-run"))

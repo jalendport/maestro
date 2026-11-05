@@ -152,16 +152,14 @@ func (a *app) superviseCmd() *cobra.Command {
 func (a *app) waitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "wait <task|run>",
-		Short: "Block until a Task or a Run ends; print its report",
-		Long:  "Wait for a Task (4-hex id) or a Run (r-NNNN) in the current project to end, then print its result. --json prints dispatch.json or run.json.",
+		Short: "Wait until work ends or needs the Orchestrator",
+		Long:  "Wait for a Task (4-hex id) or a Run (r-NNNN) in the current project. Return with exit 2 and the next command for an open Relay, a paused Run, or a blocked Task of a Run. Wait again after the answer to continue. At the end, print the result. --json prints one object: the item that needs an answer, dispatch.json, or run.json.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cwd, _ := os.Getwd()
 			env, err := a.env(false)
 			if err != nil {
 				return err
 			}
-			_ = cwd
 			if folder, _, err := findRun(env.Root, args[0]); err == nil {
 				return a.waitRun(folder)
 			}
@@ -172,37 +170,28 @@ func (a *app) waitCmd() *cobra.Command {
 				}
 				return fmt.Errorf("no task or council %q under %s", args[0], env.Root)
 			}
-			started := time.Now()
-			seen := map[string]bool{}
-			for {
-				rec, err := dispatch.LoadRecord(folder)
-				if err == nil && !a.json {
-					printRelayEvents(rec, seen)
-				}
-				if err == nil && rec.State == "ended" {
-					return exit(dispatch.Print(rec, a.json))
-				}
-				// A dead supervisor never ends the record: say so instead of waiting forever.
-				if time.Since(started) > 5*time.Second && !supervisorAlive(folder, rec) {
-					return &proc.ExitError{Code: proc.CodeFailed, Message: fmt.Sprintf("task %s: its supervisor is gone before the dispatch ended; see %s", args[0], filepath.Join(folder, "supervisor.log"))}
-				}
-				time.Sleep(2 * time.Second)
-			}
+			return a.waitTask(folder, args[0])
 		},
 	}
 }
 
-func printRelayEvents(rec *dispatch.Record, seen map[string]bool) {
-	for _, event := range rec.Events {
-		if event.Kind != "relay" && event.Kind != "relay-answer" {
-			continue
+func (a *app) waitTask(folder, id string) error {
+	started := time.Now()
+	for {
+		rec, err := dispatch.LoadRecord(folder)
+		if err == nil && rec.State == "ended" {
+			return exit(dispatch.Print(rec, a.json))
 		}
-		key := fmt.Sprintf("%s/%d/%s/%s", rec.Task, rec.Attempt, event.Kind, event.At.Format(time.RFC3339Nano))
-		if seen[key] {
-			continue
+		if item, err := relayItem(folder, id); err != nil {
+			return err
+		} else if item != nil {
+			return a.printWaitItem(item)
 		}
-		seen[key] = true
-		fmt.Fprint(os.Stdout, dispatch.RelayEvents(&dispatch.Record{Task: rec.Task, Events: []dispatch.Event{event}}))
+		// A dead supervisor never ends the record: say so instead of waiting forever.
+		if time.Since(started) > 5*time.Second && !supervisorAlive(folder, rec) {
+			return &proc.ExitError{Code: proc.CodeFailed, Message: fmt.Sprintf("task %s: its supervisor is gone before the dispatch ended; see %s", id, filepath.Join(folder, "supervisor.log"))}
+		}
+		time.Sleep(2 * time.Second)
 	}
 }
 

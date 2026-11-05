@@ -8,9 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Added
+- Added project live items to the Reminder in Claude Code, Codex, and Antigravity: open Relays with answer commands, paused Runs with resume commands, blocked and failed Tasks of live Runs, and running Lanes with their Tasks and elapsed times; Grok uses `maestro status`
+- Added Solo wake-ups for a paused Run and a single Dispatch that ends failed, blocked, timed out, or with an unshaped Report, with the same next command as `maestro wait`
 - Added `maestro doctor --canary [harness]` to check each Harness with a small read Dispatch and store version-specific launch, hook, and Report results; the hook part does not apply to Codex, and the Canary uses only its Wall limit
 
 ### Changed
+- Changed `maestro wait` to return with exit 2 and the next command for an open Relay, a paused Run, or a blocked or failed Task that needs the Orchestrator; while a Lane runs, each user reply opens with a table of the running Lanes (Lane, Task, Started, State) and one line for what waits for the user
 - Changed `close_tabs` to a key with no effect; old user files still load, and `maestro doctor` reports the key
 - Changed Canary evidence to name the hook record's folder, accept a Run folder record when the control write fails, and keep failed check files at the path shown by `maestro doctor` until the next Canary for that Harness
 - Changed the default of `max_per_account` to no Account cap; `max_total` still applies across Runs
@@ -25,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Removed `maestro tell` and `maestro roster solo`, which used Lane tabs and Solo agent tool discovery
 
 ### Fixed
+- Fixed resume answers that appeared again before a slow Task start; the Run state is saved before the answer marker is removed, and a second answer cannot restart a running Task
+- Fixed Run ownership during a pause; the supervisor and CLI make one decision about which process takes a resume answer, and a second supervisor cannot take a live Run
+- Fixed stale Lanes in the Reminder and status; the Reminder leaves out processes that are gone, and status marks them `stale (process gone)`
+- Fixed the Reminder's project root in a nested git folder to match the CLI
+- Fixed the label for a failed Task in `maestro wait` to be `task_failed`, limited Relay input in the Reminder and wait reason to 300 characters, and added the paused Run report path in text and JSON
+- Fixed the temp path symlink test to use the per-user temp folder and skip with a reason when it cannot make a symlink
+- Fixed Runs that started one caffeinate for each Dispatch; each Maestro process now shares one until the last caller stops
+- Fixed Lanes stopped at the Idle limit while a tool call was in progress; that time no longer counts toward the Idle limit, and the Wall limit still applies
 - Fixed Antigravity read Lanes that could not write `result.md` in headless mode; they now return the Report in their final message
 - Fixed Tasks that wait for an Account slot so they do no Budget refresh, Router call, or snapshot while they wait; a lost slot keeps its Route for the next claim
 - Fixed Route statistics to leave out Canary Ledger rows

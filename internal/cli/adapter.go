@@ -14,6 +14,7 @@ import (
 	"github.com/jalendport/maestro/internal/hook"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
+	"github.com/jalendport/maestro/internal/run"
 	"github.com/jalendport/maestro/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -63,7 +64,7 @@ func (a *app) hookCmd() *cobra.Command {
 				if r, err := roster.Load(); err == nil {
 					scope = r.Hook.Scope
 				}
-				if out := hook.RenderReminder(call, scope); out != nil {
+				if out := hook.RenderReminder(call, scope, run.ReminderItems); out != nil {
 					fmt.Fprintln(os.Stdout, string(out))
 				}
 				return nil
