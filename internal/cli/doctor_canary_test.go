@@ -13,6 +13,7 @@ import (
 	"github.com/jalendport/maestro/internal/discovery"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/harness"
+	"github.com/jalendport/maestro/internal/hook"
 	"github.com/jalendport/maestro/internal/ledger"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
@@ -57,7 +58,11 @@ func TestDoctorCanaryHarness(t *testing.T) {
 	}
 	mode := os.Getenv("MAESTRO_TEST_CANARY_MODE")
 	name := os.Getenv("MAESTRO_TEST_CANARY_HARNESS")
-	if mode != "hook" && name != "codex" {
+	if mode == "run record" {
+		if err := hook.RecordJudgment(filepath.Join(folder, "no-control-folder"), folder, &hook.Call{Harness: name, Tool: "run_terminal_command"}, hook.Verdict{Kind: "auto_approve"}); err != nil {
+			t.Fatal(err)
+		}
+	} else if mode != "hook" && name != "codex" {
 		call := map[string]any{
 			"tool_name": "exec_command", "tool_input": map[string]any{"command": "cat " + filepath.Join(task.Project, "canary.txt")}, "cwd": task.Project,
 		}
@@ -78,8 +83,10 @@ func TestDoctorCanaryHarness(t *testing.T) {
 	if mode == "report" {
 		report = "The hook ran and the report is fine."
 	}
-	if err := os.WriteFile(filepath.Join(folder, dispatch.FileReport), []byte(report), 0o600); err != nil {
-		t.Fatal(err)
+	if name != "agy" {
+		if err := os.WriteFile(filepath.Join(folder, dispatch.FileReport), []byte(report), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if mode == "process" {
 		os.Exit(7)
@@ -87,7 +94,11 @@ func TestDoctorCanaryHarness(t *testing.T) {
 	if mode == "stream error" {
 		fmt.Println(`{"type":"turn.failed","error":{"message":"Harness failed after the Report"}}`)
 	} else if name == "agy" {
-		fmt.Println(`{"status":"SUCCESS","response":"Report written"}`)
+		b, err := json.Marshal(map[string]string{"status": "SUCCESS", "response": report})
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Println(string(b))
 	}
 	os.Exit(0)
 }
@@ -194,15 +205,26 @@ func TestDoctorCanaryPartsAndScratchCleanup(t *testing.T) {
 			if !strings.HasPrefix(filepath.Base(scratch), "maestro-canary-") {
 				t.Fatalf("unexpected scratch path: %s", scratch)
 			}
-			if _, err := os.Stat(scratch); !os.IsNotExist(err) {
-				t.Fatalf("scratch folder remains: %s, %v", scratch, err)
+			if result.Passed() {
+				if _, err := os.Stat(scratch); !os.IsNotExist(err) || result.ScratchFolder != "" {
+					t.Fatalf("scratch folder remains: %s, %v", scratch, err)
+				}
+			} else {
+				if result.ScratchFolder != scratch || !strings.Contains(out, scratch) {
+					t.Fatalf("doctor did not name the scratch folder: %+v, %s", result, out)
+				}
+				for _, name := range []string{dispatch.FileBrief, dispatch.FileReport, dispatch.FileOutput, dispatch.FileStderr, dispatch.FileRecord} {
+					if _, err := os.Stat(filepath.Join(folder, name)); err != nil {
+						t.Fatalf("failed Canary lost %s: %v", name, err)
+					}
+				}
 			}
 			control, err := config.ControlDirForFolder(folder)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := os.Stat(control); !os.IsNotExist(err) {
-				t.Fatalf("control folder remains: %s, %v", control, err)
+			if _, err := os.Stat(control); result.Passed() && !os.IsNotExist(err) || !result.Passed() && err != nil {
+				t.Fatalf("control folder: %s, %v", control, err)
 			}
 			rows := 0
 			err = ledger.Each(func(raw json.RawMessage) error {
@@ -243,6 +265,44 @@ func TestDoctorDoesNotDispatchAndRejectsOldCanaryVersion(t *testing.T) {
 	}
 }
 
+func TestDoctorCanaryRemovesEarlierFailureBeforeNextDispatch(t *testing.T) {
+	started := setupDoctorCanary(t)
+	t.Setenv("MAESTRO_TEST_CANARY_MODE", "report")
+	doctorOutput(t, "--canary", "codex")
+	first, err := dispatch.LoadCanary("codex")
+	if err != nil || first == nil || first.ScratchFolder == "" {
+		t.Fatalf("failed Canary = %+v, error = %v", first, err)
+	}
+	b, err := os.ReadFile(started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := controlFolder(t, string(b))
+	markers := []string{filepath.Join(first.ScratchFolder, "old-evidence"), filepath.Join(control, "old-evidence")}
+	for _, marker := range markers {
+		if err := os.WriteFile(marker, []byte("earlier failure"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("MAESTRO_TEST_CANARY_MODE", "process")
+	doctorOutput(t, "--canary", "codex")
+	for _, marker := range markers {
+		if _, err := os.Stat(marker); !os.IsNotExist(err) {
+			t.Fatalf("earlier evidence remains: %s, %v", marker, err)
+		}
+	}
+	t.Setenv("MAESTRO_TEST_CANARY_MODE", "pass")
+	out, _ := doctorOutput(t, "--canary", "codex")
+	if !strings.Contains(out, "canary passed") {
+		t.Fatalf("Canary did not pass: %s", out)
+	}
+	for _, folder := range []string{first.ScratchFolder, control} {
+		if _, err := os.Stat(folder); !os.IsNotExist(err) {
+			t.Fatalf("scratch files remain after a pass: %s, %v", folder, err)
+		}
+	}
+}
+
 func TestDoctorCanaryHelpAndArguments(t *testing.T) {
 	setupDoctorCanary(t)
 	out, err := doctorOutput(t, "--help")
@@ -268,7 +328,7 @@ func TestDoctorSoloRowDescribesView(t *testing.T) {
 
 func TestCanaryWithEachHarness(t *testing.T) {
 	for _, name := range []string{"claude", "codex", "grok", "agy"} {
-		for _, mode := range []string{"pass", "hook"} {
+		for _, mode := range []string{"pass", "hook", "run record"} {
 			t.Run(name+"/"+mode, func(t *testing.T) {
 				setupDoctorCanary(t)
 				t.Setenv("MAESTRO_TEST_CANARY_HARNESS", name)
@@ -297,6 +357,15 @@ func TestCanaryWithEachHarness(t *testing.T) {
 				stored, err := dispatch.LoadCanary(name)
 				if err != nil || stored.Hook.NotApplicable != (name == "codex") || (mode == "hook" && name != "codex" && !strings.Contains(stored.FailedParts(), "hook:")) {
 					t.Fatalf("stored hook part = %+v, error = %v", stored, err)
+				}
+				if name != "codex" && mode != "hook" {
+					place := "control folder"
+					if mode == "run record" {
+						place = "Run folder; the Lane can write this record"
+					}
+					if !strings.Contains(stored.Hook.Detail, place) {
+						t.Fatalf("hook record place = %s", stored.Hook.Detail)
+					}
 				}
 			})
 		}

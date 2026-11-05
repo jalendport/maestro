@@ -2,8 +2,11 @@ package harness
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jalendport/maestro/internal/brief"
 )
 
 func TestAgyEnforcement(t *testing.T) {
@@ -44,8 +47,12 @@ func TestAgyLaunchShapes(t *testing.T) {
 			if !reflect.DeepEqual(command.Flags, tc.flags) {
 				t.Fatalf("permission flags: %q, want %q", command.Flags, tc.flags)
 			}
-			if command.Cmd.Dir != launch.Root || !reflect.DeepEqual(command.Cmd.Env, launch.Env) || command.PromptStdin || command.ReportByText {
+			if command.Cmd.Dir != launch.Root || !reflect.DeepEqual(command.Cmd.Env, launch.Env) || command.PromptStdin || command.ReportByText != (tc.access == "read") {
 				t.Fatalf("launch: %+v", command)
+			}
+			rendered := brief.Render(&brief.Brief{Title: "Check the Report"}, brief.RenderOpts{Access: tc.access, ReportPath: "result.md", ReportByMessage: command.ReportByText})
+			if strings.Contains(rendered, "Your final message is your report.") != (tc.access == "read") || strings.Contains(rendered, "write the file `result.md`") != (tc.access == "edit") {
+				t.Fatalf("Report section: %s", rendered)
 			}
 		})
 	}

@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `maestro watch` to follow Dispatch events, model text, and tool names, with one terminal View per Dispatch inside Solo and `close_tabs` control
 
 ### Changed
+- Changed Canary evidence to name the hook record's folder, accept a Run folder record when the control write fails, and keep failed check files at the path shown by `maestro doctor` until the next Canary for that Harness
 - Changed the default of `max_per_account` to no Account cap; `max_total` still applies across Runs
 - Changed `solo_tool` to a key with no effect; old user files still load, and `maestro doctor` reports the key
 - Changed every Lane to run as a headless child process inside Solo and outside it. Claude Lanes with a Solo link get a read-only Solo MCP set for process data and todo comments. The Brief gives the required `project_id`. Other Solo tools are denied without a Relay, and all `SOLO_` variables stay removed
@@ -24,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Removed `maestro tell` and `maestro roster solo`, which used Lane tabs and Solo agent tool discovery
 
 ### Fixed
+- Fixed Antigravity read Lanes that could not write `result.md` in headless mode; they now return the Report in their final message
 - Fixed Tasks that wait for an Account slot so they do no Budget refresh, Router call, or snapshot while they wait; a lost slot keeps its Route for the next claim
 - Fixed Grok text in the View so chunks join and keep their own line breaks
 - Fixed slow Solo View calls so the Lane gets its Pointer and runs without a wait; `close_tabs` also applies to a View that opens late

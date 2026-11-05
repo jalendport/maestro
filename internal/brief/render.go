@@ -15,8 +15,8 @@ type RenderOpts struct {
 	ReportPath    string
 	Retry         *Retry
 	SoloProjectID int // Claude Lane with a Solo link only
-	// ReportByMessage: the Lane cannot write files (Codex read-only sandbox);
-	// its final message is the Report and the Harness writes it to the path.
+	// ReportByMessage: the Lane returns its Report in its final message
+	// because the Harness cannot permit the Report write.
 	ReportByMessage bool
 	// Council: the read shape ends with a POSITION line instead of STATUS.
 	Council bool

@@ -89,7 +89,7 @@ func (a *app) hookCmd() *cobra.Command {
 					}
 					if lane, ok := hook.LoadLane(folder); ok {
 						verdict := hook.DecideLane(call, lane)
-						if err := hook.RecordJudgment(folder, call, verdict); err != nil {
+						if err := hook.RecordJudgment(folder, lane.RunFolder, call, verdict); err != nil {
 							ui.Warnf("hook record: %v", err)
 						}
 						if verdict.Kind == "relay" && call.Harness != "claude" {

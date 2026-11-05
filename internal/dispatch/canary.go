@@ -41,13 +41,14 @@ type CanaryPart struct {
 }
 
 type CanaryResult struct {
-	Harness   string     `json:"harness"`
-	Version   string     `json:"version"`
-	CheckedAt time.Time  `json:"checked_at"`
-	Family    string     `json:"family,omitempty"`
-	Process   CanaryPart `json:"process"`
-	Hook      CanaryPart `json:"hook"`
-	Report    CanaryPart `json:"report"`
+	Harness       string     `json:"harness"`
+	Version       string     `json:"version"`
+	CheckedAt     time.Time  `json:"checked_at"`
+	Family        string     `json:"family,omitempty"`
+	ScratchFolder string     `json:"scratch_folder,omitempty"`
+	Process       CanaryPart `json:"process"`
+	Hook          CanaryPart `json:"hook"`
+	Report        CanaryPart `json:"report"`
 }
 
 func (r *CanaryResult) Passed() bool {
@@ -124,22 +125,30 @@ func RunCanary(env *Env, name string) (result *CanaryResult, err error) {
 	if name == "codex" {
 		result.Hook = CanaryPart{NotApplicable: true, Detail: "not applicable: the Codex sandbox holds Access"}
 	}
+	root := filepath.Join(config.Home(), "cache", "maestro-canary-"+name)
+	if err := removeCanaryScratch(root); err != nil {
+		return nil, err
+	}
 	route, routeErr := canaryRoute(env, name)
 	if routeErr != nil {
 		result.Process.Detail = routeErr.Error()
 		return result, result.save()
 	}
 	result.Family = route.FamilyID
-	root, err := os.MkdirTemp("", "maestro-canary-")
-	if err != nil {
+	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, err
 	}
-	defer func() { err = errors.Join(err, os.RemoveAll(root)) }()
+	defer func() {
+		if result != nil && result.Passed() && err == nil {
+			err = removeCanaryScratch(root)
+		}
+	}()
 	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return nil, err
 	}
 	root = resolved
+	result.ScratchFolder = root
 	folder := filepath.Join(config.RunsDir(root), "canary", "check")
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		return nil, err
@@ -148,12 +157,6 @@ func RunCanary(env *Env, name string) (result *CanaryResult, err error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		err = errors.Join(err, os.RemoveAll(control))
-		// This project key belongs only to the scratch folder.
-		_ = os.Remove(filepath.Dir(control))
-		_ = os.Remove(filepath.Dir(filepath.Dir(control)))
-	}()
 	if err := os.WriteFile(config.ProjectFile(root), nil, 0o600); err != nil {
 		return nil, err
 	}
@@ -197,17 +200,42 @@ func RunCanary(env *Env, name string) (result *CanaryResult, err error) {
 	} else if rec.Outcome.ErrorText != "" {
 		result.Process.Detail = rec.Outcome.ErrorText
 	}
-	if b, err := os.ReadFile(filepath.Join(control, hook.FileJudgment)); err == nil && !result.Hook.NotApplicable {
-		var judgment hook.Judgment
-		if json.Unmarshal(b, &judgment) == nil && judgment.Harness == name && judgment.Tool != "" && judgment.Verdict != "" && !judgment.At.Before(rec.StartedAt) {
-			result.Hook = CanaryPart{Passed: true, Detail: judgment.Tool + ": " + judgment.Verdict}
+	if !result.Hook.NotApplicable {
+		for _, place := range []struct{ folder, detail string }{
+			{control, "control folder"},
+			{folder, "Run folder; the Lane can write this record, so it checks the Harness and does not prove the Lane is safe"},
+		} {
+			b, err := os.ReadFile(filepath.Join(place.folder, hook.FileJudgment))
+			var judgment hook.Judgment
+			if err == nil && json.Unmarshal(b, &judgment) == nil && judgment.Harness == name && judgment.Tool != "" && judgment.Verdict != "" && !judgment.At.Before(rec.StartedAt) {
+				result.Hook = CanaryPart{Passed: true, Detail: judgment.Tool + ": " + judgment.Verdict + " (" + place.detail + ")"}
+				break
+			}
 		}
 	}
 	if report, found := rec.Report(); found && report.Status != brief.StatusUnshaped {
 		result.Report = CanaryPart{Passed: true, Detail: "STATUS: " + report.Status}
 	}
 	result.CheckedAt = time.Now()
+	if result.Passed() {
+		result.ScratchFolder = ""
+	}
 	return result, result.save()
+}
+
+func removeCanaryScratch(root string) error {
+	folder := filepath.Join(config.RunsDir(root), "canary", "check")
+	control, err := config.ControlDirForFolder(folder)
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(control); err != nil {
+		return err
+	}
+	// This project key belongs only to the scratch folder.
+	_ = os.Remove(filepath.Dir(control))
+	_ = os.Remove(filepath.Dir(filepath.Dir(control)))
+	return os.RemoveAll(root)
 }
 
 func canaryRoute(env *Env, name string) (*router.Route, error) {

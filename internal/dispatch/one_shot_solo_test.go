@@ -133,7 +133,7 @@ func TestOneShotLaunchAndBriefWithSolo(t *testing.T) {
 					if rec.Outcome.Outcome != want || rec.SoloProcess != wantProcess {
 						t.Fatalf("solo=%t: %+v", inSolo, rec.Outcome)
 					}
-					if rec.Outcome.ReportByText != (access == brief.AccessRead && (name == "codex" || name == "grok")) {
+					if rec.Outcome.ReportByText != (access == brief.AccessRead && (name == "codex" || name == "grok" || name == "agy")) {
 						t.Fatalf("solo=%t: wrong Report rules: %+v", inSolo, rec.Outcome)
 					}
 					var got laneLaunch
@@ -230,6 +230,7 @@ func TestOneShotLaunchAndBriefWithSolo(t *testing.T) {
 						}
 					}
 				}
+				env.Solo.views.Wait()
 				calls, err := os.ReadFile(callsPath)
 				if err != nil || strings.Count(string(calls), `"name":"spawn_process"`) != 1 || strings.Count(string(calls), `"name":"send_input"`) != 1 || strings.Count(string(calls), `"name":"close_process"`) != 1 {
 					t.Fatalf("unexpected Solo calls: %s, %v", calls, err)

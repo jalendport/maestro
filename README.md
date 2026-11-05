@@ -48,7 +48,7 @@ maestro adapter install  # connect every harness found on this machine
 maestro init             # in each project: write .agents/maestro.toml
 ```
 
-`maestro doctor` shows the stored Canary result for each installed Harness version and starts no Dispatch. Run `maestro doctor --canary` to check every installed Harness, or `maestro doctor --canary codex` to check one. Each Canary uses your Account for one small read Dispatch with the cheapest enabled Family. It runs on the one-shot path in a scratch folder that Maestro removes. A pass needs a process that starts and ends with no error, a Lane tool call judged by the Maestro hook, and a Report with a valid Status line. For Codex, the hook part does not apply: the Codex sandbox holds Access, and a pass needs only the process and Report parts. Maestro stores the version, time, and all three parts; an older version's pass does not count for an update. The Canary uses only its Wall limit. Canary Dispatches have `canary: true` in the Ledger and do not count in Route statistics. A Canary runs only when you request it.
+`maestro doctor` shows the stored Canary result for each installed Harness version and starts no Dispatch. Run `maestro doctor --canary` to check every installed Harness, or `maestro doctor --canary codex` to check one. Each Canary uses your Account for one small read Dispatch with the cheapest enabled Family. It runs on the one-shot path in a scratch folder. Maestro removes that folder after a pass. After a fail, it keeps the files under `~/.maestro/cache/maestro-canary-<harness>`, and the doctor line gives the path. The next Canary for the same Harness removes those files first. A pass needs a process that starts and ends with no error, a Lane tool call judged by the Maestro hook, and a Report with a valid Status line. For Codex, the hook part does not apply: the Codex sandbox holds Access, and a pass needs only the process and Report parts. Maestro stores the version, time, and all three parts; an older version's pass does not count for an update. The hook result names the control folder or the Run folder where it found the record. The Lane can write a record in the Run folder, so that record checks for a broken Harness and does not prove the Lane is safe. The Canary uses only its Wall limit. Canary Dispatches have `canary: true` in the Ledger and do not count in Route statistics. A Canary runs only when you request it.
 
 `maestro adapter` prints the steps for each harness and writes nothing. `maestro adapter install` does the steps. Maestro touches nothing else in the configuration of a harness. To connect one harness only, give its name: `maestro adapter install claude`.
 
@@ -118,6 +118,8 @@ The hook judges a command as written. A read-only command that carries a shell e
 
 Grok Lanes run under `--sandbox workspace` when every writable directory is inside the project. For edit Lanes, this includes `dirs`. If a directory lies outside the project, as this repository's Go caches do, the Grok edit Lane runs without the sandbox and its Route is `best-effort`. A read Lane does not use the extra edit `dirs`.
 
+The hook first tries to record its judgment in the control folder under `~/.maestro`. The Grok workspace sandbox permits this record only inside the project, so the hook uses the Task's Run folder when the control write fails. The Canary reads both places and names the place in its hook result.
+
 Maestro cannot detect three limits. Grok warns and continues without the kernel sandbox when the OS refuses a built-in profile. Maestro finds a Grok Lane through the `transcriptPath` key in the hook payload; a Grok release that drops the key leaves the Lane under the Orchestrator rule. A check that runs Lane-written code under the Grok workspace sandbox can write `~/.grok`, Grok's own home. Grok's `hashline` file toolset is not supported in a Lane: its write tools are denied as unknown.
 
 The hook entry changed, so an existing install must run `maestro adapter install grok` again.
@@ -148,7 +150,7 @@ The probe denies only where the hook is in scope: with the default `[hook] scope
 
 Antigravity takes read and edit work, like the other harnesses. The Maestro hook entry carries each Lane's permissions:
 
-- A read Lane runs read-only commands and writes only its Report in the Run folder
+- A read Lane runs read-only commands and returns its Report in its final message; Maestro saves the `response` text as `result.md` in the Run folder
 - An edit Lane also runs commands on the checks and `allow` lists, and writes inside the project, the Run folder, and the extra `dirs`
 - An edit Lane relays other commands; a read Lane denies them
 

@@ -458,7 +458,11 @@ func TestRunOnceWritesLaneForEveryHarnessAndAccess(t *testing.T) {
 				t.Setenv("MAESTRO_TEST_CONTROL", control)
 				script := "#!/bin/sh\ncat >/dev/null\n[ -s \"$MAESTRO_TEST_CONTROL/lane.json\" ] || exit 7\nprintf '## Answer\\nfile report\\nSTATUS: done\\n' > \"$MAESTRO_TASK_FOLDER/result.md\"\n"
 				if name == "agy" {
-					script += "printf '%s\\n' '{\"status\":\"SUCCESS\",\"response\":\"This final message is not a Report\",\"usage\":{\"input_tokens\":12,\"output_tokens\":4}}'\n"
+					if access == brief.AccessRead {
+						script = "#!/bin/sh\n[ -s \"$MAESTRO_TEST_CONTROL/lane.json\" ] || exit 7\nprintf '%s\\n' '{\"status\":\"SUCCESS\",\"response\":\"## Answer\\nresponse report\\nSTATUS: done\\n\",\"usage\":{\"input_tokens\":12,\"output_tokens\":4}}'\n"
+					} else {
+						script += "printf '%s\\n' '{\"status\":\"SUCCESS\",\"response\":\"This final message is not a Report\",\"usage\":{\"input_tokens\":12,\"output_tokens\":4}}'\n"
+					}
 				}
 				if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 					t.Fatal(err)
@@ -491,7 +495,11 @@ func TestRunOnceWritesLaneForEveryHarnessAndAccess(t *testing.T) {
 					}
 					if name == "agy" {
 						report, ok := rec.Report()
-						if !ok || !strings.Contains(report.Raw, "file report") || rec.Outcome.ReportByText || rec.Budget.Tokens.Input == nil || *rec.Budget.Tokens.Input != 12 {
+						wantText := "file report"
+						if access == brief.AccessRead {
+							wantText = "response report"
+						}
+						if !ok || !strings.Contains(report.Raw, wantText) || rec.Outcome.ReportByText != (access == brief.AccessRead) || rec.Budget.Tokens.Input == nil || *rec.Budget.Tokens.Input != 12 {
 							t.Fatalf("Antigravity Report and tokens: %+v", rec)
 						}
 					}
@@ -511,7 +519,7 @@ func TestRunOnceAgyUsesOneShotInSolo(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "agy")
 	argsPath := filepath.Join(t.TempDir(), "args")
 	t.Setenv("MAESTRO_TEST_ARGS", argsPath)
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$MAESTRO_TEST_ARGS\"\nprintf '## Answer\\nPASS\\nPOSITION: confirmed\\n' > \"$MAESTRO_TEST_REPORT\"\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$MAESTRO_TEST_ARGS\"\nprintf '%s\\n' '{\"status\":\"SUCCESS\",\"response\":\"## Answer\\nPASS\\nPOSITION: confirmed\\n\"}'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	env := &Env{Root: root, Roster: &roster.Roster{Harness: map[string]config.Harness{"agy": {}}},
@@ -519,13 +527,14 @@ func TestRunOnceAgyUsesOneShotInSolo(t *testing.T) {
 	task := &Task{Project: root, Folder: folder, Run: "council", Task: "seat", Access: brief.AccessRead, Council: true,
 		Route: &router.Route{Harness: "agy", Model: "gemini-3.8-flash", Effort: "high"}, WallLimit: "1m", IdleLimit: "1m"}
 	rec := runOnce(env, task, &brief.Brief{Title: "Council"}, 1, nil)
-	if rec.SoloProcess != 8 || rec.Outcome.Outcome != OutcomeAnswered || rec.Outcome.ReportByText {
+	if rec.SoloProcess != 8 || rec.Outcome.Outcome != OutcomeAnswered || !rec.Outcome.ReportByText {
 		t.Fatalf("Antigravity one-shot outcome: %+v", rec.Outcome)
 	}
 	lane, ok := hook.LoadLane(controlFolder(t, folder))
 	if !ok || lane.Harness != "agy" || lane.Access != brief.AccessRead {
 		t.Fatalf("one-shot permissions: %+v", lane)
 	}
+	env.Solo.views.Wait()
 	calls, err := os.ReadFile(callsPath)
 	if err != nil {
 		t.Fatal(err)

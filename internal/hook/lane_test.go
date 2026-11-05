@@ -8,10 +8,52 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/harness"
 )
+
+func TestRecordJudgmentUsesRunFolderOnlyWhenControlWriteFails(t *testing.T) {
+	for _, writable := range []bool{true, false} {
+		t.Run(strconv.FormatBool(writable), func(t *testing.T) {
+			control, folder := t.TempDir(), t.TempDir()
+			if !writable {
+				if os.Geteuid() == 0 {
+					t.Skip("root can write a folder with no write permission")
+				}
+				if err := os.Chmod(control, 0o500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(control, 0o700) })
+			}
+			started := time.Now()
+			call := &Call{Harness: "grok", Tool: "run_terminal_command"}
+			if err := RecordJudgment(control, folder, call, Verdict{Kind: "auto_approve"}); err != nil {
+				t.Fatal(err)
+			}
+			found, absent := control, folder
+			if !writable {
+				found, absent = folder, control
+			}
+			b, err := os.ReadFile(filepath.Join(found, FileJudgment))
+			var judgment Judgment
+			if err != nil || json.Unmarshal(b, &judgment) != nil || judgment.Harness != "grok" || judgment.Tool != call.Tool || judgment.Verdict != "auto_approve" || judgment.At.Before(started) {
+				t.Fatalf("judgment = %+v, error = %v", judgment, err)
+			}
+			if _, err := os.Stat(filepath.Join(absent, FileJudgment)); !os.IsNotExist(err) {
+				t.Fatalf("second record: %v", err)
+			}
+			if err := RecordJudgment(control, folder, call, Verdict{Kind: "deny"}); err != nil {
+				t.Fatal(err)
+			}
+			kept, err := os.ReadFile(filepath.Join(found, FileJudgment))
+			if err != nil || string(kept) != string(b) {
+				t.Fatalf("first judgment changed: %s, %v", kept, err)
+			}
+		})
+	}
+}
 
 func TestParseAntigravityCwdAndArgs(t *testing.T) {
 	for _, harness := range []string{"", "agy"} {

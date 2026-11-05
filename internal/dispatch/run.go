@@ -385,7 +385,7 @@ func retryWait(outcome Outcome) (time.Duration, bool) {
 func archiveAttempt(folder string, n int) {
 	dst := filepath.Join(folder, FileAttempts, strconv.Itoa(n))
 	_ = os.MkdirAll(dst, 0o755)
-	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, FileBaseline} {
+	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, FileBaseline, hook.FileJudgment} {
 		_ = os.Rename(filepath.Join(folder, f), filepath.Join(dst, f))
 	}
 	control, err := config.ControlDirForFolder(folder)
@@ -557,6 +557,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		return fail(FailLane, err.Error())
 	}
 	clearAnswers(control)
+	_ = os.Remove(filepath.Join(t.Folder, hook.FileJudgment))
 	if err := os.WriteFile(filepath.Join(control, "lane.json"), lane, 0o600); err != nil {
 		return fail(FailLane, err.Error())
 	}

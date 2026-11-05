@@ -170,7 +170,11 @@ func canaryState(result *dispatch.CanaryResult, version, name string) (string, b
 	if result.Passed() {
 		return "canary passed for " + version, false
 	}
-	return "canary failed for " + version + " (" + result.FailedParts() + ")", true
+	state := "canary failed for " + version + " (" + result.FailedParts() + ")"
+	if result.ScratchFolder != "" {
+		state += "; files kept at " + result.ScratchFolder
+	}
+	return state, true
 }
 
 func orchestratorRow(family string) doctorRow {

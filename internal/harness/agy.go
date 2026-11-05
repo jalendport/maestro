@@ -86,7 +86,8 @@ func (a *Agy) Build(l Launch) (*Command, error) {
 	cmd := exec.Command(a.bin, args...)
 	cmd.Dir = l.Root
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Enforcement: a.Enforcement(l.Access), Flags: flags}, nil
+	// A headless read Lane cannot get permission to write its Report.
+	return &Command{Cmd: cmd, Enforcement: a.Enforcement(l.Access), Flags: flags, ReportByText: l.Access == "read"}, nil
 }
 
 func (a *Agy) NewParser() Parser { return &agyParser{out: &Outcome{}} }

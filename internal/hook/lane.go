@@ -41,7 +41,7 @@ type Judgment struct {
 	At      time.Time `json:"at"`
 }
 
-func RecordJudgment(folder string, call *Call, verdict Verdict) error {
+func RecordJudgment(folder, runFolder string, call *Call, verdict Verdict) error {
 	if call.Tool == "" {
 		return nil
 	}
@@ -49,6 +49,19 @@ func RecordJudgment(folder string, call *Call, verdict Verdict) error {
 	if err != nil {
 		return err
 	}
+	if err := writeJudgment(folder, b); err != nil {
+		if runFolder == "" {
+			return err
+		}
+		// The Grok workspace sandbox cannot write the control folder.
+		if fallbackErr := writeJudgment(runFolder, b); fallbackErr != nil {
+			return fmt.Errorf("control folder: %v; Run folder: %w", err, fallbackErr)
+		}
+	}
+	return nil
+}
+
+func writeJudgment(folder string, b []byte) error {
 	f, err := os.OpenFile(filepath.Join(folder, FileJudgment), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if os.IsExist(err) {
 		return nil
