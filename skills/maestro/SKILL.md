@@ -39,6 +39,8 @@ A Task is accepted when you have read its diff. Outcome `unverified` means Maest
 
 Read `report.md`, then answer once: `maestro resume <run> --task <n> --lane <family[:effort]>`, `--brief <corrected file>`, or `--skip`. A Relay is a Lane's permission prompt: in Solo it wakes you; outside Solo, `maestro wait` and `maestro status` print the `relay` event. Answer with `maestro answer <task> allow|deny --relay <id>`, with the id from that event.
 
+Claude and Antigravity edit Lanes relay commands outside the allow list on both the one-shot path and the tab path. Read Lanes, Grok Lanes, and Codex Lanes do not relay. An open Relay pauses the Idle limit and the Wall limit. An unanswered Relay is denied after 10 minutes and the Lane continues.
+
 ## Facts
 
 `maestro roster`, `maestro budget`, and `maestro doctor` print the Lanes, the usage per Account, and the Harnesses. Maestro passes no bypass flag to a Claude, Codex, or Antigravity Lane (a Grok Lane runs in always-approve because the Maestro hook and the sandbox decide before Grok does), never pushes, and commits only when a Brief says `commit: true`.

@@ -29,7 +29,7 @@ func TestAgyLaunchShapes(t *testing.T) {
 			args:  []string{"--sandbox", "--output-format", "json", "--model", "gemini-3.8-flash-high", "--print-timeout", "10m0s", "--disable-slash-commands", "-p", "read the brief"},
 			flags: []string{"--sandbox"}},
 		{name: "edit one-shot", access: "edit",
-			args:  []string{"--sandbox", "--output-format", "json", "--model", "gemini-3.8-flash-high", "--print-timeout", "10m0s", "--disable-slash-commands", "--mode", "accept-edits", "--add-dir", "/extra", "--add-dir", "/other dir", "-p", "read the brief"},
+			args:  []string{"--sandbox", "--output-format", "json", "--model", "gemini-3.8-flash-high", "--print-timeout", "0s", "--disable-slash-commands", "--mode", "accept-edits", "--add-dir", "/extra", "--add-dir", "/other dir", "-p", "read the brief"},
 			flags: []string{"--sandbox", "--mode", "accept-edits", "--add-dir", "/extra", "--add-dir", "/other dir"}},
 		{name: "read tab", access: "read", tab: true,
 			args:  []string{"--sandbox", "--model", "gemini-3.8-flash", "--effort", "high", "--prompt-interactive", "read the brief"},

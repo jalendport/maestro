@@ -76,7 +76,9 @@ func (a *Agy) build(l Launch, tab bool) (*Command, error) {
 		model += "-" + l.Effort
 	}
 	timeout := "0s"
-	if l.WallLimit > 0 {
+	// An edit Lane can wait on Relays. Only Maestro can pause the Wall limit,
+	// so disable the vendor timeout for that Lane, including repeated Relays.
+	if l.Access == "read" && l.WallLimit > 0 {
 		timeout = l.WallLimit.String()
 	}
 	args := []string{"--sandbox", "--output-format", "json", "--model", model, "--print-timeout", timeout, "--disable-slash-commands"}

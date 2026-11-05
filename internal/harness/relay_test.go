@@ -25,6 +25,9 @@ func TestClaudePermissionHookInEveryShape(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if !tab && !strings.Contains(strings.Join(command.Cmd.Args, "\n"), "--permission-prompts\nnone") {
+				t.Fatalf("one-shot must keep permission prompts off: %q", command.Cmd.Args)
+			}
 			settings := ""
 			for i, arg := range command.Cmd.Args {
 				if arg == "--settings" {

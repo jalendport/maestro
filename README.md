@@ -71,6 +71,8 @@ A Claude tab in a project you have not opened in Claude Code will wait on its fo
 
 Every Claude Lane ignores the user, project, and local settings files. `CLAUDE.md` still loads. Maestro supplies the Lane hook and sandbox settings at launch. A Claude edit Lane runs shell commands in the Claude sandbox: writes stay in the project, the Run folder, the project's `dirs`, and the per-user temp directory. Shell commands have no outbound network, so a check that must download something fails inside a Claude Lane. Caches already on disk are readable; a check that writes a cache needs that cache in `dirs`. A shell command that names a network host is denied without a prompt in every Claude Lane, one-shot or tab (`sandbox.network.strictAllowlist`, Claude Code 2.1.219 or later); a check that needs a module download must find it in the caches first. `claude_auto = true` makes Claude edit Lanes `best-effort`.
 
+With `claude_auto = true`, Claude's own classifier decides whether to allow a command outside the allow list on the one-shot path too.
+
 Verify: `maestro doctor` shows `adapter claude` as `ok`.
 
 Probe the hook. A sub-agent that can write code must get a `deny`:
@@ -152,7 +154,7 @@ Antigravity takes read and edit work, like the other harnesses. The Maestro hook
 
 - A read Lane runs read-only commands and writes only its Report in the Run folder
 - An edit Lane also runs commands on the checks and `allow` lists, and writes inside the project, the Run folder, and the extra `dirs`
-- Only an edit Lane in a tab relays other commands; a read Lane or a one-shot Lane denies them
+- An edit Lane relays other commands on both the one-shot path and the tab path; a read Lane denies them
 
 Antigravity has no kernel sandbox, so the hook is the only boundary of an Antigravity Lane. It judges a command as written: a read-only command that carries a shell expansion (`$`, a backquote, a brace list, or an unquoted glob) is denied; quote the pattern or name the file.
 
@@ -235,6 +237,8 @@ maestro router stats    # Jev vs rules agreement, verified rates
 ```
 
 Exit codes: `0` ok, `1` failed, `2` needs the orchestrator (a held breakdown, a paused run, a blocked task). `--json` prints one object per verb.
+
+Claude and Antigravity edit Lanes relay commands outside the allow list on both the one-shot path and the tab path. Read Lanes, Grok Lanes, and Codex Lanes do not relay. An open Relay pauses the Idle limit and the Wall limit; an unanswered Relay is denied after 10 minutes and the Lane continues. Antigravity edit Lanes use Maestro's limits with no vendor print timeout.
 
 Answer a Relay with `maestro answer <task> allow|deny --relay <id>`. Use the id from the `relay` event printed by `maestro wait` or `maestro status`.
 

@@ -167,7 +167,7 @@ func TestDecideLaneCommandPermissions(t *testing.T) {
 				if access == "edit" {
 					if tc.edit {
 						want = "auto_approve"
-					} else if tab {
+					} else {
 						want = "relay"
 					}
 				}
@@ -199,6 +199,9 @@ func TestDecideLaneGitWrites(t *testing.T) {
 					lane := &Lane{Access: access, Root: "/project", Commit: commit}
 					call := &Call{Harness: "agy", Tool: "run_command", Input: map[string]any{"CommandLine": command}}
 					want := "deny"
+					if access == "edit" {
+						want = "relay"
+					}
 					if access == "edit" && commit && subcommand != "push" {
 						want = "auto_approve"
 					}
@@ -219,6 +222,9 @@ func TestDecideLaneCompoundCommands(t *testing.T) {
 				want := "auto_approve"
 				if strings.Contains(command, "rm file") || access == "read" && strings.HasPrefix(command, "go test") {
 					want = "deny"
+					if access == "edit" {
+						want = "relay"
+					}
 				}
 				call := &Call{Harness: "agy", Tool: "run_command", Input: map[string]any{"CommandLine": command}}
 				if got := DecideLane(call, lane); got.Kind != want {
@@ -802,13 +808,22 @@ func TestDecideLaneSymlinkBeforeParent(t *testing.T) {
 	}
 }
 
-func TestDecideLaneGrokTabNeverRelays(t *testing.T) {
-	reason := "outside the Lane's allow list; add it to `checks` or the project `allow` list"
-	for _, harness := range []string{"agy", "grok"} {
-		call := &Call{Harness: harness, Tool: "run_terminal_command", CWD: "/project", Input: map[string]any{"command": "go build ./..."}}
-		got := DecideLane(call, &Lane{Harness: harness, Access: "edit", Root: "/project", Tab: true})
-		if harness == "grok" && (got.Kind != "deny" || got.Reason != reason) || harness == "agy" && got.Kind != "relay" {
-			t.Fatalf("%s = %+v", harness, got)
+func TestDecideLaneRelayByHarnessAccessAndLaunch(t *testing.T) {
+	for _, harness := range []string{"claude", "agy", "grok", "codex"} {
+		for _, access := range []string{"read", "edit"} {
+			for _, tab := range []bool{false, true} {
+				t.Run(harness+"/"+access+"/tab="+strconv.FormatBool(tab), func(t *testing.T) {
+					call := &Call{Harness: harness, Tool: "Bash", CWD: "/project", Input: map[string]any{"command": "go build ./..."}}
+					got := DecideLane(call, &Lane{Harness: harness, Access: access, Root: "/project", Tab: tab})
+					want := "deny"
+					if access == "edit" && (harness == "claude" || harness == "agy") {
+						want = "relay"
+					}
+					if got.Kind != want || want == "deny" && got.Reason == "" {
+						t.Fatalf("verdict = %+v, want %s", got, want)
+					}
+				})
+			}
 		}
 	}
 }

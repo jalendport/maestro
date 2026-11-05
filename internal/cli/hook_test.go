@@ -52,7 +52,7 @@ func TestHookCommandAntigravityLane(t *testing.T) {
 		{"read command", "read", "run_command", map[string]any{"CommandLine": "pwd"}, "auto_approve"},
 		{"read denied command", "read", "run_command", map[string]any{"CommandLine": "go test ./..."}, "deny"},
 		{"edit check", "edit", "run_command", map[string]any{"CommandLine": "go test ./... -race"}, "auto_approve"},
-		{"edit denied command", "edit", "run_command", map[string]any{"CommandLine": "go run main.go"}, "deny"},
+		{"edit shell redirect", "edit", "run_command", map[string]any{"CommandLine": "go run main.go > output"}, "deny"},
 		{"read project write", "read", "write_to_file", map[string]any{"TargetFile": "/project/file.go"}, "deny"},
 		{"edit project write", "edit", "write_to_file", map[string]any{"TargetFile": "/project/file.go"}, "auto_approve"},
 		{"read run write", "read", "write_to_file", map[string]any{"TargetFile": "/run/result.md"}, "auto_approve"},
@@ -95,51 +95,53 @@ func TestHookCommandAntigravityLane(t *testing.T) {
 }
 
 func TestHookCommandAntigravityRelay(t *testing.T) {
-	for _, answer := range []string{"allow", "deny"} {
-		t.Run(answer, func(t *testing.T) {
-			t.Setenv("MAESTRO_HOME", t.TempDir())
-			folder := t.TempDir()
-			t.Setenv("MAESTRO_TASK_FOLDER", folder)
-			control := controlFolder(t, folder)
-			if err := os.MkdirAll(control, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(`{"access":"edit","root":"/project","tab":true}`), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			reply := answerOpenRelay(control, answer)
-			payload := `{"toolCall":{"name":"run_command","args":{"CommandLine":"go run main.go","Cwd":"/project","Blocking":true}}}`
-			output := runHookPayload(t, payload, "agy")
-			want := `{"decision":"auto_approve"}`
-			if answer == "deny" {
-				want = `{"decision":"deny","reason":"deny"}`
-			}
-			if output != want {
-				t.Fatalf("answer: %s, want %s", output, want)
-			}
-			got := <-reply
-			if got.err != nil {
-				t.Fatal(got.err)
-			}
-			b, err := os.ReadFile(filepath.Join(control, "relay-answer-"+got.id+".json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			var saved struct {
-				Request struct {
-					ToolName  string         `json:"tool_name"`
-					ToolInput map[string]any `json:"tool_input"`
+	for _, tab := range []bool{false, true} {
+		for _, answer := range []string{"allow", "deny"} {
+			t.Run("tab="+strconv.FormatBool(tab)+"/"+answer, func(t *testing.T) {
+				t.Setenv("MAESTRO_HOME", t.TempDir())
+				folder := t.TempDir()
+				t.Setenv("MAESTRO_TASK_FOLDER", folder)
+				control := controlFolder(t, folder)
+				if err := os.MkdirAll(control, 0o700); err != nil {
+					t.Fatal(err)
 				}
-				Answer string
-			}
-			if err := json.Unmarshal(b, &saved); err != nil {
-				t.Fatal(err)
-			}
-			input := map[string]any{"CommandLine": "go run main.go", "Cwd": "/project", "Blocking": true}
-			if saved.Answer != answer || saved.Request.ToolName != "run_command" || !reflect.DeepEqual(saved.Request.ToolInput, input) {
-				t.Fatalf("saved Relay: %s", b)
-			}
-		})
+				if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(`{"access":"edit","harness":"agy","root":"/project","tab":`+strconv.FormatBool(tab)+`}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				reply := answerOpenRelay(control, answer)
+				payload := `{"toolCall":{"name":"run_command","args":{"CommandLine":"go run main.go","Cwd":"/project","Blocking":true}}}`
+				output := runHookPayload(t, payload, "agy")
+				want := `{"decision":"auto_approve"}`
+				if answer == "deny" {
+					want = `{"decision":"deny","reason":"deny"}`
+				}
+				if output != want {
+					t.Fatalf("answer: %s, want %s", output, want)
+				}
+				got := <-reply
+				if got.err != nil {
+					t.Fatal(got.err)
+				}
+				b, err := os.ReadFile(filepath.Join(control, "relay-answer-"+got.id+".json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var saved struct {
+					Request struct {
+						ToolName  string         `json:"tool_name"`
+						ToolInput map[string]any `json:"tool_input"`
+					}
+					Answer string
+				}
+				if err := json.Unmarshal(b, &saved); err != nil {
+					t.Fatal(err)
+				}
+				input := map[string]any{"CommandLine": "go run main.go", "Cwd": "/project", "Blocking": true}
+				if saved.Answer != answer || saved.Request.ToolName != "run_command" || !reflect.DeepEqual(saved.Request.ToolInput, input) {
+					t.Fatalf("saved Relay: %s", b)
+				}
+			})
+		}
 	}
 }
 
@@ -583,6 +585,7 @@ func TestHookCommandClaudeLane(t *testing.T) {
 			{"read tool", "read", "Read", "valid", map[string]any{"file_path": "<project>/main.go"}, false, ""},
 			{"edit git write", "edit", "Edit", "valid", map[string]any{"file_path": "<project>/.git/config"}, false, ".git"},
 			{"edit tab off-list command", "edit", "Bash", "valid", map[string]any{"command": "go run main.go"}, true, ""},
+			{"edit one-shot off-list command", "edit", "Bash", "valid", map[string]any{"command": "go run main.go"}, false, ""},
 			{"missing policy", "read", "Write", "missing", map[string]any{"file_path": "<run>/result.md"}, false, "no readable Lane policy"},
 			{"invalid policy", "read", "Write", "invalid", map[string]any{"file_path": "<run>/result.md"}, false, "no readable Lane policy"},
 			{"reader spawn", "read", "Agent", "valid", map[string]any{"subagent_type": "Explore"}, false, ""},

@@ -69,7 +69,7 @@ func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 			return nil, err
 		}
 	}
-	args := []string{"--prompt-file", promptFile, "--output-format", "json", "--no-subagents", "--model", l.Model}
+	args := []string{"--prompt-file", promptFile, "--output-format", "streaming-json", "--no-subagents", "--model", l.Model}
 	if tab {
 		args = []string{l.Pointer, "--model", l.Model, "--no-subagents", "--cwd", l.Root, "--trust"}
 	}
@@ -131,23 +131,44 @@ func within(path, root string) bool {
 
 func (g *Grok) NewParser() Parser { return &grokParser{out: &Outcome{}} }
 
-// grokParser reads the one JSON object Grok prints at the end; progress is
-// any non-empty line.
+// Grok's event list is open, so every non-empty line counts as progress.
 type grokParser struct {
-	out *Outcome
-	buf strings.Builder
+	out           *Outcome
+	text          strings.Builder
+	thought       strings.Builder
+	thoughtDenied bool
+	textBreak     bool
 }
 
-func (p *grokParser) Outcome() *Outcome {
-	text := strings.TrimSpace(p.buf.String())
+func (p *grokParser) Outcome() *Outcome { return p.out }
+
+func (p *grokParser) Line(line []byte) bool {
+	text := strings.TrimSpace(string(line))
 	if text == "" {
-		return p.out
+		return false
+	}
+	var event struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(line, &event); err != nil {
+		p.out.IsError = true
+		p.out.ErrorText = cutText(text, 500)
+		p.out.Signals = append(p.out.Signals, classifyText("grok", text))
+		return true
+	}
+	switch event.Type {
+	case "text", "thought", "end", "error":
+	case "tool_call", "usage":
+		// A tool call or a response boundary ends one stretch of text. Other
+		// events can arrive in the middle of a response and must not split it.
+		p.textBreak = true
+		return true
+	default:
+		return true
 	}
 	var doc struct {
-		Text      string `json:"text"`
-		Stop      string `json:"stopReason"`
-		SessionID string `json:"sessionId"`
-		Thought   string `json:"thought"`
+		Data      string  `json:"data"`
+		SessionID *string `json:"sessionId"`
 		Usage     struct {
 			Input     *int `json:"input_tokens"`
 			CacheRead *int `json:"cache_read_input_tokens"`
@@ -157,37 +178,63 @@ func (p *grokParser) Outcome() *Outcome {
 		Cost       *float64                   `json:"total_cost_usd"`
 		ModelUsage map[string]json.RawMessage `json:"modelUsage"`
 		Error      string                     `json:"error"`
+		Message    string                     `json:"message"`
 	}
-	if err := json.Unmarshal([]byte(text), &doc); err != nil {
-		// Not JSON: an error message on stdout.
+	if err := json.Unmarshal(line, &doc); err != nil {
 		p.out.IsError = true
 		p.out.ErrorText = cutText(text, 500)
 		p.out.Signals = append(p.out.Signals, classifyText("grok", text))
-		return p.out
+		return true
 	}
-	p.out.SessionID = doc.SessionID
-	p.out.Text = doc.Text
-	p.out.CostUSD = doc.Cost
-	p.out.Tokens = Tokens{Input: doc.Usage.Input, CachedInput: doc.Usage.CacheRead, Output: doc.Usage.Output, Reasoning: doc.Usage.Reasoning}
-	for model := range doc.ModelUsage {
-		p.out.ModelRan = model
+	switch event.Type {
+	case "text":
+		if p.textBreak && p.text.Len() > 0 {
+			p.text.WriteString("\n\n")
+		}
+		p.textBreak = false
+		p.text.WriteString(doc.Data)
+		p.out.Text = p.text.String()
+	case "thought":
+		// Grok exits 0 on a denial; the thought text is the only trace.
+		p.thought.WriteString(doc.Data)
+		thought := strings.ToLower(p.thought.String())
+		if !p.thoughtDenied && (strings.Contains(thought, "denied") || strings.Contains(thought, "permission")) {
+			p.out.Denials = append(p.out.Denials, Denial{Tool: "thought", Input: cutText(p.thought.String(), 300)})
+			p.thoughtDenied = true
+		}
+	case "end", "error":
+		if doc.SessionID != nil {
+			p.out.SessionID = *doc.SessionID
+		}
+		if doc.Cost != nil {
+			p.out.CostUSD = doc.Cost
+		}
+		if doc.Usage.Input != nil {
+			p.out.Tokens.Input = doc.Usage.Input
+		}
+		if doc.Usage.CacheRead != nil {
+			p.out.Tokens.CachedInput = doc.Usage.CacheRead
+		}
+		if doc.Usage.Output != nil {
+			p.out.Tokens.Output = doc.Usage.Output
+		}
+		if doc.Usage.Reasoning != nil {
+			p.out.Tokens.Reasoning = doc.Usage.Reasoning
+		}
+		for model := range doc.ModelUsage {
+			p.out.ModelRan = model
+		}
+		if event.Type == "error" || doc.Error != "" {
+			errorText := doc.Error
+			if errorText == "" {
+				errorText = doc.Message
+			}
+			p.out.IsError = true
+			p.out.ErrorText = errorText
+			p.out.Signals = append(p.out.Signals, classifyText("grok", errorText))
+		}
 	}
-	if doc.Error != "" {
-		p.out.IsError = true
-		p.out.ErrorText = doc.Error
-		p.out.Signals = append(p.out.Signals, classifyText("grok", doc.Error))
-	}
-	// Grok exits 0 on a denial; the thought text is the only trace.
-	if strings.Contains(strings.ToLower(doc.Thought), "denied") || strings.Contains(strings.ToLower(doc.Thought), "permission") {
-		p.out.Denials = append(p.out.Denials, Denial{Tool: "thought", Input: cutText(doc.Thought, 300)})
-	}
-	return p.out
-}
-
-func (p *grokParser) Line(line []byte) bool {
-	p.buf.Write(line)
-	p.buf.WriteByte('\n')
-	return len(strings.TrimSpace(string(line))) > 0
+	return true
 }
 
 func cutText(s string, n int) string {

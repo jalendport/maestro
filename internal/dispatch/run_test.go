@@ -263,6 +263,122 @@ func TestRunOncePausesLimitsAndRecordsRelay(t *testing.T) {
 	}
 }
 
+// The fake Harness runs in a separate process, reads the one-shot Lane policy,
+// and waits for a real Relay answer before it writes its Report.
+func TestOneShotRelayHarness(t *testing.T) {
+	if os.Getenv("MAESTRO_TEST_RELAY_HELPER") != "1" {
+		return
+	}
+	folder := os.Getenv("MAESTRO_TASK_FOLDER")
+	control := controlFolder(t, folder)
+	lane, ok := hook.LoadLane(control)
+	if !ok || lane.Tab || lane.Access != brief.AccessEdit {
+		t.Fatalf("expected a one-shot edit Lane: %+v", lane)
+	}
+	call := &hook.Call{Harness: lane.Harness, Tool: "Bash", CWD: lane.Root, Input: map[string]any{"command": "go run main.go"}}
+	if verdict := hook.DecideLane(call, lane); verdict.Kind != "relay" {
+		t.Fatalf("expected Relay: %+v", verdict)
+	}
+	relayDeadline, relayPollInterval = 4*time.Second, 10*time.Millisecond
+	input, err := json.Marshal(call.Input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	answer, err := RelayWait(control, RelayRequest{ToolName: call.Tool, ToolInput: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer == "denied: no answer" && time.Since(started) < relayDeadline {
+		t.Fatal("Relay denied before its deadline")
+	}
+	if err := os.WriteFile(filepath.Join(folder, FileReport), []byte("## Summary\n"+answer+"\n\nSTATUS: done\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.Exit(0)
+}
+
+func TestRunOnceEditRelayAnswerAndDeadline(t *testing.T) {
+	for _, harnessName := range []string{"claude", "agy"} {
+		for _, answer := range []string{"allow", "timeout"} {
+			t.Run(harnessName+"/"+answer, func(t *testing.T) {
+				t.Setenv("MAESTRO_HOME", t.TempDir())
+				t.Setenv("MAESTRO_TEST_RELAY_HELPER", "1")
+				self, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("MAESTRO_TEST_RELAY_EXE", self)
+				root := t.TempDir()
+				if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
+					t.Fatalf("git init: %v: %s", err, out)
+				}
+				folder := filepath.Join(config.RunsDir(root), "r-test", "abcd")
+				if err := os.MkdirAll(folder, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				bin := filepath.Join(t.TempDir(), "lane")
+				script := "#!/bin/sh\nexec \"$MAESTRO_TEST_RELAY_EXE\" -test.run=^TestOneShotRelayHarness$ -- \"$@\"\n"
+				if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				r := &roster.Roster{}
+				r.Router.Backend = "rules"
+				env := &Env{Root: root, Roster: r, Reg: harness.New(map[string]string{harnessName: bin})}
+				task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessEdit,
+					Route: &router.Route{Harness: harnessName}, WallLimit: "2s", IdleLimit: "2s"}
+				control := controlFolder(t, folder)
+				reply := make(chan error, 1)
+				go func() {
+					request, err := waitRelayRequest(control)
+					if err == nil && answer == "allow" {
+						// Stay silent longer than both limits, then use the same
+						// answer file as `maestro answer`.
+						time.Sleep(3 * time.Second)
+						err = WriteRelayAnswer(control, "allow", request.ID)
+					}
+					reply <- err
+				}()
+				rec := runOnce(env, task, &brief.Brief{}, 1, nil)
+				if err := <-reply; err != nil {
+					t.Fatal(err)
+				}
+				if rec.Outcome.Timer != "" || rec.Outcome.ExitCode != 0 || rec.Outcome.Outcome != OutcomeUnverified || rec.Outcome.Status != brief.StatusDone {
+					t.Fatalf("Lane did not finish after Relay: %+v; stderr: %s", rec.Outcome, tail(filepath.Join(folder, FileStderr), 1000))
+				}
+				var kinds []string
+				for _, event := range rec.Events {
+					if strings.HasPrefix(event.Kind, "relay") {
+						kinds = append(kinds, event.Kind)
+					}
+				}
+				if !reflect.DeepEqual(kinds, []string{"relay", "relay-answer"}) || len(rec.Permission.Relays) != 1 {
+					t.Fatalf("Relay events: %v, records: %s", kinds, rec.Permission.Relays)
+				}
+				var saved struct {
+					Answer  string
+					Seconds float64
+				}
+				if err := json.Unmarshal(rec.Permission.Relays[0], &saved); err != nil {
+					t.Fatal(err)
+				}
+				want, seconds := "allow", 3.0
+				if answer == "timeout" {
+					// RelayWait starts its deadline before it publishes AskedAt.
+					want, seconds = "denied: no answer", 3.9
+				}
+				if saved.Answer != want || saved.Seconds < seconds {
+					t.Fatalf("Relay answer: %+v, want %q after at least %.0fs", saved, want, seconds)
+				}
+				report, err := os.ReadFile(filepath.Join(folder, FileReport))
+				if err != nil || !strings.Contains(string(report), "\n"+want+"\n") {
+					t.Fatalf("Harness did not receive the answer: %s, %v", report, err)
+				}
+			})
+		}
+	}
+}
+
 func TestArchiveAttemptPreservesBaselineTabLogAndLane(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	folder := t.TempDir()

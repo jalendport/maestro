@@ -324,7 +324,7 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 			if lane.Access == "read" {
 				return Verdict{Kind: "deny", Reason: "read Lane: command not on the read-only list"}
 			}
-			if lane.Access == "edit" && lane.Tab && c.Harness != "grok" && lane.Harness != "grok" {
+			if lane.Access == "edit" && (c.Harness == "claude" || c.Harness == "agy") && lane.Harness != "grok" && lane.Harness != "codex" {
 				return Verdict{Kind: "relay"}
 			}
 			return Verdict{Kind: "deny", Reason: "outside the Lane's allow list; add it to `checks` or the project `allow` list"}

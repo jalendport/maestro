@@ -3,6 +3,7 @@ package harness
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -52,9 +53,196 @@ func TestClassify(t *testing.T) {
 }
 
 func TestGrokParserFixture(t *testing.T) {
-	o := feed(t, (&Grok{}).NewParser(), "testdata/grok-out.json")
-	if o.SessionID == "" || o.Text != "OK" || o.ModelRan != "grok-4.7-build" || o.IsError || o.CostUSD == nil {
+	o := feed(t, (&Grok{}).NewParser(), "testdata/grok-stream.jsonl")
+	if o.SessionID != "01a1aa79-20f6-7320-a783-63b7b414f078" || o.Text != "2" || o.ModelRan != "grok-4.7-build" || o.IsError || o.ErrorText != "" || len(o.Signals) != 0 || len(o.Denials) != 0 {
 		t.Fatalf("%+v", o)
+	}
+	if o.CostUSD == nil || *o.CostUSD != 0.01065084 {
+		t.Fatalf("cost %v", o.CostUSD)
+	}
+	wantTokens := Tokens{Input: intp(8657), CachedInput: intp(27136), Output: intp(74), Reasoning: intp(42)}
+	if !reflect.DeepEqual(o.Tokens, wantTokens) {
+		t.Fatalf("tokens %+v, want %+v", o.Tokens, wantTokens)
+	}
+}
+
+func TestGrokTextChunksJoinInOrder(t *testing.T) {
+	p := (&Grok{}).NewParser()
+	for _, line := range []string{
+		`{"type":"text","data":"First "}`,
+		`{"type":"tool_call","toolName":"read_file"}`,
+		`{"type":"text","data":"second\n"}`,
+		`{"type":"text","data":"third"}`,
+		`{"type":"end","sessionId":"session"}`,
+	} {
+		if !p.Line([]byte(line)) {
+			t.Fatalf("line must count as progress: %s", line)
+		}
+	}
+	if o := p.Outcome(); o.Text != "First \n\nsecond\nthird" || o.IsError {
+		t.Fatalf("%+v", o)
+	}
+}
+
+func TestGrokConsecutiveTextChunksJoinWithoutSeparator(t *testing.T) {
+	p := (&Grok{}).NewParser()
+	p.Line([]byte(`{"type":"text","data":"## Ans"}`))
+	p.Line([]byte(`{"type":"text","data":"wer\nSTATUS: done"}`))
+	if o := p.Outcome(); o.Text != "## Answer\nSTATUS: done" || o.IsError {
+		t.Fatalf("%+v", o)
+	}
+}
+
+func TestGrokLateLinesKeepMetadata(t *testing.T) {
+	for _, late := range []string{
+		`{"type":"error","message":"usage limit reached"}`,
+		`{"type":"end","error":"usage limit reached"}`,
+		`{"type":"error","message":"usage limit reached","usage":{"output_tokens":0},"total_cost_usd":0}`,
+	} {
+		t.Run(late, func(t *testing.T) {
+			p := (&Grok{}).NewParser()
+			p.Line([]byte(`{"type":"end","sessionId":"session","total_cost_usd":0.25,"usage":{"input_tokens":10,"cache_read_input_tokens":20,"output_tokens":30,"reasoning_tokens":40},"modelUsage":{"grok-4.7-build":{}}}`))
+			p.Line([]byte(late))
+			o := p.Outcome()
+			wantCost := 0.25
+			wantTokens := Tokens{Input: intp(10), CachedInput: intp(20), Output: intp(30), Reasoning: intp(40)}
+			if strings.Contains(late, `"output_tokens":0`) {
+				wantCost = 0
+				wantTokens.Output = intp(0)
+			}
+			if o.SessionID != "session" || o.ModelRan != "grok-4.7-build" || o.CostUSD == nil || *o.CostUSD != wantCost || !reflect.DeepEqual(o.Tokens, wantTokens) {
+				t.Fatalf("metadata lost: %+v", o)
+			}
+			if !o.IsError || o.ErrorText != "usage limit reached" || len(o.Signals) != 1 || o.Signals[0].Class != "limit" {
+				t.Fatalf("%+v", o)
+			}
+		})
+	}
+}
+
+func TestGrokUnknownTypeIsProgressWithoutChangingOutcome(t *testing.T) {
+	p := (&Grok{}).NewParser()
+	o := feed(t, p, "testdata/grok-stream.jsonl")
+	want := *o
+	if !p.Line([]byte(`{"type":"future_event","data":{"text":"ignored"},"sessionId":"other","usage":"unknown","error":"quota exceeded"}`)) {
+		t.Fatal("unknown type must count as progress")
+	}
+	if !reflect.DeepEqual(*p.Outcome(), want) {
+		t.Fatalf("outcome changed: %+v, want %+v", p.Outcome(), want)
+	}
+	for _, line := range []string{"", " \t\r"} {
+		if p.Line([]byte(line)) {
+			t.Fatal("empty line must not count as progress")
+		}
+	}
+	if !reflect.DeepEqual(*p.Outcome(), want) {
+		t.Fatal("empty line changed the outcome")
+	}
+}
+
+func TestGrokStreamErrorsKeepLimitClassification(t *testing.T) {
+	for _, line := range []string{
+		`{"type":"error","message":"usage limit reached"}`,
+		`{"type":"end","error":"usage limit reached"}`,
+	} {
+		t.Run(line, func(t *testing.T) {
+			p := (&Grok{}).NewParser()
+			if !p.Line([]byte(line)) {
+				t.Fatal("error line must count as progress")
+			}
+			o := p.Outcome()
+			if !o.IsError || o.ErrorText != "usage limit reached" || len(o.Signals) != 1 || o.Signals[0].Class != "limit" {
+				t.Fatalf("%+v", o)
+			}
+		})
+	}
+}
+
+func TestGrokNonJSONIsAnError(t *testing.T) {
+	p := (&Grok{}).NewParser()
+	if !p.Line([]byte("quota exceeded")) {
+		t.Fatal("non-empty stdout must count as progress")
+	}
+	p.Line([]byte(`{"type":"end","sessionId":"session"}`))
+	o := p.Outcome()
+	if !o.IsError || o.ErrorText != "quota exceeded" || len(o.Signals) != 1 || o.Signals[0].Class != "limit" {
+		t.Fatalf("%+v", o)
+	}
+}
+
+func TestGrokThoughtDenial(t *testing.T) {
+	for _, thought := range []string{"The command was DENIED.", "I need Permission to run this."} {
+		t.Run(thought, func(t *testing.T) {
+			p := (&Grok{}).NewParser()
+			line, err := json.Marshal(map[string]string{"type": "thought", "data": thought})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !p.Line(line) {
+				t.Fatal("thought line must count as progress")
+			}
+			p.Line([]byte(`{"type":"text","data":"Done"}`))
+			p.Line([]byte(`{"type":"end"}`))
+			o := p.Outcome()
+			if o.IsError || o.Text != "Done" || !reflect.DeepEqual(o.Denials, []Denial{{Tool: "thought", Input: thought}}) {
+				t.Fatalf("%+v", o)
+			}
+			want := *o
+			if !reflect.DeepEqual(*p.Outcome(), want) {
+				t.Fatal("reading the outcome changed the denial signal")
+			}
+		})
+	}
+}
+
+func TestGrokThoughtChunksGiveOneDenial(t *testing.T) {
+	for _, chunks := range [][]string{
+		{"The command was den", "ied."},
+		{"I need per", "mission to run this."},
+		{"The command was denied.", " Another command was denied."},
+	} {
+		t.Run(strings.Join(chunks, ""), func(t *testing.T) {
+			p := (&Grok{}).NewParser()
+			for _, chunk := range chunks {
+				line, err := json.Marshal(map[string]string{"type": "thought", "data": chunk})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !p.Line(line) {
+					t.Fatal("thought line must count as progress")
+				}
+			}
+			o := p.Outcome()
+			if o.IsError || len(o.Denials) != 1 || o.Denials[0].Tool != "thought" || !strings.Contains(o.Denials[0].Input, "denied") && !strings.Contains(o.Denials[0].Input, "permission") {
+				t.Fatalf("%+v", o)
+			}
+		})
+	}
+}
+
+func TestGrokOneShotStreamsAndTabArgumentsStayTheSame(t *testing.T) {
+	g := &Grok{bin: "/bin/grok"}
+	for _, access := range []string{"read", "edit"} {
+		t.Run(access, func(t *testing.T) {
+			launch := Launch{Access: access, Root: "/project", RunFolder: "/project/run", Model: "grok-4.7-build", Effort: "high"}
+			command, err := g.Build(launch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{g.bin, "--prompt-file", "/project/run/pointer.txt", "--output-format", "streaming-json", "--no-subagents", "--model", launch.Model, "--reasoning-effort", launch.Effort, "--sandbox", "workspace", "--permission-mode", "bypassPermissions"}
+			if !reflect.DeepEqual(command.Cmd.Args, want) {
+				t.Fatalf("one-shot args %q, want %q", command.Cmd.Args, want)
+			}
+			launch.Pointer = "read the Brief"
+			command, err = g.BuildTab(launch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want = []string{g.bin, launch.Pointer, "--model", launch.Model, "--no-subagents", "--cwd", launch.Root, "--trust", "--reasoning-effort", launch.Effort, "--sandbox", "workspace", "--permission-mode", "bypassPermissions"}
+			if !reflect.DeepEqual(command.Cmd.Args, want) {
+				t.Fatalf("tab args %q, want %q", command.Cmd.Args, want)
+			}
+		})
 	}
 }
 

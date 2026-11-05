@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Changed
+- Changed Claude and Antigravity edit Lanes to relay commands outside the allow list on both the one-shot path and the tab path; Antigravity edit Lanes use Maestro's limits with no vendor print timeout
+
 ### Fixed
 - Fixed Grok Lane tabs that waited on folder trust: Maestro now passes `--trust` for the project root
+- Fixed one-shot Grok Lanes that stopped at the Idle limit during work: Maestro now reads `streaming-json` output line by line
 
 ## 1.2.0 - 2026-10-14
 
