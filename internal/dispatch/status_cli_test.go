@@ -85,7 +85,7 @@ func TestWaitDispatchHasNoTabText(t *testing.T) {
 	if err := os.MkdirAll(folder, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	rec := &dispatch.Record{Task: "abcd", Path: folder, State: "ended", SoloProcess: 42,
+	rec := &dispatch.Record{Task: "abcd", Path: folder, State: "ended",
 		Route: &router.Route{FamilyID: "codex-sol"}, Outcome: dispatch.Outcome{Outcome: dispatch.OutcomeAnswered, Status: "done"}}
 	if err := rec.Save(); err != nil {
 		t.Fatal(err)

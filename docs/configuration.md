@@ -4,7 +4,7 @@ Maestro runs with no configuration file. It reads three layers, in this order: t
 
 A key that Maestro does not know gives a warning. It does not stop a Route.
 
-Every Lane runs as a headless child process on the one-shot path, inside Solo and outside it. This includes Run Tasks, single Dispatches, and Council Seats. Solo supplies terminal Views, todos, Report and Merge comments, and wake-ups.
+Every Lane runs as a headless child process on the one-shot path, inside Solo and outside it. This includes Run Tasks, single Dispatches, and Council Seats. Solo supplies todos, Report and Merge comments, and wake-ups.
 
 ## ~/.maestro/config.toml
 
@@ -287,7 +287,7 @@ These keys set how many Lanes run at the same time.
 | `max_parallel` | integer | `4` | Sets how many Council Seats or Run Tasks run at the same time. |
 | `max_per_account` | integer | none | Caps concurrent Run Dispatches on one Account across the machine when set to a positive number. An absent key or `0` gives the Account no cap of its own; `max_total` still applies across Runs. A Task at a set Account cap waits with `account cap <id>` until a slot is free. |
 | `max_total` | integer | `6` | Caps concurrent Run Dispatches across the machine. A Task waits with `machine cap` until a slot is free. |
-| `close_tabs` | string | `"on-success"` | When to close a Solo View tab: `"on-success"` closes it after `verified`, `answered`, or `unverified`; `"always"` closes it after every outcome, including failure and cancellation; `"never"` leaves it open. Closing the View does not stop the Dispatch. |
+| `close_tabs` | string | — | Accepted for old user files. Has no effect; `maestro doctor` reports the key. |
 
 ## .agents/maestro.toml
 

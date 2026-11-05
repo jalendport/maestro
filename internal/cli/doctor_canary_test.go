@@ -316,11 +316,11 @@ func TestDoctorCanaryHelpAndArguments(t *testing.T) {
 	}
 }
 
-func TestDoctorSoloRowDescribesView(t *testing.T) {
+func TestDoctorSoloRowDescribesLink(t *testing.T) {
 	for _, process := range []string{"", "42"} {
 		t.Setenv("SOLO_PROCESS_ID", process)
 		row := soloRow(&dispatch.Env{})
-		if !strings.Contains(row.State, "View") || strings.Contains(row.State, "one-shot lanes only") {
+		if (process == "" && row.State != "outside Solo") || (process != "" && row.State != "Solo unavailable") {
 			t.Fatalf("Solo row = %+v", row)
 		}
 	}

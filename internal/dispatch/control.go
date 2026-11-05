@@ -16,8 +16,8 @@ func RequestCancel(folder string) error {
 	return os.WriteFile(filepath.Join(folder, fileCancel), nil, 0o644)
 }
 
-// WatchCancel connects a detached supervisor to the Lane's Cancel channel.
-func WatchCancel(ctx context.Context, folder string) <-chan struct{} {
+// MonitorCancel connects a detached supervisor to the Lane's Cancel channel.
+func MonitorCancel(ctx context.Context, folder string) <-chan struct{} {
 	cancelled := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(100 * time.Millisecond)

@@ -93,36 +93,8 @@ func (a *Agy) Build(l Launch) (*Command, error) {
 func (a *Agy) NewParser() Parser { return &agyParser{out: &Outcome{}} }
 
 type agyParser struct {
-	out      *Outcome
-	buf      strings.Builder
-	readable strings.Builder
-}
-
-func (p *agyParser) Readable(line []byte) []string {
-	// Antigravity can print one JSON document across several lines.
-	if p.readable.Len() == 0 && !strings.HasPrefix(strings.TrimSpace(string(line)), "{") {
-		return nil
-	}
-	p.readable.Write(line)
-	p.readable.WriteByte('\n')
-	var doc struct {
-		Response string `json:"response"`
-	}
-	if json.Unmarshal([]byte(p.readable.String()), &doc) != nil {
-		if json.Valid(line) {
-			p.readable.Reset()
-			if json.Unmarshal(line, &doc) != nil || doc.Response == "" {
-				return nil
-			}
-			return []string{doc.Response}
-		}
-		return nil
-	}
-	p.readable.Reset()
-	if doc.Response != "" {
-		return []string{doc.Response}
-	}
-	return nil
+	out *Outcome
+	buf strings.Builder
 }
 
 func (p *agyParser) Outcome() *Outcome {

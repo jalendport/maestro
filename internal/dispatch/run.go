@@ -263,7 +263,7 @@ func prepareRouted(env *Env, b *brief.Brief, route *router.Route, runID, taskID,
 		wall = d
 	}
 	t := &Task{
-		Project: env.Root, Run: runID, Task: taskID, BriefPath: b.Path, Title: b.Title, Tab: strings.TrimSpace(b.Tab),
+		Project: env.Root, Run: runID, Task: taskID, BriefPath: b.Path, Title: b.Title,
 		Category: route.Category, Access: b.EffectiveAccess(), Commit: b.WantsCommit(), Touch: b.Touch, Dirs: dirs,
 		Checks: b.Checks, WallLimit: wall.String(), IdleLimit: env.Roster.Failure.IdleLimit.Duration.String(),
 		Route: route, Folder: folder, ClaudeAuto: env.Project != nil && env.Project.ClaudeAuto, InSolo: solo.InSolo(),
@@ -586,8 +586,6 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	rec.Pid = cmd.Process.Pid
 	rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "start", Text: fmt.Sprintf("%s pid %d", h.Name(), cmd.Process.Pid)})
 	_ = rec.Save()
-	finishView := env.Solo.OpenView(env, t)
-	defer func() { finishView(rec) }()
 	ui.Eventf("dispatch", "task %s  %s %s %s  %s  wall %s  → %s", t.Task, h.Name(), t.Route.Model, t.Route.Effort, t.Access, t.WallLimit, relOrAbs(t.Project, t.Folder))
 	if stdin != nil {
 		go func() {

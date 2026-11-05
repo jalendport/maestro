@@ -249,5 +249,4 @@ council_tasks = 10
 [concurrency]
 max_parallel = 4
 max_total = 6
-close_tabs = "on-success"
 `

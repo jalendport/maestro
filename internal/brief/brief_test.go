@@ -1,6 +1,7 @@
 package brief
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -187,8 +188,22 @@ func TestTabField(t *testing.T) {
 	if b.Tab != "Pin Grok home" {
 		t.Errorf("tab = %q", b.Tab)
 	}
+	rendered := Render(b, RenderOpts{})
+	b.Tab = ""
+	if got := Render(b, RenderOpts{}); got != rendered {
+		t.Fatal("tab changed the rendered Brief")
+	}
+	path := t.TempDir() + "/brief.md"
+	b.Tab = "Something"
+	if err := Write(b, path); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil || strings.Contains(string(written), "tab:") || strings.Contains(string(written), "Something") {
+		t.Fatalf("tab in written Brief: %s, %v", written, err)
+	}
 	long := "---\ntitle: T\ntab: this tab name is far too long\n---\n## Goal\nx\n## Done\ny\n"
-	if _, err := ParseText(long); err == nil || !strings.Contains(err.Error(), "tab is") {
+	if _, err := ParseText(long); err != nil {
 		t.Errorf("long tab: err = %v", err)
 	}
 }

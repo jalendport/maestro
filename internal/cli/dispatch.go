@@ -139,7 +139,7 @@ func (a *app) superviseCmd() *cobra.Command {
 			}
 			ctx, stop := context.WithCancel(context.Background())
 			defer stop()
-			t.Cancel = dispatch.WatchCancel(ctx, t.Folder)
+			t.Cancel = dispatch.MonitorCancel(ctx, t.Folder)
 			rec, err := dispatch.Execute(env, t)
 			if err != nil {
 				return err

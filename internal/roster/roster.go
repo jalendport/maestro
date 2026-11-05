@@ -501,9 +501,6 @@ func mergeConcurrency(dst *config.Concurrency, u config.Concurrency) {
 	if u.MaxTotal != 0 {
 		dst.MaxTotal = u.MaxTotal
 	}
-	if u.CloseTabs != "" {
-		dst.CloseTabs = u.CloseTabs
-	}
 }
 
 // bindAccounts binds every family to its Harness's single

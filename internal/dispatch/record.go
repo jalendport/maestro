@@ -43,7 +43,6 @@ type Task struct {
 	Task       string        `json:"task"`
 	BriefPath  string        `json:"brief_path"`
 	Title      string        `json:"title"`
-	Tab        string        `json:"tab,omitempty"`
 	Category   string        `json:"category"`
 	Access     string        `json:"access"`
 	Commit     bool          `json:"commit"`
@@ -86,8 +85,6 @@ type Record struct {
 	DurationS float64   `json:"duration_s"`
 	Path      string    `json:"path"`
 	SessionID string    `json:"session_id,omitempty"`
-	// SoloProcess is the terminal that shows the Dispatch view.
-	SoloProcess int `json:"solo_process,omitempty"`
 
 	TaskInfo     TaskInfo      `json:"task_info"`
 	Route        *router.Route `json:"route"`

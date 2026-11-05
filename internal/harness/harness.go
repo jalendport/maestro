@@ -105,9 +105,6 @@ type Parser interface {
 	// Line reports whether the line counts as new output (resets the Idle limit).
 	Line(line []byte) bool
 	Outcome() *Outcome
-	// Readable returns model text and tool names; unknown lines return nothing.
-	// A nil line flushes text at the end of the stream.
-	Readable(line []byte) []string
 }
 
 // Harness is one adapter.

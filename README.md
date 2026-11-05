@@ -13,7 +13,7 @@ Maestro is a small command-line tool that takes over once you and your coding ag
 - **Subscriptions first** — everyday work spreads across the subscriptions you already pay for, while lanes billed per token get read-only work on their own and edit work only when you ask for them by name; set `[router] orchestrator = "<family>"` in `~/.maestro/config.toml` and the model you are talking to is never spent automatically
 - **Budgets that bind** — usage windows are read from every dispatch (and probed when stale), with a block point, a warning, and a reserve kept back for the session you are in
 - **A permission contract** — a Lane gets `read` or `edit` Access through a sandbox, a tool allowlist, or the Maestro hook; Maestro passes no bypass flag to Claude, Codex, or Antigravity, and a Grok Lane runs in always-approve only because the hook and the sandbox decide before Grok does
-- **Solo integration** — inside [Solo](https://soloterm.com), tasks are todos, results are comments, and each Dispatch has a terminal View; your session is woken when a run ends
+- **Solo integration** — inside [Solo](https://soloterm.com), Tasks are todos, results are comments, and your session wakes when a Run ends
 - **Keeps the Mac awake** — `caffeinate` runs for as long as a dispatch or a run is live, so the machine does not go to sleep under a lane that is still working, and a notice tells you when the run ends; set `[failure] keep_awake = false` to turn it off
 - **Single static binary** — Go, no runtime dependencies, and each harness needs only a skill file, a hook entry or two, and for Grok one rules file
 
@@ -186,7 +186,7 @@ You install once and plan with your agent. The agent hands finished plans to Mae
 1. Install Maestro and connect the harnesses once. See [Installation](#installation).
 2. Plan with your agent as you do now: a grilling session, a spec, a plan file. The Maestro skill tells the agent what a finished plan looks like.
 3. When you approve the plan, the agent writes the Plan file and runs `maestro run` itself. Nobody asks you to type anything.
-4. Inside Solo, each task is a todo and each result is a comment, and a finished run wakes the agent. Each Dispatch opens a terminal View. Outside Solo, the agent reports from `maestro wait`.
+4. Inside Solo, each task is a todo and each result is a comment, and a finished run wakes the agent. Outside Solo, the agent reports from `maestro wait`.
 5. Maestro needs you when a verb exits with code 2: a held breakdown, a paused run, a blocked task, or a single-opinion council. The agent reads the report and either answers or asks you one question.
 
 Inside hook scope, the Orchestrator gets a one-line Reminder on every prompt in Claude Code and Codex, and before every model call in Antigravity. In Grok, the rules file loads in every session and states the scope condition in words, so there the scope is best-effort.
@@ -195,7 +195,7 @@ For example, you end a grilling session with a plan for a new probe feature. The
 
 ### Solo
 
-Every Lane runs as a headless child process. Inside Solo, Maestro opens one terminal View per Dispatch. The View shows Dispatch events, model text, and tool names until the Dispatch ends. The tab name uses the Brief's `tab` field or the first words of its title, followed by the Family. The `close_tabs` setting controls when the View tab closes, including a View that opens after the Dispatch ends. The Lane gets its Pointer and runs without a wait for Solo. If Solo cannot open the terminal or start the View, Maestro prints one warning and the Dispatch continues. Closing a View tab does not stop the Lane.
+Every Lane runs as a headless child process. Inside Solo, Maestro creates todos, adds Report and Merge comments, and sends wake-ups.
 
 With a Solo link, Maestro passes Solo's MCP server to a Claude Lane through `--mcp-config`. Read and edit Lanes get the same read-only set, which also permits a todo comment:
 
@@ -208,8 +208,6 @@ With a Solo link, Maestro passes Solo's MCP server to a Claude Lane through `--m
 
 The Brief gives the Solo project id. Each Solo tool call needs this id in `project_id`. A Claude Lane can read dev server or test watcher output and add a todo comment. Other Solo tools are denied without a Relay. A Lane has no Solo identity, so Solo could treat its action as an action of the Orchestrator. All `SOLO_` variables stay removed. With no Solo link, a Claude Lane gets no MCP config. Other Harnesses and the Canary get no Solo MCP tools.
 
-`maestro watch <task>` opens the same View in any terminal. You can also give it a Run folder path. Unknown stream lines are skipped. Antigravity reports its text when its final JSON response is available.
-
 ### Verbs
 
 These are the commands the agent runs. A person can run them by hand too.
@@ -219,7 +217,6 @@ Write a brief file (`maestro help brief` prints the format), then dispatch it:
 ```sh
 maestro dispatch .agents/briefs/add-probe.md        # returns at once with a task id
 maestro wait 7f3a                                   # prints the status, changes, checks, and report
-maestro watch 7f3a                                  # follows events, model text, and tool names
 maestro dispatch .agents/briefs/add-probe.md --wait # or block
 ```
 

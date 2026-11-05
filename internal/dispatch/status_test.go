@@ -41,7 +41,7 @@ func TestListStandaloneDispatches(t *testing.T) {
 			t.Fatal(err)
 		}
 		rec := &Record{Task: tt.task, State: tt.state, StartedAt: now.Add(-time.Minute), EndedAt: tt.ended, Path: folder,
-			TaskInfo: TaskInfo{Title: "Task title"}, Route: &router.Route{FamilyID: "codex-sol", Effort: "high"}, Attempt: 2, SoloProcess: 42,
+			TaskInfo: TaskInfo{Title: "Task title"}, Route: &router.Route{FamilyID: "codex-sol", Effort: "high"}, Attempt: 2,
 			Outcome: Outcome{Outcome: OutcomeUnverified}}
 		if err := rec.Save(); err != nil {
 			t.Fatal(err)

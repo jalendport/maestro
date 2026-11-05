@@ -101,49 +101,10 @@ func (c *Codex) Build(l Launch) (*Command, error) {
 func (c *Codex) NewParser() Parser { return &codexParser{out: &Outcome{}} }
 
 type codexParser struct {
-	out       *Outcome
-	readTools map[string]bool
+	out *Outcome
 }
 
 func (p *codexParser) Outcome() *Outcome { return p.out }
-
-func (p *codexParser) Readable(line []byte) []string {
-	var ev struct {
-		Type string `json:"type"`
-		Item struct {
-			ID   string `json:"id"`
-			Type string `json:"type"`
-			Text string `json:"text"`
-			Tool string `json:"tool"`
-		} `json:"item"`
-	}
-	if json.Unmarshal(line, &ev) != nil {
-		return nil
-	}
-	if ev.Type == "item.completed" && ev.Item.Type == "agent_message" && ev.Item.Text != "" {
-		return []string{ev.Item.Text}
-	}
-	if ev.Type == "item.started" || ev.Type == "item.completed" {
-		name := ""
-		switch ev.Item.Type {
-		case "command_execution", "file_change", "web_search":
-			name = ev.Item.Type
-		case "mcp_tool_call":
-			name = ev.Item.Tool
-		}
-		if name == "" || (ev.Item.ID != "" && p.readTools[ev.Item.ID]) {
-			return nil
-		}
-		if ev.Item.ID != "" {
-			if p.readTools == nil {
-				p.readTools = map[string]bool{}
-			}
-			p.readTools[ev.Item.ID] = true
-		}
-		return []string{"tool: " + name}
-	}
-	return nil
-}
 
 func (p *codexParser) Line(line []byte) bool {
 	var ev struct {

@@ -123,10 +123,9 @@ type Run struct {
 
 // Concurrency is the `concurrency` block.
 type Concurrency struct {
-	MaxParallel   int    `toml:"max_parallel"`
-	MaxPerAccount int    `toml:"max_per_account"`
-	MaxTotal      int    `toml:"max_total"`
-	CloseTabs     string `toml:"close_tabs"`
+	MaxParallel   int `toml:"max_parallel"`
+	MaxPerAccount int `toml:"max_per_account"`
+	MaxTotal      int `toml:"max_total"`
 }
 
 // Duration parses TOML strings such as "10m" or "1h".
@@ -189,7 +188,7 @@ func ParseFile(src string) (*File, []string, error) {
 	}
 	var unknown []string
 	for _, k := range md.Undecoded() {
-		if len(k) == 3 && k[0] == "harness" && k[2] == "solo_tool" {
+		if (len(k) == 3 && k[0] == "harness" && k[2] == "solo_tool") || k.String() == "concurrency.close_tabs" {
 			f.Ignored = append(f.Ignored, k.String())
 			continue
 		}

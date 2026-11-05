@@ -127,54 +127,9 @@ type grokParser struct {
 	thought       strings.Builder
 	thoughtDenied bool
 	textBreak     bool
-	readableText  string
 }
 
 func (p *grokParser) Outcome() *Outcome { return p.out }
-
-func (p *grokParser) Readable(line []byte) []string {
-	flush := func() []string {
-		if p.readableText == "" {
-			return nil
-		}
-		lines := strings.Split(p.readableText, "\n")
-		p.readableText = ""
-		return lines
-	}
-	if len(line) == 0 {
-		return flush()
-	}
-	var ev struct {
-		Type string `json:"type"`
-		Data string `json:"data"`
-		Tool string `json:"toolName"`
-	}
-	if json.Unmarshal(line, &ev) != nil {
-		return nil
-	}
-	switch ev.Type {
-	case "text":
-		p.readableText += ev.Data
-		var lines []string
-		for {
-			line, rest, found := strings.Cut(p.readableText, "\n")
-			if !found {
-				return lines
-			}
-			lines = append(lines, line)
-			p.readableText = rest
-		}
-	case "tool_call":
-		lines := flush()
-		if ev.Tool != "" {
-			lines = append(lines, "tool: "+ev.Tool)
-		}
-		return lines
-	case "usage", "end", "error":
-		return flush()
-	}
-	return nil
-}
 
 func (p *grokParser) Line(line []byte) bool {
 	text := strings.TrimSpace(string(line))

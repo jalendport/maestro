@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
@@ -13,92 +12,8 @@ import (
 	"github.com/jalendport/maestro/internal/ui"
 )
 
-// OpenView starts the View without a wait. The returned function sends the
-// Dispatch outcome so close_tabs also applies to a View that opens late.
-func (l *SoloLink) OpenView(env *Env, t *Task) func(*Record) {
-	if l == nil {
-		return func(*Record) {}
-	}
-	opened := make(chan int, 1)
-	ended := make(chan string, 1)
-	task := *t
-	l.views.Add(1)
-	go func() {
-		defer l.views.Done()
-		pid := l.openView(&task)
-		opened <- pid
-		outcome := <-ended
-		l.CloseView(env, &Record{SoloProcess: pid, Outcome: Outcome{Outcome: outcome}})
-	}()
-	return func(rec *Record) {
-		select {
-		case rec.SoloProcess = <-opened:
-			_ = rec.Save()
-		default:
-		}
-		ended <- rec.Outcome.Outcome
-	}
-}
-
-func (l *SoloLink) openView(t *Task) int {
-	self, err := os.Executable()
-	if err != nil {
-		ui.Warnf("solo view: %v", err)
-		return 0
-	}
-	name := t.Tab
-	if name == "" {
-		words := strings.Fields(t.Title)
-		name = "task"
-		if len(words) > 0 {
-			name = words[0]
-			if len(name) > brief.TabMax {
-				name = name[:brief.TabMax]
-			}
-			for _, word := range words[1:] {
-				if len(name)+1+len(word) > brief.TabMax {
-					break
-				}
-				name += " " + word
-			}
-		}
-	}
-	pid, err := l.Client.OpenTerminal(l.ProjectID, name+" · "+t.Route.FamilyID)
-	if err != nil {
-		ui.Warnf("solo view: %v", err)
-		return 0
-	}
-	command := shellQuote(self) + " watch " + shellQuote(t.Folder)
-	if err := l.Client.StartView(pid, command); err != nil {
-		ui.Warnf("solo view: %v", err)
-	}
-	return pid
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
-// CloseView applies close_tabs after the Dispatch ends.
-func (l *SoloLink) CloseView(env *Env, rec *Record) {
-	if l == nil || rec.SoloProcess == 0 {
-		return
-	}
-	switch env.Roster.Concurrency.CloseTabs {
-	case "never":
-		return
-	case "always":
-	default:
-		if rec.Outcome.Outcome != OutcomeVerified && rec.Outcome.Outcome != OutcomeAnswered && rec.Outcome.Outcome != OutcomeUnverified {
-			return
-		}
-	}
-	_ = l.Client.CloseProcess(rec.SoloProcess)
-}
-
 // SoloLink is Maestro's open session to Solo, nil outside Solo.
 type SoloLink struct {
-	views     sync.WaitGroup
 	Client    *solo.Client
 	ProjectID int
 	// Orchestrator is the agent process that gets wake-up timers.

@@ -181,36 +181,6 @@ type claudeParser struct{ out *Outcome }
 
 func (p *claudeParser) Outcome() *Outcome { return p.out }
 
-func (p *claudeParser) Readable(line []byte) []string {
-	var ev struct {
-		Type    string `json:"type"`
-		Message struct {
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-				Name string `json:"name"`
-			} `json:"content"`
-		} `json:"message"`
-	}
-	if json.Unmarshal(line, &ev) != nil || ev.Type != "assistant" {
-		return nil
-	}
-	var lines []string
-	for _, block := range ev.Message.Content {
-		switch block.Type {
-		case "text":
-			if block.Text != "" {
-				lines = append(lines, block.Text)
-			}
-		case "tool_use":
-			if block.Name != "" {
-				lines = append(lines, "tool: "+block.Name)
-			}
-		}
-	}
-	return lines
-}
-
 func (p *claudeParser) Line(line []byte) bool {
 	var ev struct {
 		Type      string `json:"type"`

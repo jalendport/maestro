@@ -46,7 +46,7 @@ func TestCancelStandaloneReachesSuperviseLoop(t *testing.T) {
 	stopped := make(chan struct{})
 	go func() {
 		select {
-		case <-dispatch.WatchCancel(ctx, folder):
+		case <-dispatch.MonitorCancel(ctx, folder):
 			close(stopped)
 		case <-ctx.Done():
 		}

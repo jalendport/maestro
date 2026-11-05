@@ -239,6 +239,7 @@ func mergeFields(d, t Fields) Fields {
 func Write(b *Brief, path string) error {
 	fields := b.Fields
 	fields.BlockedBy = nil
+	fields.Tab = ""
 	fm, err := yaml.Marshal(fields)
 	if err != nil {
 		return err

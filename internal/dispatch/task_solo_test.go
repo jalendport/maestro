@@ -98,7 +98,7 @@ func TestTaskKeepsSoloTodoAfterEscalationAndCompletesUnverified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]int{"todo_create": 1, "todo_complete": 1, "todo_comment_create": 2, "spawn_agent": 0} {
+	for name, want := range map[string]int{"todo_create": 1, "todo_complete": 1, "todo_comment_create": 2, "spawn_agent": 0, "spawn_process": 0, "send_input": 0, "close_process": 0} {
 		if got := strings.Count(string(calls), `"name":"`+name+`"`); got != want {
 			t.Fatalf("%s count = %d, want %d: %s", name, got, want, calls)
 		}

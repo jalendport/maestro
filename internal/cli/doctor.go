@@ -204,9 +204,9 @@ func jevRow() doctorRow {
 func soloRow(env *dispatch.Env) doctorRow {
 	if env.Solo == nil {
 		if os.Getenv("SOLO_PROCESS_ID") != "" {
-			return doctorRow{Name: "solo", Detail: "SOLO_PROCESS_ID set, helper unreachable", State: "View unavailable"}
+			return doctorRow{Name: "solo", Detail: "SOLO_PROCESS_ID set, helper unreachable", State: "Solo unavailable"}
 		}
-		return doctorRow{Name: "solo", Detail: "not inside a Solo tab", State: "no Solo View"}
+		return doctorRow{Name: "solo", Detail: "not inside a Solo tab", State: "outside Solo"}
 	}
 	return doctorRow{Name: "solo", Detail: fmt.Sprintf("project %d, orchestrator process %d", env.Solo.ProjectID, env.Solo.Orchestrator), State: "ok"}
 }

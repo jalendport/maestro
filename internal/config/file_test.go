@@ -34,7 +34,7 @@ func TestLoadUnknownKeys(t *testing.T) {
 
 func TestLoadUserAcceptsSoloToolAndCloseTabs(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
-	src := "[harness.claude]\nsolo_tool = 9\n[concurrency]\nclose_tabs = 'never'\n"
+	src := "[harness.claude]\nsolo_tool = 9\n[concurrency]\nclose_tabs = 'always'\n"
 	if err := os.WriteFile(UserFile(), []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestLoadUserAcceptsSoloToolAndCloseTabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(unknown) != 0 || !slices.Equal(f.Ignored, []string{"harness.claude.solo_tool"}) || f.Concurrency.CloseTabs != "never" {
+	if len(unknown) != 0 || !slices.Equal(f.Ignored, []string{"harness.claude.solo_tool", "concurrency.close_tabs"}) {
 		t.Fatalf("file = %+v, unknown = %v", f, unknown)
 	}
 }

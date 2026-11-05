@@ -126,11 +126,7 @@ func TestOneShotLaunchAndBriefWithSolo(t *testing.T) {
 					if access == brief.AccessEdit {
 						want = OutcomeUnverified
 					}
-					wantProcess := 0
-					if inSolo {
-						wantProcess = 8
-					}
-					if rec.Outcome.Outcome != want || rec.SoloProcess != wantProcess {
+					if rec.Outcome.Outcome != want {
 						t.Fatalf("solo=%t: %+v", inSolo, rec.Outcome)
 					}
 					if rec.Outcome.ReportByText != (access == brief.AccessRead && (name == "codex" || name == "grok" || name == "agy")) {
@@ -230,9 +226,9 @@ func TestOneShotLaunchAndBriefWithSolo(t *testing.T) {
 						}
 					}
 				}
-				env.Solo.views.Wait()
+
 				calls, err := os.ReadFile(callsPath)
-				if err != nil || strings.Count(string(calls), `"name":"spawn_process"`) != 1 || strings.Count(string(calls), `"name":"send_input"`) != 1 || strings.Count(string(calls), `"name":"close_process"`) != 1 {
+				if err != nil || strings.Count(string(calls), `"name":"spawn_process"`) != 0 || strings.Count(string(calls), `"name":"send_input"`) != 0 || strings.Count(string(calls), `"name":"close_process"`) != 0 {
 					t.Fatalf("unexpected Solo calls: %s, %v", calls, err)
 				}
 			})

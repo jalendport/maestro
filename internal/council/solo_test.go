@@ -134,7 +134,7 @@ func TestCouncilSoloTodoAndMerge(t *testing.T) {
 				}
 				folder := filepath.Join(c.Path, seat.Family)
 				rec, err := dispatch.LoadRecord(folder)
-				if err != nil || rec.SoloProcess != 0 || !rec.Outcome.ReportByText {
+				if err != nil || !rec.Outcome.ReportByText {
 					t.Fatalf("Seat one-shot record: %+v, %v", rec, err)
 				}
 				args, err := os.ReadFile(filepath.Join(folder, "args"))

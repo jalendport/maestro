@@ -54,10 +54,6 @@ type Fields struct {
 	BlockedBy []string          `yaml:"blocked_by"`
 }
 
-// TabMax is the longest `tab` field: the Solo sidebar shows about this many
-// characters before the Family name.
-const TabMax = 18
-
 // Brief is one parsed Brief file.
 type Brief struct {
 	Fields
@@ -142,9 +138,6 @@ func (b *Brief) Validate() error {
 		if _, err := time.ParseDuration(b.WallLimit); err != nil {
 			return fmt.Errorf("wall_limit: %w", err)
 		}
-	}
-	if n := len([]rune(strings.TrimSpace(b.Tab))); n > TabMax {
-		return fmt.Errorf("tab is %d characters; at most %d", n, TabMax)
 	}
 	return nil
 }

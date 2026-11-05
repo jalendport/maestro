@@ -281,33 +281,3 @@ func (c *Client) Timer(projectID, deliveryProcess int, delay time.Duration, body
 	_, err := c.Call("timer_set", args)
 	return err
 }
-
-// OpenTerminal opens a shell for a Dispatch view.
-func (c *Client) OpenTerminal(projectID int, name string) (int, error) {
-	res, err := c.Call("spawn_process", map[string]any{"project_id": projectID, "kind": "terminal", "name": name})
-	if err != nil {
-		return 0, err
-	}
-	var out struct {
-		ProcessID int `json:"process_id"`
-	}
-	if err := json.Unmarshal(res, &out); err != nil {
-		return 0, err
-	}
-	if out.ProcessID == 0 {
-		return 0, fmt.Errorf("solo spawn_process returned no process id")
-	}
-	return out.ProcessID, nil
-}
-
-// StartView sends the view command once; no later input is needed.
-func (c *Client) StartView(processID int, command string) error {
-	_, err := c.Call("send_input", map[string]any{"process_id": processID, "input": command + "\n"})
-	return err
-}
-
-// CloseProcess closes a view terminal.
-func (c *Client) CloseProcess(processID int) error {
-	_, err := c.Call("close_process", map[string]any{"process_id": processID})
-	return err
-}
