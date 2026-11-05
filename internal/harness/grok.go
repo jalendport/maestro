@@ -71,7 +71,7 @@ func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	}
 	args := []string{"--prompt-file", promptFile, "--output-format", "json", "--no-subagents", "--model", l.Model}
 	if tab {
-		args = []string{l.Pointer, "--model", l.Model, "--no-subagents", "--cwd", l.Root}
+		args = []string{l.Pointer, "--model", l.Model, "--no-subagents", "--cwd", l.Root, "--trust"}
 	}
 	if l.Effort != "" {
 		args = append(args, "--reasoning-effort", l.Effort)

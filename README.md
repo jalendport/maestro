@@ -108,6 +108,8 @@ The probe denies only where the hook is in scope: with the default `[hook] scope
 
 ### Connect Grok
 
+Maestro passes `--trust` to each Grok tab to approve folder trust for the project root. Grok saves this trust in `~/.grok/trusted_folders.toml`. A trusted folder also loads the project's own Grok hooks, MCP servers, and rules.
+
 Grok takes read and edit work. Grok's own permission modes do not hold a Lane: `dontAsk` is a Claude mode name that Grok accepts but maps to `default`, which prompts in a tab, and headless Grok runs with full tool access. So a Grok Lane runs in always-approve mode and never prompts, and the Maestro hook is the policy: it runs before every tool call and denies what the Lane may not do, and the workspace sandbox backs it at the kernel level:
 
 - A read Lane runs the built-in read-only commands and writes only its Report in the Run folder

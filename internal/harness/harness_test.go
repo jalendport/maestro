@@ -127,6 +127,15 @@ func TestGrokShapesRunAlwaysApproveUnderTheHook(t *testing.T) {
 		if flags != "--sandbox workspace --permission-mode bypassPermissions" || command.ReportByText != (i == 0) {
 			t.Fatal(command.Flags, command.ReportByText)
 		}
+		trusted := false
+		for _, arg := range command.Cmd.Args {
+			if arg == "--trust" {
+				trusted = true
+			}
+		}
+		if trusted != (i == 1) {
+			t.Fatalf("--trust must be passed only to a tab: %q", command.Cmd.Args)
+		}
 		if g.Enforcement("read") != Enforced || command.Enforcement != Enforced {
 			t.Fatal("read must be enforced")
 		}

@@ -42,8 +42,8 @@ func TestTabArgsPerHarnessAndAccess(t *testing.T) {
 		// Grok runs under always-approve with the Maestro hook as the policy; a
 		// read Lane writes only its Run folder, inside the project, so it runs in
 		// the workspace sandbox; the edit Lane's /extra dir is outside, so it does not.
-		{name: "grok", access: "read", want: []string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--reasoning-effort", "high", "--sandbox", "workspace", "--permission-mode", "bypassPermissions"}},
-		{name: "grok", access: "edit", want: []string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--reasoning-effort", "high", "--permission-mode", "bypassPermissions"}},
+		{name: "grok", access: "read", want: []string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--trust", "--reasoning-effort", "high", "--sandbox", "workspace", "--permission-mode", "bypassPermissions"}},
+		{name: "grok", access: "edit", want: []string{pointer, "--model", "model", "--no-subagents", "--cwd", root, "--trust", "--reasoning-effort", "high", "--permission-mode", "bypassPermissions"}},
 		{name: "agy", access: "read", want: []string{"--sandbox", "--model", "model", "--effort", "high", "--prompt-interactive", pointer}},
 		{name: "agy", access: "edit", want: []string{"--sandbox", "--model", "model", "--effort", "high", "--mode", "accept-edits", "--add-dir", "/extra", "--prompt-interactive", pointer}},
 	} {
