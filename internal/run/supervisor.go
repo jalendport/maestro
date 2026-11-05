@@ -182,11 +182,17 @@ type Supervisor struct {
 	// running holds the cancel channel of every running Task.
 	running map[string]chan struct{}
 	results chan result
+	pending map[*TaskState]pendingDispatch
 	// escalation tracking for the Run pause
 	escalationsInARow int
 	errorTexts        map[string]int
 	paused            bool
 	cancelled         bool
+}
+
+type pendingDispatch struct {
+	brief *brief.Brief
+	route *router.Route
 }
 
 type result struct {
@@ -298,12 +304,7 @@ func (sup *Supervisor) schedule() {
 				t.Waiting = "tree busy"
 				continue
 			}
-			if acct := sup.accountFor(t); acct != "" && sup.accountRunning(acct) >= caps.MaxPerAccount {
-				t.Waiting = "account cap " + acct
-				continue
-			}
-			sup.start(t)
-			if access == brief.AccessEdit {
+			if sup.start(t) && access == brief.AccessEdit {
 				editRunning = true
 			}
 		}
@@ -398,13 +399,6 @@ func routeBounds(s *State, b *brief.Brief) (roster.Tier, roster.Tier) {
 	return floor, ceiling
 }
 
-func (sup *Supervisor) accountFor(t *TaskState) string {
-	if t.Route != nil {
-		return t.Route.Account
-	}
-	return ""
-}
-
 func (sup *Supervisor) accountRunning(acct string) int {
 	n := 0
 	for id := range sup.running {
@@ -442,29 +436,69 @@ func (sup *Supervisor) machineRunning() int {
 }
 
 // start routes the Task at Dispatch time and runs it in a goroutine.
-func (sup *Supervisor) start(t *TaskState) {
-	b, err := brief.Parse(t.BriefPath)
-	if err != nil {
-		t.State = TaskFailed
-		t.Error = err.Error()
-		return
+func (sup *Supervisor) start(t *TaskState) bool {
+	pending, routed := sup.pending[t]
+	route := t.Route
+	if routed {
+		route = pending.route
 	}
-	req := router.Request{Lane: firstNonEmpty3(t.ResumeLane, b.Lane, sup.State.Lane), Level: sup.State.Level, Excluded: t.Excluded}
-	req.Floor, req.Ceiling = routeBounds(sup.State, b)
-	if t.Escalations > 0 && t.Route != nil && req.Lane == "" {
-		// Escalation: the new pick must be a higher Tier.
-		if next := nextTier(t.Route.Tier); next != "" && (req.Floor == "" || next.Rank() > req.Floor.Rank()) {
-			req.Floor = next
+	// This check avoids work while a Task waits. claim checks again under
+	// the home lock before the Task takes a slot.
+	if sup.machineRunning() >= sup.Env.Roster.Concurrency.MaxTotal {
+		t.Waiting = "machine cap"
+		return false
+	}
+	if route != nil && (routed || (t.ResumeLane == "" && t.Escalations == 0)) {
+		caps := sup.Env.Roster.Concurrency
+		if caps.MaxPerAccount > 0 && route.Account != "" && sup.accountRunning(route.Account) >= caps.MaxPerAccount {
+			t.Waiting = "account cap " + route.Account
+			return false
 		}
 	}
-	task, err := dispatch.Prepare(sup.Env, b, req, sup.State.Run, t.ID)
-	sup.consumeControl()
-	if sup.cancelled || t.State != TaskWaiting {
-		return
+	if !routed {
+		b, err := brief.Parse(t.BriefPath)
+		if err != nil {
+			t.State = TaskFailed
+			t.Error = err.Error()
+			return false
+		}
+		req := router.Request{Lane: firstNonEmpty3(t.ResumeLane, b.Lane, sup.State.Lane), Level: sup.State.Level, Excluded: t.Excluded}
+		req.Floor, req.Ceiling = routeBounds(sup.State, b)
+		if t.Escalations > 0 && t.Route != nil && req.Lane == "" {
+			// Escalation: the new pick must be a higher Tier.
+			if next := nextTier(t.Route.Tier); next != "" && (req.Floor == "" || next.Rank() > req.Floor.Rank()) {
+				req.Floor = next
+			}
+		}
+		route, err := dispatch.RouteBrief(sup.Env, b, req)
+		sup.consumeControl()
+		if sup.cancelled || t.State != TaskWaiting {
+			return false
+		}
+		if err != nil {
+			sup.escalate(t, nil, err.Error())
+			return false
+		}
+		pending = pendingDispatch{brief: b, route: route}
+		if sup.pending == nil {
+			sup.pending = map[*TaskState]pendingDispatch{}
+		}
+		sup.pending[t] = pending
 	}
+	claimed, err := sup.claim(t, pending.route)
+	if err != nil {
+		t.Waiting = "claim slot: " + err.Error()
+		return false
+	}
+	if !claimed {
+		return false
+	}
+	delete(sup.pending, t)
+	task, err := dispatch.PrepareRouted(sup.Env, pending.brief, pending.route, sup.State.Run, t.ID, "")
 	if err != nil {
 		sup.escalate(t, nil, err.Error())
-		return
+		_ = sup.State.Save()
+		return false
 	}
 	task.FirstAttempt = t.Attempt + 1
 	task.LedgerByRun = true
@@ -472,17 +506,11 @@ func (sup *Supervisor) start(t *TaskState) {
 	cancel := make(chan struct{})
 	task.Cancel = cancel
 	sup.running[t.ID] = cancel
-	t.State = TaskRunning
-	t.Waiting = ""
-	t.Route = task.Route
-	t.Provisional = false
-	t.StartedAt = time.Now()
-	t.LastOutput = time.Now()
-	t.ResumeLane = ""
 	go func() {
 		rec, err := dispatch.Execute(sup.Env, task)
 		sup.results <- result{task: t, rec: rec, err: err}
 	}()
+	return true
 }
 
 func nextTier(t roster.Tier) roster.Tier {
@@ -760,6 +788,7 @@ func (sup *Supervisor) applyResume(path string) {
 		ui.Warnf("resume: no task %q", r.Task)
 		return
 	}
+	delete(sup.pending, t)
 	switch {
 	case r.Skip:
 		t.State = TaskSkipped
