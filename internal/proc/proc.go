@@ -7,7 +7,18 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"sync"
+	"syscall"
 )
+
+// Alive reports whether a process exists, including one owned by another user.
+func Alive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
 
 // Exit codes: 0 ok, 1 failed, 2 needs the Orchestrator.
 const (
@@ -35,18 +46,43 @@ func Code(err error) (int, bool) {
 	return 0, false
 }
 
-// KeepAwake starts caffeinate tied to this process; no-op when off or absent.
+var awake struct {
+	sync.Mutex
+	callers int
+	cmd     *exec.Cmd
+}
+
+// KeepAwake shares one caffeinate for this process until the last caller stops.
+// It does nothing when off or when caffeinate cannot start.
 func KeepAwake(on bool) func() {
 	if !on {
 		return nil
 	}
-	path, err := exec.LookPath("caffeinate")
-	if err != nil {
-		return nil
+	awake.Lock()
+	defer awake.Unlock()
+	if awake.callers == 0 {
+		path, err := exec.LookPath("caffeinate")
+		if err != nil {
+			return nil
+		}
+		c := exec.Command(path, "-s", "-w", strconv.Itoa(os.Getpid()))
+		if err := c.Start(); err != nil {
+			return nil
+		}
+		awake.cmd = c
 	}
-	c := exec.Command(path, "-s", "-w", strconv.Itoa(os.Getpid()))
-	if err := c.Start(); err != nil {
-		return nil
+	awake.callers++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			awake.Lock()
+			defer awake.Unlock()
+			awake.callers--
+			if awake.callers == 0 {
+				_ = awake.cmd.Process.Kill()
+				_ = awake.cmd.Wait()
+				awake.cmd = nil
+			}
+		})
 	}
-	return func() { _ = c.Process.Kill(); _, _ = c.Process.Wait() }
 }
