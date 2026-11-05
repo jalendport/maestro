@@ -3,7 +3,6 @@ package budget
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,45 +111,6 @@ func TestCodexHarvestUsesConfigHomeAndWindowDurations(t *testing.T) {
 	}
 	if len(windows) != 2 || windows[0].Duration != 2*time.Hour || windows[1].Duration != 7*24*time.Hour {
 		t.Fatalf("windows: %+v", windows)
-	}
-}
-
-func TestFindCodexRolloutUsesLaunchTimeAndWorkspace(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CODEX_HOME", dir)
-	folder := filepath.Join(dir, "sessions", "2026", "10", "13")
-	if err := os.MkdirAll(folder, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	start := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
-	for _, session := range []struct {
-		id, cwd string
-		at      time.Time
-	}{
-		{"old", "/run", start.Add(-time.Minute)},
-		{"first", "/run", start.Add(time.Second)},
-		{"newest", "/run", start.Add(2 * time.Second)},
-		{"other-task", "/other-run", start.Add(3 * time.Second)},
-	} {
-		data := fmt.Sprintf(`{"type":"session_meta","payload":{"id":%q,"cwd":%q,"timestamp":%q}}`, session.id, session.cwd, session.at.Format(time.RFC3339Nano))
-		data += "\n" + `{"payload":{"rate_limits":{"primary":{"used_percent":42,"window_minutes":120,"resets_at":2000000000}}}}` + "\n"
-		if err := os.WriteFile(filepath.Join(folder, "rollout-"+session.id+".jsonl"), []byte(data), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	id, err := FindCodexRollout(start, "/run")
-	if err != nil || id != "newest" {
-		t.Fatalf("session = %q, error = %v", id, err)
-	}
-	ws, err := HarvestCodexRollout(id)
-	if err != nil || len(ws) != 1 || ws[0].Used != .42 {
-		t.Fatalf("harvest: %+v, %v", ws, err)
-	}
-	if _, err := FindCodexRollout(start.Add(time.Minute), "/run"); err == nil {
-		t.Fatal("accepted a session from before the launch")
-	}
-	if _, err := FindCodexRollout(start, "/missing"); err == nil {
-		t.Fatal("accepted a different workspace")
 	}
 }
 

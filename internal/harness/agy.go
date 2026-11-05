@@ -57,14 +57,6 @@ func (a *Agy) Enforcement(access string) string {
 
 // Build folds the effort into the model name for a one-shot Dispatch.
 func (a *Agy) Build(l Launch) (*Command, error) {
-	return a.build(l, false)
-}
-
-func (a *Agy) BuildTab(l Launch) (*Command, error) {
-	return a.build(l, true)
-}
-
-func (a *Agy) build(l Launch, tab bool) (*Command, error) {
 	if a.bin == "" {
 		return nil, fmt.Errorf("agy is not installed")
 	}
@@ -83,12 +75,6 @@ func (a *Agy) build(l Launch, tab bool) (*Command, error) {
 	}
 	args := []string{"--sandbox", "--output-format", "json", "--model", model, "--print-timeout", timeout, "--disable-slash-commands"}
 	flags := []string{"--sandbox"}
-	if tab {
-		args = []string{"--sandbox", "--model", l.Model}
-		if l.Effort != "" {
-			args = append(args, "--effort", l.Effort)
-		}
-	}
 	if l.Access == "edit" {
 		flags = append(flags, "--mode", "accept-edits")
 		for _, dir := range l.Dirs {
@@ -96,11 +82,7 @@ func (a *Agy) build(l Launch, tab bool) (*Command, error) {
 		}
 	}
 	args = append(args, flags[1:]...)
-	if tab {
-		args = append(args, "--prompt-interactive", l.Pointer)
-	} else {
-		args = append(args, "-p", l.Pointer)
-	}
+	args = append(args, "-p", l.Pointer)
 	cmd := exec.Command(a.bin, args...)
 	cmd.Dir = l.Root
 	cmd.Env = l.Env
@@ -110,8 +92,36 @@ func (a *Agy) build(l Launch, tab bool) (*Command, error) {
 func (a *Agy) NewParser() Parser { return &agyParser{out: &Outcome{}} }
 
 type agyParser struct {
-	out *Outcome
-	buf strings.Builder
+	out      *Outcome
+	buf      strings.Builder
+	readable strings.Builder
+}
+
+func (p *agyParser) Readable(line []byte) []string {
+	// Antigravity can print one JSON document across several lines.
+	if p.readable.Len() == 0 && !strings.HasPrefix(strings.TrimSpace(string(line)), "{") {
+		return nil
+	}
+	p.readable.Write(line)
+	p.readable.WriteByte('\n')
+	var doc struct {
+		Response string `json:"response"`
+	}
+	if json.Unmarshal([]byte(p.readable.String()), &doc) != nil {
+		if json.Valid(line) {
+			p.readable.Reset()
+			if json.Unmarshal(line, &doc) != nil || doc.Response == "" {
+				return nil
+			}
+			return []string{doc.Response}
+		}
+		return nil
+	}
+	p.readable.Reset()
+	if doc.Response != "" {
+		return []string{doc.Response}
+	}
+	return nil
 }
 
 func (p *agyParser) Outcome() *Outcome {

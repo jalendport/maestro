@@ -22,7 +22,6 @@ func TestAgyLaunchShapes(t *testing.T) {
 	a := &Agy{bin: "/bin/agy"}
 	for _, tc := range []struct {
 		name, access string
-		tab          bool
 		args, flags  []string
 	}{
 		{name: "read one-shot", access: "read",
@@ -31,21 +30,11 @@ func TestAgyLaunchShapes(t *testing.T) {
 		{name: "edit one-shot", access: "edit",
 			args:  []string{"--sandbox", "--output-format", "json", "--model", "gemini-3.8-flash-high", "--print-timeout", "0s", "--disable-slash-commands", "--mode", "accept-edits", "--add-dir", "/extra", "--add-dir", "/other dir", "-p", "read the brief"},
 			flags: []string{"--sandbox", "--mode", "accept-edits", "--add-dir", "/extra", "--add-dir", "/other dir"}},
-		{name: "read tab", access: "read", tab: true,
-			args:  []string{"--sandbox", "--model", "gemini-3.8-flash", "--effort", "high", "--prompt-interactive", "read the brief"},
-			flags: []string{"--sandbox"}},
-		{name: "edit tab", access: "edit", tab: true,
-			args:  []string{"--sandbox", "--model", "gemini-3.8-flash", "--effort", "high", "--mode", "accept-edits", "--add-dir", "/extra", "--add-dir", "/other dir", "--prompt-interactive", "read the brief"},
-			flags: []string{"--sandbox", "--mode", "accept-edits", "--add-dir", "/extra", "--add-dir", "/other dir"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			launch := Launch{Model: "gemini-3.8-flash", Effort: "high", Access: tc.access, Root: "/project",
 				Dirs: []string{"/extra", "/other dir"}, Pointer: "read the brief", WallLimit: 10 * time.Minute, Env: []string{"MAESTRO_LANE=1"}}
-			build := a.Build
-			if tc.tab {
-				build = a.BuildTab
-			}
-			command, err := build(launch)
+			command, err := a.Build(launch)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -79,17 +68,7 @@ func TestAgyLaunchDefaults(t *testing.T) {
 			t.Fatalf("arguments: %q, want %q", command.Cmd.Args, want)
 		}
 	}
-	command, err := a.BuildTab(Launch{Access: "read", Model: "gemini-3.8-flash", Pointer: "brief"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{a.bin, "--sandbox", "--model", "gemini-3.8-flash", "--prompt-interactive", "brief"}
-	if !reflect.DeepEqual(command.Cmd.Args, want) {
-		t.Fatalf("arguments: %q, want %q", command.Cmd.Args, want)
-	}
-	for _, build := range []func(Launch) (*Command, error){a.Build, a.BuildTab} {
-		if _, err := build(Launch{Access: "other"}); err == nil {
-			t.Fatal("unknown Access must fail")
-		}
+	if _, err := a.Build(Launch{Access: "other"}); err == nil {
+		t.Fatal("unknown Access must fail")
 	}
 }

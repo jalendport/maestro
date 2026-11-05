@@ -31,3 +31,18 @@ func TestLoadUnknownKeys(t *testing.T) {
 		t.Fatalf("%+v", project)
 	}
 }
+
+func TestLoadUserAcceptsSoloToolAndCloseTabs(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	src := "[harness.claude]\nsolo_tool = 9\n[concurrency]\nclose_tabs = 'never'\n"
+	if err := os.WriteFile(UserFile(), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, unknown, err := LoadUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unknown) != 0 || !slices.Equal(f.Ignored, []string{"harness.claude.solo_tool"}) || f.Concurrency.CloseTabs != "never" {
+		t.Fatalf("file = %+v, unknown = %v", f, unknown)
+	}
+}

@@ -15,6 +15,7 @@ import (
 // Families use pointer fields so a user delta can change one key and leave
 // the rest of the embedded stanza alone.
 type File struct {
+	Ignored     []string           `toml:"-"` // retired keys, reported by doctor
 	Version     int                `toml:"version"`
 	Accounts    map[string]Account `toml:"accounts"`
 	Harness     map[string]Harness `toml:"harness"`
@@ -56,7 +57,6 @@ type Harness struct {
 	Bin        string   `toml:"bin"`
 	MinVersion string   `toml:"min_version"`
 	StripEnv   []string `toml:"strip_env"`
-	SoloTool   int      `toml:"solo_tool"`
 }
 
 // Family is one Harness × model pair, the Route option.
@@ -189,6 +189,10 @@ func ParseFile(src string) (*File, []string, error) {
 	}
 	var unknown []string
 	for _, k := range md.Undecoded() {
+		if len(k) == 3 && k[0] == "harness" && k[2] == "solo_tool" {
+			f.Ignored = append(f.Ignored, k.String())
+			continue
+		}
 		unknown = append(unknown, k.String())
 	}
 	return &f, unknown, nil

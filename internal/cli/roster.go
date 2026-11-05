@@ -43,25 +43,6 @@ func (a *app) rosterCmd() *cobra.Command {
 		},
 	})
 	c.AddCommand(&cobra.Command{
-		Use:   "solo",
-		Short: "Print Solo preset command lines to type in by hand",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			env, err := a.env(false)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(os.Stdout, "Solo → Settings → Agents. One preset per Harness; Maestro passes model, effort, and permission flags per launch in extra_args.")
-			fmt.Fprintln(os.Stdout)
-			for _, name := range env.Reg.Names() {
-				h, _ := env.Reg.Get(name)
-				known := soloPresetNote(env, name)
-				toolType := map[string]string{"claude": "claude", "codex": "codex", "agy": "antigravity", "grok": "generic"}[name]
-				fmt.Fprintf(os.Stdout, "  %-6s  Name: %s   Command: %s   Tool type: %s   Default arguments: (none)   — %s\n", name, strings.ToUpper(name[:1])+name[1:], h.Bin(), toolType, known)
-			}
-			return nil
-		},
-	})
-	c.AddCommand(&cobra.Command{
 		Use:   "prices",
 		Short: "Show the embedded price table",
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -218,22 +199,4 @@ func ago(t time.Time) string {
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-}
-
-func soloPresetNote(env *dispatch.Env, name string) string {
-	if id := env.Roster.Harness[name].SoloTool; id != 0 {
-		return fmt.Sprintf("agent tool id %d (user file)", id)
-	}
-	rec := env.Disc.Harness[name]
-	if len(rec.SoloPresets) > 1 {
-		var choices []string
-		for _, preset := range rec.SoloPresets {
-			choices = append(choices, fmt.Sprintf("%s (%d)", preset.Name, preset.ID))
-		}
-		return fmt.Sprintf("several presets: %s; set [harness.%s] solo_tool = <preset id> in %s", strings.Join(choices, ", "), name, config.UserFile())
-	}
-	if rec.SoloTool != 0 {
-		return fmt.Sprintf("agent tool id %d", rec.SoloTool)
-	}
-	return "not found in Solo"
 }

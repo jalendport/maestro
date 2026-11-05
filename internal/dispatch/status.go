@@ -48,7 +48,7 @@ func List(root string) []*Record {
 	return out
 }
 
-// Status renders one Dispatch line, including its Lane, attempt, and tab.
+// Status renders one Dispatch line, including its Lane and attempt.
 func Status(rec *Record) string {
 	lane := "—"
 	if rec.Route != nil {
@@ -66,15 +66,11 @@ func Status(rec *Record) string {
 	if rec.Outcome.Outcome == OutcomeUnverified && rec.Outcome.ErrorText != "" {
 		state += " (" + rec.Outcome.ErrorText + ")"
 	}
-	tab := "tab no"
-	if rec.SoloProcess > 0 {
-		tab = "tab yes"
-	}
 	duration := "—"
 	if !rec.StartedAt.IsZero() {
 		duration = ui.Duration(time.Duration(elapsed * float64(time.Second)))
 	}
-	return fmt.Sprintf("  task %s  %s  %s  attempt %d  %s  %s  %s\n", rec.Task, rec.TaskInfo.Title, lane, rec.Attempt, duration, tab, state) + RelayEvents(rec)
+	return fmt.Sprintf("  task %s  %s  %s  attempt %d  %s  %s\n", rec.Task, rec.TaskInfo.Title, lane, rec.Attempt, duration, state) + RelayEvents(rec)
 }
 
 func RelayEvents(rec *Record) string {

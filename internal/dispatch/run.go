@@ -183,13 +183,27 @@ func Prepare(env *Env, b *brief.Brief, req router.Request, runID, taskID string)
 // PrepareIn is Prepare with the Run directory given (Councils keep their
 // Seats under .agents/maestro/councils/<slug>/round-N/ instead of the runs folder).
 func PrepareIn(env *Env, b *brief.Brief, req router.Request, runID, taskID, runDir string) (*Task, error) {
-	if err := env.Roster.ValidateAccounts(); err != nil {
-		return nil, err
-	}
 	if b.EffectiveAccess() == brief.AccessEdit {
 		if _, err := verify.Take(env.Root); err != nil {
 			return nil, err
 		}
+	}
+	route, err := RouteBrief(env, b, req)
+	if err != nil {
+		return nil, err
+	}
+	task, err := prepareRouted(env, b, route, runID, taskID, runDir)
+	if err == nil && req.Seat != "" {
+		task.Council = true
+		err = task.Save()
+	}
+	return task, err
+}
+
+// RouteBrief chooses a Route without a snapshot or a Task file write.
+func RouteBrief(env *Env, b *brief.Brief, req router.Request) (*router.Route, error) {
+	if err := env.Roster.ValidateAccounts(); err != nil {
+		return nil, err
 	}
 	env.RefreshBudget()
 	rt := env.NewRouter()
@@ -198,10 +212,21 @@ func PrepareIn(env *Env, b *brief.Brief, req router.Request, runID, taskID, runD
 	req.Root = env.Root
 	req.Access = b.EffectiveAccess()
 	req.InSolo = solo.InSolo()
-	route, err := rt.Route(req)
-	if err != nil {
-		return nil, err
+	return rt.Route(req)
+}
+
+// PrepareRouted lays out a Task after the supervisor has claimed its slot.
+func PrepareRouted(env *Env, b *brief.Brief, route *router.Route, runID, taskID, runDir string) (*Task, error) {
+	if b.EffectiveAccess() == brief.AccessEdit {
+		if _, err := verify.Take(env.Root); err != nil {
+			return nil, err
+		}
 	}
+	return prepareRouted(env, b, route, runID, taskID, runDir)
+}
+
+func prepareRouted(env *Env, b *brief.Brief, route *router.Route, runID, taskID, runDir string) (*Task, error) {
+	var err error
 	if runID == "" {
 		runID, err = NextRunID(env.Root)
 		if err != nil {
@@ -239,10 +264,10 @@ func PrepareIn(env *Env, b *brief.Brief, req router.Request, runID, taskID, runD
 	}
 	t := &Task{
 		Project: env.Root, Run: runID, Task: taskID, BriefPath: b.Path, Title: b.Title, Tab: strings.TrimSpace(b.Tab),
-		Category: route.Category, Access: req.Access, Commit: b.WantsCommit(), Touch: b.Touch, Dirs: dirs,
+		Category: route.Category, Access: b.EffectiveAccess(), Commit: b.WantsCommit(), Touch: b.Touch, Dirs: dirs,
 		Checks: b.Checks, WallLimit: wall.String(), IdleLimit: env.Roster.Failure.IdleLimit.Duration.String(),
 		Route: route, Folder: folder, ClaudeAuto: env.Project != nil && env.Project.ClaudeAuto, InSolo: solo.InSolo(),
-		MaxAttempt: 2, Council: req.Seat != "",
+		MaxAttempt: 2,
 	}
 	// A new Route for the same Task keeps the existing Solo todo.
 	if previous, err := LoadTask(folder); err == nil {
@@ -310,7 +335,6 @@ attempts:
 		if !t.Council {
 			env.Solo.ReportComment(t, rec)
 		}
-		env.Solo.CloseTab(env, rec)
 		if !again || attempt == t.MaxAttempt {
 			break
 		}
@@ -334,7 +358,7 @@ attempts:
 // clearAnswers drops old Lane permissions and answer markers left by an
 // earlier attempt or a late `maestro answer`.
 func clearAnswers(folder string) {
-	for _, name := range []string{"relay.json", "relay.lock", "relay-answer.json", "lane.json"} {
+	for _, name := range []string{"relay.json", "relay.lock", "relay-answer.json", "lane.json", hook.FileJudgment} {
 		_ = os.Remove(filepath.Join(folder, name))
 	}
 	answers, _ := filepath.Glob(filepath.Join(folder, "relay-answer-*.json"))
@@ -346,12 +370,7 @@ func clearAnswers(folder string) {
 	}
 }
 
-const tabStartupError = "the tab never started working (startup prompt or launch error); see tab.log"
-
 func retryWait(outcome Outcome) (time.Duration, bool) {
-	if outcome.FailureClass == FailLane && outcome.ErrorText == tabStartupError {
-		return 0, false
-	}
 	switch outcome.FailureClass {
 	case FailLane:
 		return 5 * time.Second, true
@@ -366,14 +385,14 @@ func retryWait(outcome Outcome) (time.Duration, bool) {
 func archiveAttempt(folder string, n int) {
 	dst := filepath.Join(folder, FileAttempts, strconv.Itoa(n))
 	_ = os.MkdirAll(dst, 0o755)
-	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, FileBaseline, "tab.log"} {
+	for _, f := range []string{FileBrief, FileReport, FileOutput, FileStderr, FileRecord, FileBaseline} {
 		_ = os.Rename(filepath.Join(folder, f), filepath.Join(dst, f))
 	}
 	control, err := config.ControlDirForFolder(folder)
 	if err != nil {
 		return
 	}
-	names := []string{"lane.json", "answer-allow", "answer-deny", "relay.json", "relay.lock", "relay-answer.json"}
+	names := []string{"lane.json", "answer-allow", "answer-deny", "relay.json", "relay.lock", "relay-answer.json", hook.FileJudgment}
 	answers, _ := filepath.Glob(filepath.Join(control, "relay-answer-*.json"))
 	for _, path := range answers {
 		names = append(names, filepath.Base(path))
@@ -390,7 +409,8 @@ func archiveAttempt(folder string, n int) {
 
 func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry) *Record {
 	rec := &Record{
-		Kind: "dispatch", Project: t.Project, Run: t.Run, Task: t.Task, Attempt: attempt, State: "running",
+		Canary: t.Canary,
+		Kind:   "dispatch", Project: t.Project, Run: t.Run, Task: t.Task, Attempt: attempt, State: "running",
 		Pid: os.Getpid(), StartedAt: time.Now(), Path: t.Folder, Route: t.Route,
 		TaskInfo:     TaskInfo{Title: t.Title, Category: t.Category, LevelEstimate: string(t.Route.LevelEstimate), Access: t.Access, Commit: t.Commit, WallLimit: t.WallLimit},
 		Permission:   Permission{Enforcement: t.Route.Enforcement, Denials: []harness.Denial{}, Blocked: []string{}, Relays: []json.RawMessage{}},
@@ -440,12 +460,6 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	if !ok {
 		return fail(FailLane, "unknown harness "+t.Route.Harness)
 	}
-	if env.Solo != nil && env.Solo.toolID(env, h.Name()) == 0 {
-		ui.Warnf("solo: no preset for %s; using one-shot", h.Name())
-		copyEnv := *env
-		copyEnv.Solo = nil
-		env = &copyEnv
-	}
 	reportPath := filepath.Join(t.Folder, FileReport)
 	briefRel, _ := filepath.Rel(t.Project, filepath.Join(t.Folder, FileBrief))
 	reportRel, _ := filepath.Rel(t.Project, reportPath)
@@ -465,12 +479,20 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	if t.Access == brief.AccessEdit && env.Project != nil {
 		allowRules = env.Project.Allow
 	}
-	useTab := env.Solo != nil
+	// A child Lane has no Solo process identity. Maestro keeps the Solo link
+	// for todos, comments, and wake-ups.
+	stripEnv := append([]string{}, env.Roster.StripEnv(t.Route.Harness)...)
+	for _, kv := range os.Environ() {
+		key, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(key, "SOLO_") {
+			stripEnv = append(stripEnv, key)
+		}
+	}
 	launch := harness.Launch{
 		Model: t.Route.Model, Effort: t.Route.Effort, Access: t.Access, Root: t.Project, Dirs: t.Dirs,
 		TaskID: t.Task, AllowRules: allowRules, AllowedCommands: allChecks, AllowCommit: t.Commit, RunFolder: t.Folder, ReportPath: reportPath,
-		Pointer: brief.Pointer(briefRel), ClaudeAuto: t.ClaudeAuto, InSolo: t.InSolo, WallLimit: wallOf(t.WallLimit),
-		Env: harness.Env(env.Roster.StripEnv(t.Route.Harness), map[string]string{
+		Pointer: brief.Pointer(briefRel), ClaudeAuto: t.ClaudeAuto, WallLimit: wallOf(t.WallLimit),
+		Env: harness.Env(stripEnv, map[string]string{
 			"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
 			"GROK_CLAUDE_HOOKS_ENABLED":        "false",
 			"GROK_CLAUDE_SKILLS_ENABLED":       "false",
@@ -482,14 +504,8 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 			"MAESTRO_TASK_FOLDER":              t.Folder,
 		}),
 	}
-	var command *harness.Command
-	var err error
 	renderBrief := b
-	if useTab {
-		launch.Pointer = brief.Pointer(filepath.Join(t.Folder, FileBrief))
-		reportRel = reportPath
-	}
-	if t.Access == brief.AccessRead && (h.Name() == "claude" || (useTab && h.Name() == "codex")) {
+	if t.Access == brief.AccessRead && h.Name() == "claude" {
 		launch.Pointer = brief.Pointer(filepath.Join(t.Folder, FileBrief))
 		launch.Pointer += fmt.Sprintf(" The repository is at `%s`; read repository files through absolute paths.", t.Project)
 		reportRel = reportPath
@@ -503,11 +519,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		}
 		renderBrief = &copyBrief
 	}
-	if useTab {
-		command, err = h.BuildTab(launch)
-	} else {
-		command, err = h.Build(launch)
-	}
+	command, err := h.Build(launch)
 	if err != nil {
 		return fail(FailLane, err.Error())
 	}
@@ -526,7 +538,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	}
 	lane, err := json.MarshalIndent(hook.Lane{
 		Task: t.Task, Harness: h.Name(), Access: t.Access, Root: t.Project, Dirs: append([]string{}, t.Dirs...),
-		RunFolder: t.Folder, Allow: append([]string{}, allowRules...), Checks: allChecks, Commit: t.Commit, Tab: useTab,
+		RunFolder: t.Folder, Allow: append([]string{}, allowRules...), Checks: allChecks, Commit: t.Commit,
 	}, "", "  ")
 	if err != nil {
 		return fail(FailLane, err.Error())
@@ -541,9 +553,6 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	clearAnswers(control)
 	if err := os.WriteFile(filepath.Join(control, "lane.json"), lane, 0o600); err != nil {
 		return fail(FailLane, err.Error())
-	}
-	if useTab {
-		return runTab(env, t, h, command, launch, rec, reportPath, allChecks, b, snap)
 	}
 
 	// Launch.
@@ -570,6 +579,8 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	rec.Pid = cmd.Process.Pid
 	rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "start", Text: fmt.Sprintf("%s pid %d", h.Name(), cmd.Process.Pid)})
 	_ = rec.Save()
+	finishView := env.Solo.OpenView(env, t)
+	defer func() { finishView(rec) }()
 	ui.Eventf("dispatch", "task %s  %s %s %s  %s  wall %s  → %s", t.Task, h.Name(), t.Route.Model, t.Route.Effort, t.Access, t.WallLimit, relOrAbs(t.Project, t.Folder))
 	if stdin != nil {
 		go func() {
@@ -673,6 +684,7 @@ loop:
 	}
 	rec.Outcome.ExitCode = exitCode
 	out := parser.Outcome()
+	rec.Outcome.ProcessError = out.IsError
 	rec.SessionID = out.SessionID
 	rec.Outcome.ModelRan = out.ModelRan
 	if rec.Outcome.ModelRan == "" {
@@ -847,7 +859,17 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 		}
 		if len(allChecks) > 0 {
 			ui.Eventf("verify", "task %s  running %d check(s)", t.Task, len(allChecks))
+			rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "check", Text: fmt.Sprintf("running %d check(s)", len(allChecks))})
+			_ = rec.Save()
 			rec.Verification.Checks = verify.RunChecks(t.Project, allChecks, 10*time.Minute)
+			for _, check := range rec.Verification.Checks {
+				result := "ok"
+				if !check.OK {
+					result = "failed"
+				}
+				rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "check", Text: check.Command + ": " + result})
+			}
+			_ = rec.Save()
 		}
 	}
 	if rec.Verification.TouchViolations == nil {
@@ -934,6 +956,7 @@ func finish(rec *Record) {
 	rec.DurationS = rec.EndedAt.Sub(rec.StartedAt).Seconds()
 	rec.State = "ended"
 	rec.Pid = 0
+	rec.Events = append(rec.Events, Event{At: rec.EndedAt, Kind: "verdict", Text: strings.TrimSpace(rec.Outcome.Outcome + " " + rec.Outcome.ErrorText)})
 	_ = rec.Save()
 }
 
@@ -1031,104 +1054,4 @@ func priced(env *Env, modelRan, requested string, tk harness.Tokens) *float64 {
 func wallOf(s string) time.Duration {
 	d, _ := time.ParseDuration(s)
 	return d
-}
-
-// runTab is runOnce's tail for a Solo tab Lane.
-func runTab(env *Env, t *Task, h harness.Harness, command *harness.Command, launch harness.Launch, rec *Record, reportPath string, allChecks []string, b *brief.Brief, snap attemptBaseline) *Record {
-	idle, _ := time.ParseDuration(t.IdleLimit)
-	wall, _ := time.ParseDuration(t.WallLimit)
-	ui.Eventf("dispatch", "task %s  %s %s %s  %s  tab  wall %s  → %s", t.Task, h.Name(), t.Route.Model, t.Route.Effort, t.Access, t.WallLimit, relOrAbs(t.Project, t.Folder))
-	out, timer, err := env.Solo.TabLane(env, t, h, command, rec, idle, wall)
-	harvestTab(env, t, h, launch, rec)
-	if err != nil {
-		rec.Outcome.FailureClass = FailLane
-		rec.Outcome.Outcome = OutcomeFailed
-		rec.Outcome.ErrorText = cut(err.Error(), 500)
-		finish(rec)
-		ui.Eventf("failed", "task %s  %s: %s", t.Task, FailLane, ui.FirstLine(err.Error(), 0))
-		return rec
-	}
-	if timer == "cancelled" {
-		rec.Outcome.Outcome = OutcomeCancelled
-		finish(rec)
-		return rec
-	}
-	rec.Outcome.ModelRan = t.Route.Model
-	report, found := rec.Report()
-	if out != nil {
-		for _, sig := range out.Signals {
-			if sig.Class == "limit" {
-				stands, note := env.confirmLimit(rec, t.Route.Account, t.Route.Harness)
-				rec.Outcome.LimitConfirmation = note
-				if stands && (!found || report.Status == brief.StatusUnshaped) {
-					rec.Outcome.FailureClass = FailLimit
-					rec.Outcome.Outcome = OutcomeFailed
-					rec.Outcome.ErrorText = sig.Text
-					finish(rec)
-					return rec
-				}
-			}
-		}
-	}
-	if (!found || strings.TrimSpace(report.Raw) == "") && out != nil && !out.TabWorked {
-		rec.Outcome.FailureClass = FailLane
-		rec.Outcome.Outcome = OutcomeFailed
-		rec.Outcome.ErrorText = tabStartupError
-		rec.Outcome.Timer = timer
-		finish(rec)
-		return rec
-	}
-	if timer == "idle" || timer == "wall" {
-		rec.Outcome.Timer = timer
-		rec.Outcome.FailureClass = FailStall
-		rec.Outcome.Outcome = OutcomeTimedOut
-		finish(rec)
-		ui.Eventf("stall", "task %s  %s limit passed in the tab", t.Task, timer)
-		return rec
-	}
-	if !found || strings.TrimSpace(report.Raw) == "" {
-		class := FailTransient
-		if out != nil && out.ErrorText == "early exit" {
-			class = FailLane // the tab died before it did work
-		}
-		rec.Outcome.FailureClass = class
-		rec.Outcome.Outcome = OutcomeFailed
-		rec.Outcome.ErrorText = "the tab ended with no report"
-		finish(rec)
-		return rec
-	}
-	return judge(env, t, rec, report, allChecks, b, snap)
-}
-
-func harvestTab(env *Env, t *Task, h harness.Harness, launch harness.Launch, rec *Record) {
-	if rec.SoloProcess == 0 {
-		return
-	}
-	switch h.Name() {
-	case "claude":
-		if env.Budget != nil {
-			if ws, err := budget.ProbeClaude(context.Background(), h.Bin(), launch.Env); err == nil {
-				rec.Budget.Windows = ws
-				env.harvest(t.Route.Account, ws)
-			}
-		}
-	case "codex":
-		root := t.Project
-		if t.Access == brief.AccessRead {
-			root = t.Folder
-		}
-		started := rec.StartedAt
-		for _, event := range rec.Events {
-			if event.Kind == "tab" {
-				started = event.At
-			}
-		}
-		if id, err := budget.FindCodexRollout(started, root); err == nil {
-			rec.SessionID = id
-			if ws, err := budget.HarvestCodexRollout(id); err == nil {
-				rec.Budget.Windows = ws
-				env.harvest(t.Route.Account, ws)
-			}
-		}
-	}
 }

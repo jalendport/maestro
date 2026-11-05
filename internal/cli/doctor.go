@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/jalendport/maestro/internal/adapter"
@@ -23,14 +22,28 @@ type doctorRow struct {
 }
 
 func (a *app) doctorCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "doctor",
+	var canary bool
+	c := &cobra.Command{
+		Use:   "doctor [--canary [harness]]",
 		Short: "Check Harnesses, versions, logins, the Jev key, and Solo",
-		Long:  "Read current discovery facts and report every Harness, the Jev key, Solo, the config files, and the Roster's pre-flight state.",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		Long:  "Read current discovery facts and report every Harness, its Canary result, the Jev key, Solo, the config files, and the Roster's pre-flight state. --canary starts one small read Dispatch per installed Harness, or for the named Harness, and uses your Account.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if len(args) > 0 && !canary {
+				return fmt.Errorf("a Harness name needs --canary")
+			}
 			env, err := a.loadEnv(true, false)
 			if err != nil {
 				return err
+			}
+			if len(args) > 0 {
+				h, ok := env.Reg.Get(args[0])
+				if !ok {
+					return fmt.Errorf("unknown Harness %q", args[0])
+				}
+				if h.Bin() == "" {
+					return fmt.Errorf("Harness %s is not installed", args[0])
+				}
 			}
 			var rows []doctorRow
 			problems := 0
@@ -63,6 +76,22 @@ func (a *app) doctorCmd() *cobra.Command {
 						row.State = "ok"
 					}
 				}
+				if rec.Path != "" {
+					if canary && (len(args) == 0 || args[0] == name) {
+						if _, err := dispatch.RunCanary(env, name); err != nil {
+							return err
+						}
+					}
+					result, err := dispatch.LoadCanary(name)
+					if err != nil {
+						return err
+					}
+					state, failed := canaryState(result, rec.Version, name)
+					row.State += "  " + state
+					if failed {
+						problems++
+					}
+				}
 				rows = append(rows, row)
 			}
 			rows = append(rows, jevRow())
@@ -79,6 +108,13 @@ func (a *app) doctorCmd() *cobra.Command {
 			}
 			cfg.State = "ok"
 			rows = append(rows, cfg)
+			user, _, err := config.LoadUser()
+			if err != nil {
+				return err
+			}
+			for _, key := range user.Ignored {
+				rows = append(rows, doctorRow{Name: "config", Detail: config.UserFile(), State: key + " has no effect"})
+			}
 			// User warnings were printed once by loadEnv. Project keys are kept
 			// by LoadProject so doctor can report them without decoding again.
 			for _, key := range env.Project.Unknown {
@@ -123,6 +159,18 @@ func (a *app) doctorCmd() *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&canary, "canary", false, "Run one Canary per installed Harness, or for the named Harness (uses your Account)")
+	return c
+}
+
+func canaryState(result *dispatch.CanaryResult, version, name string) (string, bool) {
+	if result == nil || version == "" || result.Version != version || result.Harness != name {
+		return "no canary result for installed version; run maestro doctor --canary " + name, false
+	}
+	if result.Passed() {
+		return "canary passed for " + version, false
+	}
+	return "canary failed for " + version + " (" + result.FailedParts() + ")", true
 }
 
 func orchestratorRow(family string) doctorRow {
@@ -152,15 +200,9 @@ func jevRow() doctorRow {
 func soloRow(env *dispatch.Env) doctorRow {
 	if env.Solo == nil {
 		if os.Getenv("SOLO_PROCESS_ID") != "" {
-			return doctorRow{Name: "solo", Detail: "SOLO_PROCESS_ID set, helper unreachable", State: "one-shot lanes only"}
+			return doctorRow{Name: "solo", Detail: "SOLO_PROCESS_ID set, helper unreachable", State: "View unavailable"}
 		}
-		return doctorRow{Name: "solo", Detail: "not inside a Solo tab", State: "one-shot lanes only"}
+		return doctorRow{Name: "solo", Detail: "not inside a Solo tab", State: "no Solo View"}
 	}
-	var tools []string
-	for _, name := range env.Reg.Names() {
-		if id := env.Disc.Harness[name].SoloTool; id != 0 {
-			tools = append(tools, fmt.Sprintf("%s %d", name, id))
-		}
-	}
-	return doctorRow{Name: "solo", Detail: fmt.Sprintf("project %d, orchestrator process %d   agent tools: %s", env.Solo.ProjectID, env.Solo.Orchestrator, strings.Join(tools, ", ")), State: "ok"}
+	return doctorRow{Name: "solo", Detail: fmt.Sprintf("project %d, orchestrator process %d", env.Solo.ProjectID, env.Solo.Orchestrator), State: "ok"}
 }

@@ -69,6 +69,22 @@ func TestDoctorFailsForInstalledHarnessError(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsSoloToolHasNoEffect(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("GROK_HOME", t.TempDir())
+	t.Setenv("PATH", "")
+	t.Setenv("SOLO_PROCESS_ID", "")
+	if err := os.WriteFile(config.UserFile(), []byte("[harness.claude]\nsolo_tool = 9\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := (&app{}).build()
+	root.SetArgs([]string{"doctor"})
+	output := captureStdout(t, root.Execute)
+	if !strings.Contains(output, "harness.claude.solo_tool has no effect") {
+		t.Fatalf("doctor output = %q", output)
+	}
+}
+
 func TestDoctorWarnsOnceForRemovedUserKeys(t *testing.T) {
 	// Build retired names in parts so the source search lists only live keys.
 	for _, tc := range []struct {

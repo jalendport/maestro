@@ -79,6 +79,7 @@ func (a *app) build() *cobra.Command {
 	root.AddCommand(a.runCmd())
 	root.AddCommand(a.dispatchCmd())
 	root.AddCommand(a.waitCmd())
+	root.AddCommand(a.watchCmd())
 	root.AddCommand(a.statusCmd())
 	root.AddCommand(a.addCmd())
 	root.AddCommand(a.cancelCmd())
@@ -92,7 +93,6 @@ func (a *app) build() *cobra.Command {
 	root.AddCommand(a.hookCmd())
 	root.AddCommand(a.initCmd())
 	root.AddCommand(a.adapterCmd())
-	root.AddCommand(a.tellCmd())
 	root.AddCommand(a.councilSupervisorCmd())
 	root.AddCommand(a.rosterCmd())
 	root.AddCommand(a.doctorCmd())
@@ -100,6 +100,7 @@ func (a *app) build() *cobra.Command {
 	root.AddCommand(a.keyCmd())
 	root.AddCommand(a.budgetCmd())
 	root.AddCommand(a.routerCmd())
+	root.AddCommand(a.statsCmd())
 	root.AddCommand(a.superviseCmd())
 	return root
 }
@@ -164,9 +165,6 @@ func (a *app) loadEnv(refresh, persist bool) (*dispatch.Env, error) {
 	env := &dispatch.Env{Roster: r, Disc: disc, Reg: reg, Project: project, Root: root, Budget: bf}
 	if solo.InSolo() {
 		env.Solo = dispatch.ConnectSolo()
-		if env.Solo != nil && (refresh || soloToolsMissing(disc)) {
-			recordSoloTools(env, persist)
-		}
 	}
 	return env, nil
 }
@@ -180,12 +178,12 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, "  "+ui.Name.Render("dispatch <brief.md>")+"      Route and dispatch one Task (returns at once; --wait to block)")
 	ui.Fprintln(out, "  "+ui.Name.Render("council <question>")+"       Ask several Lanes the same question in parallel")
 	ui.Fprintln(out, "  "+ui.Name.Render("wait <run|task|council>")+"  Block until a Run, Task, or Council ends; print its report")
+	ui.Fprintln(out, "  "+ui.Name.Render("watch <task|folder>")+"     Follow Dispatch events, model text, and tool names")
 	ui.Fprintln(out, "  "+ui.Name.Render("status [run|task|council]")+" Show Runs, Dispatches, and Councils")
 	ui.Fprintln(out, "")
 	ui.Fprintln(out, ui.Section.Render("Mid-run"))
 	ui.Fprintln(out, "  "+ui.Name.Render("add <brief.md>")+"           Add a Task to the live Run")
 	ui.Fprintln(out, "  "+ui.Name.Render("cancel <task|run>")+"        Cancel a Task or a Run (running Dispatches are stopped)")
-	ui.Fprintln(out, "  "+ui.Name.Render("tell <task> <text>")+"       Send a note into a running Lane (Solo tab only)")
 	ui.Fprintln(out, "  "+ui.Name.Render("answer <task> allow|deny --relay <id>")+" Answer a relayed permission prompt")
 	ui.Fprintln(out, "  "+ui.Name.Render("approve <run>")+"            Approve a breakdown that was held for approval")
 	ui.Fprintln(out, "  "+ui.Name.Render("resume <run> --task <n>")+"  (--lane F[:E] | --brief <file> | --skip)  Continue a paused Run")
@@ -196,7 +194,6 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, "  "+ui.Name.Render("roster")+"                   Show the effective Roster (families, models, levels, state)")
 	ui.Fprintln(out, "    "+ui.Name.Render("roster refresh")+"         Re-read the Harness catalogs")
 	ui.Fprintln(out, "    "+ui.Name.Render("roster prices")+"          Show the embedded price table")
-	ui.Fprintln(out, "    "+ui.Name.Render("roster solo")+"            Print Solo preset command lines to type in by hand")
 	ui.Fprintln(out, "  "+ui.Name.Render("budget")+"                   Show Budget readings per Account")
 	ui.Fprintln(out, "    "+ui.Name.Render("budget set <account> <percent>")+"   Record a manual reading")
 	ui.Fprintln(out, "    "+ui.Name.Render("budget record claude")+"   Read a Claude statusline JSON on stdin (statusline tee)")
@@ -226,29 +223,4 @@ func (a *app) result(value any, format string, args ...any) error {
 	}
 	ui.Outf(format, args...)
 	return nil
-}
-
-// soloToolsMissing also refreshes old caches that did not record preset choices.
-func soloToolsMissing(disc *discovery.Cache) bool {
-	for _, rec := range disc.Harness {
-		if len(rec.SoloPresets) > 0 {
-			return false
-		}
-	}
-	return true
-}
-
-// recordSoloTools maps Solo's agent tools onto Harness names in the cache.
-func recordSoloTools(env *dispatch.Env, persist bool) {
-	res, err := env.Solo.Client.Call("list_agent_tools", nil)
-	if err != nil {
-		return
-	}
-	var tools []discovery.SoloAgentTool
-	if json.Unmarshal(res, &tools) != nil {
-		return
-	}
-	if env.Disc.RecordSoloTools(tools) && persist {
-		_ = env.Disc.Save()
-	}
 }

@@ -7,7 +7,7 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Maestro** — a local tool that owns the work after the thinking is done. It turns a plan into Tasks, routes, dispatches, checks, and runs Councils.
 - **Orchestrator** — the model session the user talks to, in any Harness. It plans and hands work to Maestro. It is a role, not a program.
 - **Harness** — a CLI agent program that can run a model on a task: Claude Code, Codex, Grok, Antigravity.
-- **Lane** — one runnable combination of harness + model + effort, for example `codex gpt-5.6-sol high`. Maestro routes Tasks to Lanes.
+- **Lane** — one runnable combination of harness + model + effort, for example `codex gpt-5.6-sol high`. Maestro routes Tasks to Lanes and starts each Lane as a headless child process, inside Solo and outside it.
 - **Roster** — the list of all Lanes with their facts: cost, speed, strengths, limits, billing kind.
 - **Billing kind** — whether a Lane draws on a vendor subscription or pays per token through an API key. Drives how often the Lane is used.
 - **Budget** — what is left for a Lane's billing source: percent of a subscription window and its reset time, or money for a token-billed Lane.
@@ -15,6 +15,7 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Route** — the decision "this Task goes to this Lane".
 - **Router** — the part of Maestro that makes Routes: Jev, with a rules fallback.
 - **Dispatch** — starting a Lane on a Task and collecting its result.
+- **View** — a live account of one Dispatch's events and the Lane's readable output.
 - **Council** — several Lanes answering the same question in parallel. The Orchestrator synthesizes; Maestro returns a Merge.
 - **Adapter** — the small per-Harness piece that connects an Orchestrator to Maestro: one shared skill file, one hook file, and the Carrier of the Reminder. Maestro itself works without any Adapter. `maestro adapter install` writes it.
 - **Run** — one invocation of Maestro on a plan: its Tasks, their Routes and Dispatches, the checks, and the report back to the Orchestrator.
@@ -32,6 +33,7 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Block point** — the used share of a window at which a Lane leaves the Route list.
 - **Reserve** — the part of an Account's weekly window that automatic Dispatches may not use. It applies to any Account and keeps room for the Orchestrator.
 - **Probe** — a cheap call Maestro makes only to read a Budget.
+- **Canary** — a small read Dispatch that the user starts to check the launch and Report of an installed Harness, and the Maestro hook when it holds the Lane's Access.
 - **Harvest** — reading a Budget from the output of a Dispatch that ran anyway.
 - **Family** — one Harness × model pair, the unit the Router chooses between. A Lane is a Family plus one effort. Written `<harness>-<short model>`, for example `codex-sol`.
 - **Catalog** — the list of models a Harness can run today, as its own list command reports it.
@@ -39,7 +41,7 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Discovery cache** — the file Maestro generates from the catalogs and rewrites freely. Never edited by hand.
 - **Level map** — a Family's map from Judgment level to effort. The Tier is derived from the levels a Family serves.
 - **Access** — the part of the Brief that says whether a Lane may change files. Two values: `read` and `edit`. There is no third value. Maestro passes no bypass flag to a Claude, Codex, or Antigravity Lane; a Grok Lane runs in Grok's always-approve mode because Grok has no mode that is prompt-free and deny-by-default, and there the Maestro hook and the workspace sandbox hold the Access.
-- **Enforcement** — a measured fact per Harness and Access value: `enforced` when a sandbox, a tool allowlist, or the Maestro hook holds the Access with no help from the model (the sandbox is the boundary that holds a shell; the hook holds paths, tool names, and a read-only command list judged as written, and denies a read-only command with a shell expansion), `best-effort` when only an instruction, a weak flag, or a model decision does. `claude_auto` makes Claude edit Lanes `best-effort`; Grok edit Lanes with writable `dirs` outside the project are also `best-effort`. A `read` Task goes only to `enforced` Lanes. Maestro cannot detect four limits: Grok warns and continues without the kernel sandbox when the OS refuses a built-in profile; a Grok tab is found through the `transcriptPath` key of the hook payload, so a Grok release that drops the key leaves the tab under the Orchestrator rule; a Solo tab whose transcript is not yet on disk at its first tool call runs that call under the Orchestrator rule (a Lane's first call reads its Brief); and a check that runs Lane-written code under the Grok workspace sandbox can write `~/.grok`, Grok's own home.
+- **Enforcement** — a measured fact per Harness and Access value: `enforced` when a sandbox, a tool allowlist, or the Maestro hook holds the Access with no help from the model (the sandbox is the boundary that holds a shell; the hook holds paths, tool names, and a read-only command list judged as written, and denies a read-only command with a shell expansion), `best-effort` when only an instruction, a weak flag, or a model decision does. `claude_auto` makes Claude edit Lanes `best-effort`; Grok edit Lanes with writable `dirs` outside the project are also `best-effort`. A `read` Task goes only to `enforced` Lanes. Maestro cannot detect three limits: Grok warns and continues without the kernel sandbox when the OS refuses a built-in profile; Maestro finds a Grok Lane through the `transcriptPath` key in the hook payload, so a Grok release that drops the key leaves the Lane under the Orchestrator rule; and a check that runs Lane-written code under the Grok workspace sandbox can write `~/.grok`, Grok's own home.
 - **Relay** — Maestro passing a Lane's permission prompt to the Orchestrator and typing the answer back. The Orchestrator may ask the user. An unanswered Relay is denied after 10 minutes.
 - **Failure class** — the name Maestro gives to one kind of Dispatch failure. Five values: Lane error, Transient error, Limit hit, Stall, Bad result. Every ledger row and failure message carries exactly one.
 - **Idle limit** — the longest time a Dispatch may run with no new output. One value for every Tier. An open Relay pauses it.

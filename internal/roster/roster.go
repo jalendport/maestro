@@ -265,9 +265,6 @@ func Merge(d, u *config.File) *Roster {
 		if v.StripEnv != nil {
 			base.StripEnv = v.StripEnv
 		}
-		if v.SoloTool != 0 {
-			base.SoloTool = v.SoloTool
-		}
 		r.Harness[k] = base
 	}
 	for id, f := range d.Families {

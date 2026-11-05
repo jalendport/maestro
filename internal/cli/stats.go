@@ -25,13 +25,19 @@ type routerStats struct {
 
 func (a *app) routerCmd() *cobra.Command {
 	c := &cobra.Command{Use: "router", Short: "Router facts"}
-	c.AddCommand(&cobra.Command{
+	c.AddCommand(a.statsCmd())
+	return c
+}
+
+func (a *app) statsCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "stats",
 		Short: "Jev vs rules agreement, verified rates per Route source",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			st := routerStats{BySource: map[string]int{}, Verified: map[string]int{}, Attempted: map[string]int{}, Escalated: map[string]int{}}
 			err := ledger.Each(func(raw json.RawMessage) error {
 				var row struct {
+					Canary  bool   `json:"canary"`
 					Kind    string `json:"kind"`
 					Attempt int    `json:"attempt"`
 					Route   struct {
@@ -44,7 +50,7 @@ func (a *app) routerCmd() *cobra.Command {
 						Outcome string `json:"outcome"`
 					} `json:"outcome"`
 				}
-				if json.Unmarshal(raw, &row) != nil || row.Kind != "dispatch" {
+				if json.Unmarshal(raw, &row) != nil || row.Kind != "dispatch" || row.Canary {
 					return nil
 				}
 				st.Routes++
@@ -101,8 +107,7 @@ func (a *app) routerCmd() *cobra.Command {
 			fmt.Fprintf(os.Stdout, "medium confidence    %s     fallback %s\n", ratio(st.Medium, st.Routes), ratio(st.Fallback, st.Routes))
 			return nil
 		},
-	})
-	return c
+	}
 }
 
 func ratio(n, d int) string {

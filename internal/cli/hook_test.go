@@ -95,53 +95,51 @@ func TestHookCommandAntigravityLane(t *testing.T) {
 }
 
 func TestHookCommandAntigravityRelay(t *testing.T) {
-	for _, tab := range []bool{false, true} {
-		for _, answer := range []string{"allow", "deny"} {
-			t.Run("tab="+strconv.FormatBool(tab)+"/"+answer, func(t *testing.T) {
-				t.Setenv("MAESTRO_HOME", t.TempDir())
-				folder := t.TempDir()
-				t.Setenv("MAESTRO_TASK_FOLDER", folder)
-				control := controlFolder(t, folder)
-				if err := os.MkdirAll(control, 0o700); err != nil {
-					t.Fatal(err)
+	for _, answer := range []string{"allow", "deny"} {
+		t.Run(answer, func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
+			folder := t.TempDir()
+			t.Setenv("MAESTRO_TASK_FOLDER", folder)
+			control := controlFolder(t, folder)
+			if err := os.MkdirAll(control, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(`{"access":"edit","harness":"agy","root":"/project"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			reply := answerOpenRelay(control, answer)
+			payload := `{"toolCall":{"name":"run_command","args":{"CommandLine":"go run main.go","Cwd":"/project","Blocking":true}}}`
+			output := runHookPayload(t, payload, "agy")
+			want := `{"decision":"auto_approve"}`
+			if answer == "deny" {
+				want = `{"decision":"deny","reason":"deny"}`
+			}
+			if output != want {
+				t.Fatalf("answer: %s, want %s", output, want)
+			}
+			got := <-reply
+			if got.err != nil {
+				t.Fatal(got.err)
+			}
+			b, err := os.ReadFile(filepath.Join(control, "relay-answer-"+got.id+".json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var saved struct {
+				Request struct {
+					ToolName  string         `json:"tool_name"`
+					ToolInput map[string]any `json:"tool_input"`
 				}
-				if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(`{"access":"edit","harness":"agy","root":"/project","tab":`+strconv.FormatBool(tab)+`}`), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				reply := answerOpenRelay(control, answer)
-				payload := `{"toolCall":{"name":"run_command","args":{"CommandLine":"go run main.go","Cwd":"/project","Blocking":true}}}`
-				output := runHookPayload(t, payload, "agy")
-				want := `{"decision":"auto_approve"}`
-				if answer == "deny" {
-					want = `{"decision":"deny","reason":"deny"}`
-				}
-				if output != want {
-					t.Fatalf("answer: %s, want %s", output, want)
-				}
-				got := <-reply
-				if got.err != nil {
-					t.Fatal(got.err)
-				}
-				b, err := os.ReadFile(filepath.Join(control, "relay-answer-"+got.id+".json"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				var saved struct {
-					Request struct {
-						ToolName  string         `json:"tool_name"`
-						ToolInput map[string]any `json:"tool_input"`
-					}
-					Answer string
-				}
-				if err := json.Unmarshal(b, &saved); err != nil {
-					t.Fatal(err)
-				}
-				input := map[string]any{"CommandLine": "go run main.go", "Cwd": "/project", "Blocking": true}
-				if saved.Answer != answer || saved.Request.ToolName != "run_command" || !reflect.DeepEqual(saved.Request.ToolInput, input) {
-					t.Fatalf("saved Relay: %s", b)
-				}
-			})
-		}
+				Answer string
+			}
+			if err := json.Unmarshal(b, &saved); err != nil {
+				t.Fatal(err)
+			}
+			input := map[string]any{"CommandLine": "go run main.go", "Cwd": "/project", "Blocking": true}
+			if saved.Answer != answer || saved.Request.ToolName != "run_command" || !reflect.DeepEqual(saved.Request.ToolInput, input) {
+				t.Fatalf("saved Relay: %s", b)
+			}
+		})
 	}
 }
 
@@ -577,21 +575,19 @@ func TestHookCommandClaudeLane(t *testing.T) {
 		for _, tc := range []struct {
 			name, access, tool, policy string
 			input                      map[string]any
-			tab                        bool
 			reason                     string
 		}{
-			{"read write flag", "read", "Bash", "valid", map[string]any{"command": "git log --output=x"}, false, "--output=x"},
-			{"read report write", "read", "Write", "valid", map[string]any{"file_path": "<run>/result.md"}, false, ""},
-			{"read tool", "read", "Read", "valid", map[string]any{"file_path": "<project>/main.go"}, false, ""},
-			{"edit git write", "edit", "Edit", "valid", map[string]any{"file_path": "<project>/.git/config"}, false, ".git"},
-			{"edit tab off-list command", "edit", "Bash", "valid", map[string]any{"command": "go run main.go"}, true, ""},
-			{"edit one-shot off-list command", "edit", "Bash", "valid", map[string]any{"command": "go run main.go"}, false, ""},
-			{"missing policy", "read", "Write", "missing", map[string]any{"file_path": "<run>/result.md"}, false, "no readable Lane policy"},
-			{"invalid policy", "read", "Write", "invalid", map[string]any{"file_path": "<run>/result.md"}, false, "no readable Lane policy"},
-			{"reader spawn", "read", "Agent", "valid", map[string]any{"subagent_type": "Explore"}, false, ""},
-			{"writer spawn", "edit", "Agent", "valid", map[string]any{"subagent_type": "writer"}, false, "Sub-agent"},
-			{"Orchestrator Bash", "", "Bash", "valid", map[string]any{"command": "go run main.go"}, false, ""},
-			{"Orchestrator spawn", "", "Agent", "valid", map[string]any{"subagent_type": "writer"}, false, "Sub-agent"},
+			{"read write flag", "read", "Bash", "valid", map[string]any{"command": "git log --output=x"}, "--output=x"},
+			{"read report write", "read", "Write", "valid", map[string]any{"file_path": "<run>/result.md"}, ""},
+			{"read tool", "read", "Read", "valid", map[string]any{"file_path": "<project>/main.go"}, ""},
+			{"edit git write", "edit", "Edit", "valid", map[string]any{"file_path": "<project>/.git/config"}, ".git"},
+			{"edit one-shot off-list command", "edit", "Bash", "valid", map[string]any{"command": "go run main.go"}, ""},
+			{"missing policy", "read", "Write", "missing", map[string]any{"file_path": "<run>/result.md"}, "no readable Lane policy"},
+			{"invalid policy", "read", "Write", "invalid", map[string]any{"file_path": "<run>/result.md"}, "no readable Lane policy"},
+			{"reader spawn", "read", "Agent", "valid", map[string]any{"subagent_type": "Explore"}, ""},
+			{"writer spawn", "edit", "Agent", "valid", map[string]any{"subagent_type": "writer"}, "Sub-agent"},
+			{"Orchestrator Bash", "", "Bash", "valid", map[string]any{"command": "go run main.go"}, ""},
+			{"Orchestrator spawn", "", "Agent", "valid", map[string]any{"subagent_type": "writer"}, "Sub-agent"},
 		} {
 			t.Run(signal+"/"+tc.name, func(t *testing.T) {
 				t.Setenv("HOME", t.TempDir())
@@ -612,7 +608,7 @@ func TestHookCommandClaudeLane(t *testing.T) {
 					if access == "" {
 						access = "read"
 					}
-					body, err := json.Marshal(hook.Lane{Harness: "claude", Access: access, Root: project, RunFolder: folder, Tab: tc.tab})
+					body, err := json.Marshal(hook.Lane{Harness: "claude", Access: access, Root: project, RunFolder: folder})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -739,6 +735,23 @@ func TestHookCommandCodexToolCallsSkipTranscript(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestHookCommandCodexDoesNotRecordJudgment(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	folder := filepath.Join(t.TempDir(), ".agents", "maestro", "runs", "r-test", "task")
+	t.Setenv("MAESTRO_TASK_FOLDER", folder)
+	control := controlFolder(t, folder)
+	if err := os.MkdirAll(control, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(control, "lane.json"), []byte(`{"access":"read","harness":"codex"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runHookPayload(t, `{"tool_name":"exec_command","tool_input":{"command":"pwd"}}`, "codex")
+	if _, err := os.Stat(filepath.Join(control, hook.FileJudgment)); !os.IsNotExist(err) {
+		t.Fatalf("Codex hook wrote a Lane judgment: %v", err)
 	}
 }
 

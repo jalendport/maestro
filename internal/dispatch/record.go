@@ -59,6 +59,7 @@ type Task struct {
 	MaxAttempt int           `json:"max_attempts"`
 	// Council marks a Seat Dispatch: the Report ends with POSITION, not STATUS.
 	Council bool `json:"council,omitempty"`
+	Canary  bool `json:"canary,omitempty"`
 	// Todo is the Solo todo of this Task, 0 outside Solo.
 	Todo int `json:"todo,omitempty"`
 	// FirstAttempt lets a re-Route inside a Run keep the attempt count.
@@ -73,6 +74,7 @@ type Task struct {
 type Record struct {
 	judged    bool      // judge has recorded Changed; the deferred recording stands down
 	Kind      string    `json:"kind"`
+	Canary    bool      `json:"canary,omitempty"`
 	Project   string    `json:"project"`
 	Run       string    `json:"run"`
 	Task      string    `json:"task"`
@@ -84,7 +86,7 @@ type Record struct {
 	DurationS float64   `json:"duration_s"`
 	Path      string    `json:"path"`
 	SessionID string    `json:"session_id,omitempty"`
-	// SoloProcess is the Lane's tab when it ran as one.
+	// SoloProcess is the terminal that shows the Dispatch view.
 	SoloProcess int `json:"solo_process,omitempty"`
 
 	TaskInfo     TaskInfo      `json:"task_info"`
@@ -140,9 +142,9 @@ type Outcome struct {
 	Timer             string  `json:"timer,omitempty"`
 	ErrorText         string  `json:"error_text,omitempty"`
 	ExitCode          int     `json:"exit_code"`
+	ProcessError      bool    `json:"process_error,omitempty"`
 	LimitConfirmation string  `json:"limit_confirmation,omitempty"`
 	SleepJumpS        float64 `json:"sleep_jump_s,omitempty"`
-	Nudged            bool    `json:"nudged"`
 	ModelRan          string  `json:"model_ran,omitempty"`
 	ReportByText      bool    `json:"report_by_text,omitempty"`
 }

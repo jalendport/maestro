@@ -4,6 +4,8 @@ Maestro runs with no configuration file. It reads three layers, in this order: t
 
 A key that Maestro does not know gives a warning. It does not stop a Route.
 
+Every Lane runs as a headless child process on the one-shot path, inside Solo and outside it. This includes Run Tasks, single Dispatches, and Council Seats. Solo supplies terminal Views, todos, Report and Merge comments, and wake-ups.
+
 ## ~/.maestro/config.toml
 
 This file holds only your deltas. A missing file is not an error.
@@ -49,7 +51,7 @@ A table named `[harness.<name>]` holds the settings for one Harness: `claude`, `
 | `bin` | string | none | Sets the path of the Harness program; when it is empty, Maestro finds the program itself. |
 | `min_version` | string | see below | Sets the oldest Harness version that `maestro doctor` accepts. |
 | `strip_env` | array of strings | see below | Lists the environment variables that Maestro removes before it starts a Lane or a Probe on this Harness. Names that contain `API_KEY` or `AUTH_TOKEN` are removed only for subscription Accounts; other names are always removed. `TYPESAFE_API_KEY` is always removed for every Billing kind, even if it is absent from `strip_env`, because it is Maestro’s own credential. |
-| `solo_tool` | integer | none | Sets the Solo agent tool id that Maestro uses to open a tab for this Harness; `0` means use the discovered id. |
+| `solo_tool` | integer | none | Accepted for compatibility; has no effect. `maestro doctor` reports the key when it is present. |
 
 Default entries:
 
@@ -283,9 +285,9 @@ These keys set how many Lanes run at the same time.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `max_parallel` | integer | `4` | Sets how many Council Seats or Run Tasks run at the same time. |
-| `max_per_account` | integer | `2` | Caps concurrent Run Dispatches on one Account across the machine. A Task waits with `account cap <id>` until a slot is free. |
+| `max_per_account` | integer | none | Caps concurrent Run Dispatches on one Account across the machine when set to a positive number. An absent key or `0` gives the Account no cap of its own; `max_total` still applies across Runs. A Task at a set Account cap waits with `account cap <id>` until a slot is free. |
 | `max_total` | integer | `6` | Caps concurrent Run Dispatches across the machine. A Task waits with `machine cap` until a slot is free. |
-| `close_tabs` | string | `"on-success"` | Chooses when Maestro closes the Solo tab of a Lane: `on-success` closes it after a verified, answered, or unverified result, `always` closes it every time, and `never` leaves it open. |
+| `close_tabs` | string | `"on-success"` | When to close a Solo View tab: `"on-success"` closes it after `verified`, `answered`, or `unverified`; `"always"` closes it after every outcome, including failure and cancellation; `"never"` leaves it open. Closing the View does not stop the Dispatch. |
 
 ## .agents/maestro.toml
 

@@ -14,6 +14,7 @@ import (
 	"github.com/jalendport/maestro/internal/council"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/roster"
+	"github.com/jalendport/maestro/internal/router"
 	"github.com/jalendport/maestro/internal/run"
 )
 
@@ -54,11 +55,11 @@ func TestStatusWithOnlyStandaloneDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, code := statusOutput(t)
-	if code != 0 || !strings.Contains(out, "dispatches\n  task abcd") {
+	if code != 0 || !strings.Contains(out, "dispatches\n  task abcd") || strings.Contains(out, "tab") {
 		t.Fatalf("code %d: %s", code, out)
 	}
 	out, code = statusOutput(t, "abcd")
-	if code != 0 || !strings.Contains(out, folder) {
+	if code != 0 || !strings.Contains(out, folder) || strings.Contains(out, "tab") {
 		t.Fatalf("task query: code %d: %s", code, out)
 	}
 	out, code = statusOutput(t, "--json")
@@ -72,6 +73,26 @@ func TestStatusWithOnlyStandaloneDispatch(t *testing.T) {
 	}
 	if code != 0 || len(status.Runs) != 0 || len(status.Dispatches) != 1 || status.Councils == nil {
 		t.Fatalf("JSON status: %s", out)
+	}
+}
+
+func TestWaitDispatchHasNoTabText(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("SOLO_PROCESS_ID", "")
+	root := t.TempDir()
+	t.Chdir(root)
+	folder := filepath.Join(config.RunsDir(root), "r-0001", "abcd")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := &dispatch.Record{Task: "abcd", Path: folder, State: "ended", SoloProcess: 42,
+		Route: &router.Route{FamilyID: "codex-sol"}, Outcome: dispatch.Outcome{Outcome: dispatch.OutcomeAnswered, Status: "done"}}
+	if err := rec.Save(); err != nil {
+		t.Fatal(err)
+	}
+	out, code := cliOutput(t, "wait", "abcd")
+	if code != 0 || !strings.Contains(out, "task abcd") || strings.Contains(out, "tab") {
+		t.Fatalf("wait: code %d: %s", code, out)
 	}
 }
 

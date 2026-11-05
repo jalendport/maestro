@@ -7,6 +7,8 @@ description: Hand approved plans to Maestro, which routes and runs agent work ac
 
 You are the Orchestrator: you plan, judge, and read every diff. Maestro owns the work after the thinking is done, through the `maestro` binary on PATH. Lanes write the code; read-only legwork may stay on a read-only agent.
 
+Every Lane runs as a headless child process on the one-shot path, inside Solo and outside it. This includes Run Tasks, single Dispatches, and Council Seats.
+
 ## Verbs
 
 - The user approves a plan → write the Plan file and run `maestro run <plan.md>` at once. Maestro prints the provisional Routes. When it holds for approval (exit 2), fold the plan Council's Merge into the Plan file if a Council ran, then `maestro approve <run>`. `maestro status` shows the live state; `maestro wait <run>` prints the report.
@@ -25,7 +27,7 @@ Ask the user only when a verb exits 2, or when a Task touches a human gate: push
 
 - Write the Goal as definitions, not commands.
 - Write the Done as what must be true when the Lane stops.
-- In Solo, give each Task a `tab:` of at most 18 characters that says what the Task does; it names the Solo tab.
+- In Solo, give each Task a `tab:` of at most 18 characters that says what the Task does; it names the Solo View tab.
 - `touch:` lists every path the Done names, or the Lane stops blocked.
 - A token-billed Lane takes edit work only when `lane:` names it, so name one only when no subscription Lane fits.
 
@@ -39,7 +41,7 @@ A Task is accepted when you have read its diff. Outcome `unverified` means Maest
 
 Read `report.md`, then answer once: `maestro resume <run> --task <n> --lane <family[:effort]>`, `--brief <corrected file>`, or `--skip`. A Relay is a Lane's permission prompt: in Solo it wakes you; outside Solo, `maestro wait` and `maestro status` print the `relay` event. Answer with `maestro answer <task> allow|deny --relay <id>`, with the id from that event.
 
-Claude and Antigravity edit Lanes relay commands outside the allow list on both the one-shot path and the tab path. Read Lanes, Grok Lanes, and Codex Lanes do not relay. An open Relay pauses the Idle limit and the Wall limit. An unanswered Relay is denied after 10 minutes and the Lane continues.
+Claude and Antigravity edit Lanes relay commands outside the allow list. Read Lanes, Grok Lanes, and Codex Lanes do not relay. An open Relay pauses the Idle limit and the Wall limit. An unanswered Relay is denied after 10 minutes and the Lane continues.
 
 ## Facts
 

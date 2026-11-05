@@ -220,7 +220,7 @@ func TestGrokThoughtChunksGiveOneDenial(t *testing.T) {
 	}
 }
 
-func TestGrokOneShotStreamsAndTabArgumentsStayTheSame(t *testing.T) {
+func TestGrokOneShotStreamArguments(t *testing.T) {
 	g := &Grok{bin: "/bin/grok"}
 	for _, access := range []string{"read", "edit"} {
 		t.Run(access, func(t *testing.T) {
@@ -233,15 +233,6 @@ func TestGrokOneShotStreamsAndTabArgumentsStayTheSame(t *testing.T) {
 			if !reflect.DeepEqual(command.Cmd.Args, want) {
 				t.Fatalf("one-shot args %q, want %q", command.Cmd.Args, want)
 			}
-			launch.Pointer = "read the Brief"
-			command, err = g.BuildTab(launch)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want = []string{g.bin, launch.Pointer, "--model", launch.Model, "--no-subagents", "--cwd", launch.Root, "--trust", "--reasoning-effort", launch.Effort, "--sandbox", "workspace", "--permission-mode", "bypassPermissions"}
-			if !reflect.DeepEqual(command.Cmd.Args, want) {
-				t.Fatalf("tab args %q, want %q", command.Cmd.Args, want)
-			}
 		})
 	}
 }
@@ -253,32 +244,23 @@ func TestAgyParserFixture(t *testing.T) {
 	}
 }
 
-func TestClaudeReadShapeIsolatesSettingsAndSoloTools(t *testing.T) {
+func TestClaudeReadShapeIsolatesSettings(t *testing.T) {
 	c := &Claude{bin: "/bin/claude"}
-	command, err := c.Build(Launch{Access: "read", Root: "/project", RunFolder: "/project/report", InSolo: true})
+	command, err := c.Build(Launch{Access: "read", Root: "/project", RunFolder: "/project/report"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	required := map[string]bool{"mcp__solo__whoami": false, "mcp__solo__get_process_status": false, "mcp__solo__get_process_output": false, "mcp__solo__todo_comment_create": false}
 	isolated := false
 	for i, arg := range command.Cmd.Args {
 		if arg == "--setting-sources" && i+1 < len(command.Cmd.Args) && command.Cmd.Args[i+1] == "" {
 			isolated = true
 		}
 		if strings.HasPrefix(arg, "mcp__solo__") {
-			if _, ok := required[arg]; !ok {
-				t.Fatalf("unexpected Solo tool: %s", arg)
-			}
-			required[arg] = true
+			t.Fatalf("unexpected Solo tool: %s", arg)
 		}
 	}
 	if !isolated || c.Enforcement("read") != Enforced {
 		t.Fatal("read shape not isolated")
-	}
-	for name, found := range required {
-		if !found {
-			t.Fatalf("missing %s", name)
-		}
 	}
 }
 
@@ -304,31 +286,29 @@ func TestEveryHarnessEnforcesBothShapes(t *testing.T) {
 
 func TestGrokShapesRunAlwaysApproveUnderTheHook(t *testing.T) {
 	g := &Grok{bin: "/bin/grok"}
-	for i, build := range []func(Launch) (*Command, error){g.Build, g.BuildTab} {
-		// Grok has no prompt-free deny-by-default mode, so the Maestro hook is
-		// the policy and the mode is always-approve; no allow or deny rule is passed.
-		command, err := build(Launch{Access: "read", Root: "/project", RunFolder: "/project/run", Dirs: []string{"/elsewhere"}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		flags := strings.Join(command.Flags, " ")
-		if flags != "--sandbox workspace --permission-mode bypassPermissions" || command.ReportByText != (i == 0) {
-			t.Fatal(command.Flags, command.ReportByText)
-		}
-		trusted := false
-		for _, arg := range command.Cmd.Args {
-			if arg == "--trust" {
-				trusted = true
-			}
-		}
-		if trusted != (i == 1) {
-			t.Fatalf("--trust must be passed only to a tab: %q", command.Cmd.Args)
-		}
-		if g.Enforcement("read") != Enforced || command.Enforcement != Enforced {
-			t.Fatal("read must be enforced")
+	// Grok has no prompt-free deny-by-default mode, so the Maestro hook is
+	// the policy and the mode is always-approve; no allow or deny rule is passed.
+	command, err := g.Build(Launch{Access: "read", Root: "/project", RunFolder: "/project/run", Dirs: []string{"/elsewhere"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags := strings.Join(command.Flags, " ")
+	if flags != "--sandbox workspace --permission-mode bypassPermissions" || !command.ReportByText {
+		t.Fatal(command.Flags, command.ReportByText)
+	}
+	trusted := false
+	for _, arg := range command.Cmd.Args {
+		if arg == "--trust" {
+			trusted = true
 		}
 	}
-	command, err := g.Build(Launch{Access: "edit", Root: "/project", RunFolder: "/project/.agents/maestro/runs/r-1/t1", Dirs: []string{"/project/vendor"}, AllowedCommands: []string{"go test ./..."}, AllowCommit: true})
+	if trusted {
+		t.Fatalf("--trust must not be passed to a Lane: %q", command.Cmd.Args)
+	}
+	if g.Enforcement("read") != Enforced || command.Enforcement != Enforced {
+		t.Fatal("read must be enforced")
+	}
+	command, err = g.Build(Launch{Access: "edit", Root: "/project", RunFolder: "/project/.agents/maestro/runs/r-1/t1", Dirs: []string{"/project/vendor"}, AllowedCommands: []string{"go test ./..."}, AllowCommit: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,8 +355,7 @@ func TestEnvAlwaysStripsJevKey(t *testing.T) {
 	}
 }
 
-// A host outside the allowlist is denied without a prompt in every Claude Lane,
-// so a tab never waits on the sandbox's network dialog.
+// A host outside the allowlist is denied without a prompt in every Claude Lane.
 func TestClaudeShapesDenyNetworkWithoutAPrompt(t *testing.T) {
 	c := &Claude{bin: "/bin/claude"}
 	for _, access := range []string{"read", "edit"} {

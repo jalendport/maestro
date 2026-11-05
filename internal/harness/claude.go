@@ -60,21 +60,10 @@ var readTools = []string{
 }
 
 func (c *Claude) Build(l Launch) (*Command, error) {
-	return c.build(l, false)
-}
-
-func (c *Claude) BuildTab(l Launch) (*Command, error) {
-	return c.build(l, true)
-}
-
-func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 	if c.bin == "" {
 		return nil, fmt.Errorf("claude is not installed")
 	}
 	args := []string{"-p", "--model", l.Model, "--output-format", "stream-json", "--verbose", "--permission-prompts", "none"}
-	if tab {
-		args = []string{l.Pointer, "--model", l.Model}
-	}
 	if l.Effort != "" {
 		args = append(args, "--effort", l.Effort)
 	}
@@ -83,9 +72,6 @@ func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 	case "read":
 		tools := append([]string{}, readTools...)
 		tools = append(tools, fmt.Sprintf("Write(//%s/**)", l.RunFolder), fmt.Sprintf("Edit(//%s/**)", l.RunFolder))
-		if l.InSolo {
-			tools = append(tools, "mcp__solo__whoami", "mcp__solo__get_process_status", "mcp__solo__get_process_output", "mcp__solo__todo_comment_create")
-		}
 		flags = append(flags, "--setting-sources", "", "--permission-mode", "dontAsk", "--allowedTools")
 		flags = append(flags, tools...)
 	case "edit":
@@ -100,9 +86,6 @@ func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 		}
 		if l.AllowCommit {
 			tools = append(tools, "Bash(git add *)", "Bash(git commit *)")
-		}
-		if l.InSolo {
-			tools = append(tools, "mcp__solo__*")
 		}
 		// The user's own settings could widen the allowlist with write-capable
 		// commands, so the edit shape ignores them like the read shape does.
@@ -162,7 +145,7 @@ func (c *Claude) build(l Launch, tab bool) (*Command, error) {
 		cmd.Dir = l.RunFolder
 	}
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Enforcement: enforcement, Flags: flags, PromptStdin: !tab}, nil
+	return &Command{Cmd: cmd, Enforcement: enforcement, Flags: flags, PromptStdin: true}, nil
 }
 
 func (c *Claude) NewParser() Parser { return &claudeParser{out: &Outcome{}} }
@@ -170,6 +153,36 @@ func (c *Claude) NewParser() Parser { return &claudeParser{out: &Outcome{}} }
 type claudeParser struct{ out *Outcome }
 
 func (p *claudeParser) Outcome() *Outcome { return p.out }
+
+func (p *claudeParser) Readable(line []byte) []string {
+	var ev struct {
+		Type    string `json:"type"`
+		Message struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+				Name string `json:"name"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(line, &ev) != nil || ev.Type != "assistant" {
+		return nil
+	}
+	var lines []string
+	for _, block := range ev.Message.Content {
+		switch block.Type {
+		case "text":
+			if block.Text != "" {
+				lines = append(lines, block.Text)
+			}
+		case "tool_use":
+			if block.Name != "" {
+				lines = append(lines, "tool: "+block.Name)
+			}
+		}
+	}
+	return lines
+}
 
 func (p *claudeParser) Line(line []byte) bool {
 	var ev struct {

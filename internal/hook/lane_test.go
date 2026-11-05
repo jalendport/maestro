@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jalendport/maestro/internal/brief"
+	"github.com/jalendport/maestro/internal/harness"
 )
 
 func TestParseAntigravityCwdAndArgs(t *testing.T) {
@@ -52,8 +53,8 @@ func TestLoadLane(t *testing.T) {
 			t.Fatalf("invalid Lane %q: %+v, %v", body, lane, ok)
 		}
 	}
-	want := &Lane{Task: "abcd", Harness: "agy", Access: "edit", Root: "/project", Dirs: []string{"/extra"}, RunFolder: "/run", Allow: []string{"Bash(go run *)"}, Checks: []string{"go test ./..."}, Commit: true, Tab: true}
-	body := `{"task":"abcd","harness":"agy","access":"edit","root":"/project","dirs":["/extra"],"run_folder":"/run","allow":["Bash(go run *)"],"checks":["go test ./..."],"commit":true,"tab":true}`
+	want := &Lane{Task: "abcd", Harness: "agy", Access: "edit", Root: "/project", Dirs: []string{"/extra"}, RunFolder: "/run", Allow: []string{"Bash(go run *)"}, Checks: []string{"go test ./..."}, Commit: true}
+	body := `{"task":"abcd","harness":"agy","access":"edit","root":"/project","dirs":["/extra"],"run_folder":"/run","allow":["Bash(go run *)"],"checks":["go test ./..."],"commit":true}`
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -144,46 +145,44 @@ func TestDecideLaneReadOnlyCommands(t *testing.T) {
 
 func TestDecideLaneCommandPermissions(t *testing.T) {
 	for _, access := range []string{"read", "edit"} {
-		for _, tab := range []bool{false, true} {
-			lane := &Lane{Access: access, Root: "/project", Tab: tab, Checks: []string{"go test ./..."}, Allow: []string{"Bash(go run *)", "Bash(make build)", "Write(*)", "Bash", "Bash()"}}
-			for _, tc := range []struct {
-				command string
-				edit    bool
-			}{
-				{"go test ./...", true},
-				{"go test ./... -race", true},
-				{"go test ./...other", false},
-				{"go run main.go", true},
-				{"go runner main.go", false},
-				{"go run", false},
-				{"make build", true},
-				{"make build extra", false},
-				{"rm file.go", false},
-				{"ls-other", false},
-				{"git", false},
-				{"", false},
-			} {
-				want := "deny"
+		lane := &Lane{Access: access, Root: "/project", Checks: []string{"go test ./..."}, Allow: []string{"Bash(go run *)", "Bash(make build)", "Write(*)", "Bash", "Bash()"}}
+		for _, tc := range []struct {
+			command string
+			edit    bool
+		}{
+			{"go test ./...", true},
+			{"go test ./... -race", true},
+			{"go test ./...other", false},
+			{"go run main.go", true},
+			{"go runner main.go", false},
+			{"go run", false},
+			{"make build", true},
+			{"make build extra", false},
+			{"rm file.go", false},
+			{"ls-other", false},
+			{"git", false},
+			{"", false},
+		} {
+			want := "deny"
+			if access == "edit" {
+				if tc.edit {
+					want = "auto_approve"
+				} else {
+					want = "relay"
+				}
+			}
+			call := &Call{Harness: "agy", Tool: "run_command", Input: map[string]any{"CommandLine": tc.command}}
+			got := DecideLane(call, lane)
+			if got.Kind != want {
+				t.Fatalf("%s command=%q: %+v, want %s", access, tc.command, got, want)
+			}
+			if want == "deny" {
+				reason := "read Lane: command not on the read-only list"
 				if access == "edit" {
-					if tc.edit {
-						want = "auto_approve"
-					} else {
-						want = "relay"
-					}
+					reason = "outside the Lane's allow list; add it to `checks` or the project `allow` list"
 				}
-				call := &Call{Harness: "agy", Tool: "run_command", Input: map[string]any{"CommandLine": tc.command}}
-				got := DecideLane(call, lane)
-				if got.Kind != want {
-					t.Fatalf("%s tab=%v command=%q: %+v, want %s", access, tab, tc.command, got, want)
-				}
-				if want == "deny" {
-					reason := "read Lane: command not on the read-only list"
-					if access == "edit" {
-						reason = "outside the Lane's allow list; add it to `checks` or the project `allow` list"
-					}
-					if got.Reason != reason {
-						t.Fatalf("denial: %+v, want %s", got, reason)
-					}
+				if got.Reason != reason {
+					t.Fatalf("denial: %+v, want %s", got, reason)
 				}
 			}
 		}
@@ -277,6 +276,92 @@ func TestFindLaneFolder(t *testing.T) {
 			got, ok, err := FindLaneFolder(&Call{Harness: tc.harness, TranscriptPath: transcript})
 			if err != nil || got != tc.want || ok != (tc.want != "") {
 				t.Fatalf("folder = %q, %v, %v; want %q", got, ok, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestFindOneShotLaneForEachHarness(t *testing.T) {
+	for _, name := range []string{"claude", "codex", "grok", "agy"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			folder := filepath.Join(root, ".agents", "maestro", "runs", "r-test", "abcd")
+			if err := os.MkdirAll(folder, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			reg := harness.New(map[string]string{name: "/bin/" + name})
+			h, _ := reg.Get(name)
+			command, err := h.Build(harness.Launch{
+				Access: "read", Root: root, RunFolder: folder, ReportPath: filepath.Join(folder, "result.md"),
+				Pointer: brief.Pointer(filepath.Join(folder, "brief.md")),
+				Env:     []string{"MAESTRO_TASK_FOLDER=" + folder},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, arg := range command.Cmd.Args {
+				if arg == "--trust" || arg == "--prompt-interactive" || strings.Contains(arg, "trust_level") {
+					t.Fatalf("interactive launch argument: %s", arg)
+				}
+			}
+			envFolder := ""
+			for _, kv := range command.Cmd.Env {
+				if value, ok := strings.CutPrefix(kv, "MAESTRO_TASK_FOLDER="); ok {
+					envFolder = value
+				}
+			}
+			if envFolder != folder {
+				t.Fatalf("one-shot environment has no Lane folder: %q", command.Cmd.Env)
+			}
+			if name == "claude" {
+				var settings struct {
+					Env map[string]string `json:"env"`
+				}
+				for i, arg := range command.Cmd.Args {
+					if arg == "--settings" {
+						if err := json.Unmarshal([]byte(command.Cmd.Args[i+1]), &settings); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				envFolder = settings.Env["MAESTRO_TASK_FOLDER"]
+				if envFolder != folder {
+					t.Fatal("Claude settings have no Lane folder")
+				}
+			}
+			transcript := ""
+			if name == "grok" {
+				// A Grok hook can run without the parent Lane environment.
+				// Its payload still names the one-shot session transcript.
+				envFolder = ""
+				transcript = filepath.Join(t.TempDir(), "updates.jsonl")
+				pointer, err := os.ReadFile(filepath.Join(folder, "pointer.txt"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(transcript, []byte(grokChunk(t, 0, string(pointer))), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("MAESTRO_TASK_FOLDER", envFolder)
+			payload := map[string]any{"cwd": root, "transcript_path": transcript}
+			if name == "grok" || name == "agy" {
+				payload = map[string]any{"cwd": root, "transcriptPath": transcript}
+				if name == "agy" {
+					payload["toolCall"] = map[string]any{"name": "view_file", "args": map[string]any{}}
+				}
+			}
+			body, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			call, err := Parse(name, body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, found, err := FindLaneFolder(call)
+			if err != nil || !found || got != folder {
+				t.Fatalf("one-shot Lane folder = %q, %v, %v; want %q", got, found, err, folder)
 			}
 		})
 	}
@@ -558,7 +643,7 @@ func TestDecideLaneUnsafeShell(t *testing.T) {
 		{"echo x 2> file", "2>"}, {"echo x &> file", "&>"}, {"echo x 2>&1 > file", ">"},
 	} {
 		for _, access := range []string{"read", "edit"} {
-			lane := &Lane{Access: access, Root: "/project", Tab: true, Allow: []string{"Bash(echo *)", "Bash(cat *)", "Bash(pwd *)"}}
+			lane := &Lane{Access: access, Root: "/project", Allow: []string{"Bash(echo *)", "Bash(cat *)", "Bash(pwd *)"}}
 			got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": tc.command}}, lane)
 			if got.Kind != "deny" || !strings.Contains(got.Reason, tc.reason) {
 				t.Fatalf("%s %q = %+v, want deny naming %q", access, tc.command, got, tc.reason)
@@ -587,7 +672,7 @@ func TestDecideLaneReadOnlyWriteFlags(t *testing.T) {
 		for _, flag := range flags {
 			for _, access := range []string{"read", "edit"} {
 				line := "pwd && " + command + " " + flag
-				lane := &Lane{Access: access, Root: "/project", Tab: true, Checks: []string{command}}
+				lane := &Lane{Access: access, Root: "/project", Checks: []string{command}}
 				if got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": line}}, lane); got.Kind != "deny" || !strings.Contains(got.Reason, strings.Trim(flag, "'\"")) {
 					t.Fatalf("%s %q = %+v", access, line, got)
 				}
@@ -615,7 +700,7 @@ func TestDecideLaneLongWriteFlagPrefixes(t *testing.T) {
 				for _, suffix := range []string{"", "=value"} {
 					command := name + " " + option + suffix
 					for _, access := range []string{"read", "edit"} {
-						lane := &Lane{Access: access, Root: "/project", Tab: true, Checks: []string{name}}
+						lane := &Lane{Access: access, Root: "/project", Checks: []string{name}}
 						got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": command}}, lane)
 						if got.Kind != "deny" || !strings.Contains(got.Reason, option) {
 							t.Fatalf("%s %q = %+v", access, command, got)
@@ -644,7 +729,7 @@ func TestDecideLaneReadOnlyCommandForms(t *testing.T) {
 		{"git branch -- new", "new"},
 	} {
 		for _, access := range []string{"read", "edit"} {
-			lane := &Lane{Access: access, Root: "/project", Tab: true, Checks: []string{"uniq", "git branch"}}
+			lane := &Lane{Access: access, Root: "/project", Checks: []string{"uniq", "git branch"}}
 			got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": tc.command}}, lane)
 			if got.Kind != "deny" || !strings.Contains(got.Reason, tc.reason) {
 				t.Fatalf("%s %q = %+v, want deny naming %q", access, tc.command, got, tc.reason)
@@ -688,7 +773,7 @@ func TestDecideLaneReadOnlyShellExpansion(t *testing.T) {
 		{"cat README.md(e:'touch x':)", "("},
 	} {
 		for _, access := range []string{"read", "edit"} {
-			got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": tc.command}}, &Lane{Access: access, Root: "/project", Tab: true})
+			got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": tc.command}}, &Lane{Access: access, Root: "/project"})
 			if got.Kind != "deny" || !strings.Contains(got.Reason, tc.reason) {
 				t.Fatalf("%s %q = %+v, want deny naming %q", access, tc.command, got, tc.reason)
 			}
@@ -808,22 +893,20 @@ func TestDecideLaneSymlinkBeforeParent(t *testing.T) {
 	}
 }
 
-func TestDecideLaneRelayByHarnessAccessAndLaunch(t *testing.T) {
+func TestDecideLaneRelayByHarnessAndAccess(t *testing.T) {
 	for _, harness := range []string{"claude", "agy", "grok", "codex"} {
 		for _, access := range []string{"read", "edit"} {
-			for _, tab := range []bool{false, true} {
-				t.Run(harness+"/"+access+"/tab="+strconv.FormatBool(tab), func(t *testing.T) {
-					call := &Call{Harness: harness, Tool: "Bash", CWD: "/project", Input: map[string]any{"command": "go build ./..."}}
-					got := DecideLane(call, &Lane{Harness: harness, Access: access, Root: "/project", Tab: tab})
-					want := "deny"
-					if access == "edit" && (harness == "claude" || harness == "agy") {
-						want = "relay"
-					}
-					if got.Kind != want || want == "deny" && got.Reason == "" {
-						t.Fatalf("verdict = %+v, want %s", got, want)
-					}
-				})
-			}
+			t.Run(harness+"/"+access, func(t *testing.T) {
+				call := &Call{Harness: harness, Tool: "Bash", CWD: "/project", Input: map[string]any{"command": "go build ./..."}}
+				got := DecideLane(call, &Lane{Harness: harness, Access: access, Root: "/project"})
+				want := "deny"
+				if access == "edit" && (harness == "claude" || harness == "agy") {
+					want = "relay"
+				}
+				if got.Kind != want || want == "deny" && got.Reason == "" {
+					t.Fatalf("verdict = %+v, want %s", got, want)
+				}
+			})
 		}
 	}
 }
@@ -872,7 +955,7 @@ func TestDecideLaneCommandCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, access := range []string{"read", "edit"} {
-		lane := &Lane{Access: access, Root: root, Dirs: []string{extra}, RunFolder: run, Tab: true}
+		lane := &Lane{Access: access, Root: root, Dirs: []string{extra}, RunFolder: run}
 		for _, cwd := range []string{root, extra, run, outside, link} {
 			got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": "pwd", "Cwd": cwd}}, lane)
 			want := "auto_approve"

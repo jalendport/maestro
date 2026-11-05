@@ -29,7 +29,7 @@ func TestTaskKeepsSoloTodoAfterEscalationAndCompletesUnverified(t *testing.T) {
 	}
 	t.Setenv("MAESTRO_TEST_BINARY", bin)
 	helper := filepath.Join(t.TempDir(), "solo-helper")
-	if err := os.WriteFile(helper, []byte("#!/bin/sh\nexec \"$MAESTRO_TEST_BINARY\" -test.run=TestSoloTabHelper\n"), 0o755); err != nil {
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nexec \"$MAESTRO_TEST_BINARY\" -test.run=TestSoloHelper\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("MAESTRO_SOLO_MCP", helper)
@@ -98,7 +98,7 @@ func TestTaskKeepsSoloTodoAfterEscalationAndCompletesUnverified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]int{"todo_create": 1, "todo_complete": 1, "todo_comment_create": 2} {
+	for name, want := range map[string]int{"todo_create": 1, "todo_complete": 1, "todo_comment_create": 2, "spawn_agent": 0} {
 		if got := strings.Count(string(calls), `"name":"`+name+`"`); got != want {
 			t.Fatalf("%s count = %d, want %d: %s", name, got, want, calls)
 		}

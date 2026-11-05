@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,6 +19,62 @@ import (
 	"github.com/jalendport/maestro/internal/solo"
 )
 
+func TestSoloHelper(t *testing.T) {
+	if os.Getenv("MAESTRO_TEST_SOLO_HELPER") != "1" {
+		return
+	}
+	calls, err := os.Create(os.Getenv("MAESTRO_TEST_CALLS"))
+	if err != nil {
+		panic(err)
+	}
+	defer calls.Close()
+	sc := bufio.NewScanner(os.Stdin)
+	for sc.Scan() {
+		var req struct {
+			ID     int
+			Method string
+			Params struct {
+				Name      string
+				Arguments struct {
+					TodoID int `json:"todo_id"`
+				}
+			}
+		}
+		if err := json.Unmarshal(sc.Bytes(), &req); err != nil {
+			panic(err)
+		}
+		if req.ID == 0 {
+			continue
+		}
+		var result any = map[string]any{}
+		if req.Method == "tools/call" {
+			if _, err := calls.Write(append(sc.Bytes(), '\n')); err != nil {
+				panic(err)
+			}
+			body := `{}`
+			if req.Params.Name == os.Getenv("MAESTRO_TEST_SOLO_DELAY_CALL") {
+				if delay, err := time.ParseDuration(os.Getenv("MAESTRO_TEST_SOLO_DELAY")); err == nil {
+					time.Sleep(delay)
+				}
+			}
+			switch req.Params.Name {
+			case "spawn_process":
+				body = `{"process_id":8}`
+			case "todo_create":
+				body = `{"todo_id":7}`
+			case "todo_get":
+				body = fmt.Sprintf(`{"todo":{"id":%d}}`, req.Params.Arguments.TodoID)
+			}
+			result = map[string]any{"isError": (req.Params.Name == "todo_get" && req.Params.Arguments.TodoID == 999) || req.Params.Name == os.Getenv("MAESTRO_TEST_SOLO_FAIL"),
+				"content": []any{map[string]any{"type": "text", "text": body}}}
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result}); err != nil {
+			panic(err)
+		}
+	}
+	os.Exit(0)
+}
+
 func deferredSoloClient(t *testing.T) (*solo.Client, string) {
 	t.Helper()
 	t.Setenv("MAESTRO_TEST_SOLO_HELPER", "1")
@@ -29,7 +86,7 @@ func deferredSoloClient(t *testing.T) (*solo.Client, string) {
 	}
 	t.Setenv("MAESTRO_TEST_BINARY", bin)
 	helper := filepath.Join(t.TempDir(), "solo-helper")
-	if err := os.WriteFile(helper, []byte("#!/bin/sh\nexec \"$MAESTRO_TEST_BINARY\" -test.run=TestSoloTabHelper\n"), 0o755); err != nil {
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nexec \"$MAESTRO_TEST_BINARY\" -test.run=TestSoloHelper\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("MAESTRO_SOLO_MCP", helper)
@@ -74,7 +131,6 @@ func TestDispatchAdoptsNamedSoloTodo(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			task.InSolo = false
 			rec, err := Execute(env, task)
 			if err != nil || rec.Outcome.Outcome != OutcomeAnswered {
 				t.Fatalf("record=%+v err=%v", rec, err)
@@ -91,7 +147,7 @@ func TestDispatchAdoptsNamedSoloTodo(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for name, want := range map[string]int{"todo_get": 1, "todo_create": wantCreates, "todo_comment_create": 1, "todo_complete": 1} {
+			for name, want := range map[string]int{"todo_get": 1, "todo_create": wantCreates, "todo_comment_create": 1, "todo_complete": 1, "spawn_agent": 0} {
 				if got := strings.Count(string(calls), `"name":"`+name+`"`); got != want {
 					t.Fatalf("%s count=%d want=%d: %s", name, got, want, calls)
 				}

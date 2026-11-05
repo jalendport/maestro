@@ -32,10 +32,7 @@ func TestCouncilSoloHelper(t *testing.T) {
 			ID     int    `json:"id"`
 			Method string `json:"method"`
 			Params struct {
-				Name      string `json:"name"`
-				Arguments struct {
-					ExtraArgs []string `json:"extra_args"`
-				} `json:"arguments"`
+				Name string `json:"name"`
 			} `json:"params"`
 		}
 		if err := json.Unmarshal(sc.Bytes(), &req); err != nil {
@@ -53,21 +50,6 @@ func TestCouncilSoloHelper(t *testing.T) {
 			switch req.Params.Name {
 			case "todo_create":
 				text = `{"todo_id":7}`
-			case "spawn_agent":
-				pointer := strings.Join(req.Params.Arguments.ExtraArgs, " ")
-				parts := strings.Split(pointer, "`")
-				if len(parts) < 2 {
-					panic(pointer)
-				}
-				path := filepath.Join(filepath.Dir(parts[1]), dispatch.FileReport)
-				if err := os.WriteFile(path, []byte("## Answer\nPASS\n\n## Findings\n- none\n\n## Concerns\n- none\n\nPOSITION: confirmed\n"), 0o644); err != nil {
-					panic(err)
-				}
-				text = `{"process_id":42}`
-			case "get_process_status":
-				text = `{"status":"Exited","uptime_seconds":100}`
-			case "get_process_output":
-				text = `{"output":"Council Seat finished"}`
 			}
 			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}}
 		}
@@ -107,11 +89,15 @@ func TestCouncilSoloTodoAndMerge(t *testing.T) {
 			}
 			r := roster.Merge(d, &config.File{})
 			r.Router.Backend = "rules"
-			r.Harness["codex"] = config.Harness{SoloTool: 9}
+			r.Harness["codex"] = config.Harness{}
 			off := false
 			r.Failure.KeepAwake = &off
+			lane := filepath.Join(t.TempDir(), "codex")
+			if err := os.WriteFile(lane, []byte("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' \"$@\" > \"$MAESTRO_TASK_FOLDER/args\"\nprintf '## Answer\\nPASS\\n\\n## Findings\\n- none\\n\\n## Concerns\\n- none\\n\\nPOSITION: confirmed\\n' > \"$MAESTRO_TASK_FOLDER/result.md\"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
 			env := &dispatch.Env{Root: t.TempDir(), Roster: r, Solo: &dispatch.SoloLink{Client: client, ProjectID: 1},
-				Reg:  harness.New(map[string]string{"codex": "/must-not-run-one-shot"}),
+				Reg:  harness.New(map[string]string{"codex": lane}),
 				Disc: &discovery.Cache{RefreshedAt: time.Now(), Harness: map[string]discovery.Record{"codex": {Path: "/bin/codex", Version: "0.162.0", Models: []harness.Model{{ID: "gpt-6.1-sol"}, {ID: "gpt-6-astra"}}}}}}
 			opts := Opts{Question: "Review the result", Lanes: []string{"codex-sol:high", "codex-astra:high"}, Level: roster.LevelSignificant}
 			if taskCouncil {
@@ -141,6 +127,20 @@ func TestCouncilSoloTodoAndMerge(t *testing.T) {
 			}
 			if c.State != "finished" {
 				t.Fatalf("state = %s", c.State)
+			}
+			for _, seat := range c.Seats {
+				if len(seat.Rounds) != 1 || seat.Rounds[0].Status != "ok" || seat.Rounds[0].Position != "confirmed" {
+					t.Fatalf("Seat did not answer: %+v", seat)
+				}
+				folder := filepath.Join(c.Path, seat.Family)
+				rec, err := dispatch.LoadRecord(folder)
+				if err != nil || rec.SoloProcess != 0 || !rec.Outcome.ReportByText {
+					t.Fatalf("Seat one-shot record: %+v, %v", rec, err)
+				}
+				args, err := os.ReadFile(filepath.Join(folder, "args"))
+				if err != nil || !strings.HasPrefix(string(args), "exec\n--json\n") || !strings.Contains(string(args), "-s\nread-only\n-o\n") {
+					t.Fatalf("Seat one-shot arguments: %s, %v", args, err)
+				}
 			}
 			if _, err := Start(env, c.Path); err != nil {
 				t.Fatal(err)
@@ -172,7 +172,7 @@ func TestCouncilSoloTodoAndMerge(t *testing.T) {
 			if taskCouncil {
 				wantCreate, wantComplete = 0, 0
 			}
-			if counts["todo_create"] != wantCreate || counts["todo_complete"] != wantComplete || counts["todo_comment_create"] != 1 {
+			if counts["todo_create"] != wantCreate || counts["todo_complete"] != wantComplete || counts["todo_comment_create"] != 1 || counts["spawn_agent"] != 0 {
 				t.Fatalf("calls = %v", counts)
 			}
 		})

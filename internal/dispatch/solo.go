@@ -5,16 +5,100 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
-	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/solo"
 	"github.com/jalendport/maestro/internal/ui"
 )
 
+// OpenView starts the View without a wait. The returned function sends the
+// Dispatch outcome so close_tabs also applies to a View that opens late.
+func (l *SoloLink) OpenView(env *Env, t *Task) func(*Record) {
+	if l == nil {
+		return func(*Record) {}
+	}
+	opened := make(chan int, 1)
+	ended := make(chan string, 1)
+	task := *t
+	l.views.Add(1)
+	go func() {
+		defer l.views.Done()
+		pid := l.openView(&task)
+		opened <- pid
+		outcome := <-ended
+		l.CloseView(env, &Record{SoloProcess: pid, Outcome: Outcome{Outcome: outcome}})
+	}()
+	return func(rec *Record) {
+		select {
+		case rec.SoloProcess = <-opened:
+			_ = rec.Save()
+		default:
+		}
+		ended <- rec.Outcome.Outcome
+	}
+}
+
+func (l *SoloLink) openView(t *Task) int {
+	self, err := os.Executable()
+	if err != nil {
+		ui.Warnf("solo view: %v", err)
+		return 0
+	}
+	name := t.Tab
+	if name == "" {
+		words := strings.Fields(t.Title)
+		name = "task"
+		if len(words) > 0 {
+			name = words[0]
+			if len(name) > brief.TabMax {
+				name = name[:brief.TabMax]
+			}
+			for _, word := range words[1:] {
+				if len(name)+1+len(word) > brief.TabMax {
+					break
+				}
+				name += " " + word
+			}
+		}
+	}
+	pid, err := l.Client.OpenTerminal(l.ProjectID, name+" · "+t.Route.FamilyID)
+	if err != nil {
+		ui.Warnf("solo view: %v", err)
+		return 0
+	}
+	command := shellQuote(self) + " watch " + shellQuote(t.Folder)
+	if err := l.Client.StartView(pid, command); err != nil {
+		ui.Warnf("solo view: %v", err)
+	}
+	return pid
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+// CloseView applies close_tabs after the Dispatch ends.
+func (l *SoloLink) CloseView(env *Env, rec *Record) {
+	if l == nil || rec.SoloProcess == 0 {
+		return
+	}
+	switch env.Roster.Concurrency.CloseTabs {
+	case "never":
+		return
+	case "always":
+	default:
+		if rec.Outcome.Outcome != OutcomeVerified && rec.Outcome.Outcome != OutcomeAnswered && rec.Outcome.Outcome != OutcomeUnverified {
+			return
+		}
+	}
+	_ = l.Client.CloseProcess(rec.SoloProcess)
+}
+
 // SoloLink is Maestro's open session to Solo, nil outside Solo.
 type SoloLink struct {
+	views     sync.WaitGroup
 	Client    *solo.Client
 	ProjectID int
 	// Orchestrator is the agent process that gets wake-up timers.
@@ -138,206 +222,6 @@ func (l *SoloLink) Wake(kind, id, title, harnessName, relayID string) {
 	}
 }
 
-// TabLane runs a Lane as an interactive Solo tab: spawn the preset with the
-// Lane flags and Pointer, poll for result.md, and relay prompts. It returns the Outcome the parser would have.
-func (l *SoloLink) TabLane(env *Env, t *Task, h harness.Harness, command *harness.Command, rec *Record, idle, wall time.Duration) (out *harness.Outcome, timer string, err error) {
-	toolID := l.toolID(env, h.Name())
-	if toolID == 0 {
-		return nil, "", fmt.Errorf("no Solo agent tool for %s (set [harness.%s] solo_tool)", h.Name(), h.Name())
-	}
-	args := tabArgs(command)
-	name := fmt.Sprintf("%s · %s", tabName(t), t.Route.FamilyID)
-	launched := time.Now()
-	pid, err := l.Client.Spawn(l.ProjectID, toolID, name, args)
-	if err != nil {
-		return nil, "", err
-	}
-	rec.SoloProcess = pid
-	rec.Events = append(rec.Events, Event{At: launched, Kind: "tab", Text: fmt.Sprintf("solo process %d", pid)})
-	_ = rec.Save()
-	output := &tabOutput{}
-	defer func() {
-		l.saveTabLog(pid, t.Folder)
-		if out == nil {
-			out = &harness.Outcome{}
-		}
-		out.TabWorked = output.worked
-		if raw, err := os.ReadFile(filepath.Join(t.Folder, "tab.log")); err == nil {
-			out.Text = string(raw)
-			out.Signals = append(out.Signals, harness.ClassifyText(h.Name(), out.Text))
-		}
-	}()
-	start := time.Now()
-	lastOutput := time.Now()
-	relays := &relayTracker{}
-	nudged := false
-	var nudgedAt time.Time
-	statusErrors := 0
-	reportPath := filepath.Join(t.Folder, FileReport)
-	stop := func(reason string) {
-		l.saveTabLog(pid, t.Folder)
-		if st, err := l.Client.Status(pid); err == nil && !st.Running() {
-			rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "stop", Text: reason})
-			return
-		}
-		// Stop the Lane; CloseTab applies close_tabs after the Report is judged.
-		_ = l.Client.SendKeys(pid, []byte{3})
-		time.Sleep(time.Second)
-		_ = l.Client.SendKeys(pid, []byte{3})
-		time.Sleep(3 * time.Second)
-		rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "stop", Text: reason})
-	}
-	for {
-		wasOpen := relays.open()
-		relays.poll(env, t, rec, h.Name(), time.Now())
-		if wasOpen || relays.open() {
-			lastOutput = time.Now()
-		}
-		if reportStable(reportPath) {
-			// The file is written and the Lane is quiet: judge it.
-			if st, err := l.Client.Status(pid); err != nil || !st.Running() || st.IdleSeconds >= 5 {
-				break
-			}
-		}
-		select {
-		case <-t.Cancel:
-			stop("cancelled")
-			return nil, "cancelled", nil
-		default:
-		}
-		st, err := l.Client.Status(pid)
-		if tail, outputErr := l.Client.Output(pid, 40); outputErr == nil && output.observe(tail) {
-			lastOutput = time.Now()
-		}
-		if tabGone(err) {
-			// A closed tab is gone from Solo: three answers in a row say so.
-			if statusErrors++; statusErrors >= 3 {
-				rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "stop", Text: "tab closed: " + err.Error()})
-				break
-			}
-		} else {
-			statusErrors = 0
-		}
-		if err == nil && st.Status != "" && !st.Running() {
-			// The tab ended without a Report.
-			if st.Uptime < 30 {
-				stop("early exit")
-				return &harness.Outcome{ErrorText: "early exit"}, "", nil
-			}
-			break
-		}
-		// Solo's own idle reading is the primary signal; the output diff is the backup.
-		idleFor := time.Since(lastOutput)
-		if err == nil && st.IdleSeconds > 0 && time.Duration(st.IdleSeconds*float64(time.Second)) < idleFor {
-			idleFor = time.Duration(st.IdleSeconds * float64(time.Second))
-		}
-		if relays.open() {
-			time.Sleep(time.Second)
-			continue
-		}
-		if idle > 0 && idleFor > idle {
-			if !nudged {
-				// One nudge, then two more minutes; never a second Idle period.
-				nudged = true
-				nudgedAt = time.Now()
-				rec.Outcome.Nudged = true
-				_ = l.Client.SendInput(pid, "Write your report to `result.md` now, as the brief says.\n")
-				continue
-			}
-			if time.Since(nudgedAt) > 2*time.Minute {
-				stop("idle limit")
-				return nil, "idle", nil
-			}
-		}
-		// The Wall limit does not count time spent in a Relay.
-		if wall > 0 && time.Since(start)-relays.elapsed(time.Now()) > wall {
-			stop("wall limit")
-			return nil, "wall", nil
-		}
-		time.Sleep(5 * time.Second)
-	}
-	relays.poll(env, t, rec, h.Name(), time.Now())
-	select {
-	case <-t.Cancel:
-		stop("cancelled")
-		return nil, "cancelled", nil
-	default:
-	}
-	stop("report ready or tab ended")
-	return &harness.Outcome{}, "", nil
-}
-
-// tabGone reports a status answer that says Solo no longer has the process.
-// A timeout, a helper restart, or any other error says nothing about the tab.
-func tabGone(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "not found")
-}
-
-// tabOutput compares output without reading or interpreting prompt text.
-type tabOutput struct {
-	seen   bool
-	last   string
-	worked bool
-}
-
-func (o *tabOutput) observe(text string) bool {
-	if !o.seen {
-		if strings.TrimSpace(text) == "" {
-			return false
-		}
-		o.seen, o.last = true, text
-		return true
-	}
-	if text == o.last {
-		return false
-	}
-	o.last, o.worked = text, true
-	return true
-}
-
-// CloseTab applies close_tabs after the Dispatch is judged.
-func (l *SoloLink) CloseTab(env *Env, rec *Record) {
-	if l == nil || rec.SoloProcess == 0 {
-		return
-	}
-	switch env.Roster.Concurrency.CloseTabs {
-	case "never":
-		return
-	case "always":
-	default:
-		if rec.Outcome.Outcome != OutcomeVerified && rec.Outcome.Outcome != OutcomeAnswered && rec.Outcome.Outcome != OutcomeUnverified {
-			return
-		}
-	}
-	_ = l.Client.CloseProcess(rec.SoloProcess)
-}
-
-// tabArgs uses the Harness's interactive shape as Solo preset arguments.
-func tabArgs(command *harness.Command) []string {
-	return append([]string(nil), command.Cmd.Args[1:]...)
-}
-
-func (l *SoloLink) toolID(env *Env, harnessName string) int {
-	if id := env.Roster.Harness[harnessName].SoloTool; id != 0 {
-		return id
-	}
-	if env.Disc != nil {
-		return env.Disc.Harness[harnessName].SoloTool
-	}
-	return 0
-}
-
-func (l *SoloLink) saveTabLog(pid int, folder string) {
-	raw, err := l.Client.Output(pid, 200)
-	if err != nil {
-		ui.Warnf("tab output: %v", err)
-		return
-	}
-	if err := os.WriteFile(filepath.Join(folder, "tab.log"), []byte(raw), 0o644); err != nil {
-		ui.Warnf("tab log: %v", err)
-	}
-}
-
 // Only the Relay lock holder may consume a control folder's answer marker.
 func readAnswer(controlFolder, relayID string) string {
 	for _, ans := range []string{"allow", "deny"} {
@@ -363,48 +247,4 @@ func readAnswer(controlFolder, relayID string) string {
 		}
 	}
 	return ""
-}
-
-// tabName is the short name a Solo tab shows: the Brief's `tab` field, the
-// Orchestrator's own summary, when it has one.
-func tabName(t *Task) string {
-	if t.Tab != "" {
-		return t.Tab
-	}
-	return tabTitle(t.Title)
-}
-
-// tabTitle is the fallback when a Brief has no `tab`: the first words of the
-// title that fit in tabTitleMax characters, cut at a word boundary, so the
-// tab reads as "Pin Grok home · claude-opus" and not as a clipped slug.
-func tabTitle(s string) string {
-	words := strings.Fields(s)
-	if len(words) == 0 {
-		return "task"
-	}
-	out := words[0]
-	if len(out) > tabTitleMax {
-		return out[:tabTitleMax]
-	}
-	for _, w := range words[1:] {
-		if len(out)+1+len(w) > tabTitleMax {
-			break
-		}
-		out += " " + w
-	}
-	return out
-}
-
-// tabTitleMax leaves room for " · <family>" in Solo's sidebar.
-const tabTitleMax = brief.TabMax
-
-// reportStable reports a non-empty result.md whose size has not changed for 3 s.
-func reportStable(path string) bool {
-	st1, err := os.Stat(path)
-	if err != nil || st1.Size() == 0 {
-		return false
-	}
-	time.Sleep(3 * time.Second)
-	st2, err := os.Stat(path)
-	return err == nil && st2.Size() == st1.Size() && st2.ModTime().Equal(st1.ModTime())
 }

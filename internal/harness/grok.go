@@ -52,33 +52,22 @@ func (g *Grok) Enforcement(access string) string {
 
 // Build: the Pointer goes through --prompt-file (Grok reads no stdin prompt).
 func (g *Grok) Build(l Launch) (*Command, error) {
-	return g.build(l, false)
-}
-
-func (g *Grok) BuildTab(l Launch) (*Command, error) {
-	return g.build(l, true)
-}
-
-func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	if g.bin == "" {
 		return nil, fmt.Errorf("grok is not installed")
 	}
 	promptFile := filepath.Join(l.RunFolder, "pointer.txt")
-	if !tab && l.RunFolder != "" && l.Pointer != "" {
+	if l.RunFolder != "" && l.Pointer != "" {
 		if err := os.WriteFile(promptFile, []byte(l.Pointer+"\n"), 0o644); err != nil {
 			return nil, err
 		}
 	}
 	args := []string{"--prompt-file", promptFile, "--output-format", "streaming-json", "--no-subagents", "--model", l.Model}
-	if tab {
-		args = []string{l.Pointer, "--model", l.Model, "--no-subagents", "--cwd", l.Root, "--trust"}
-	}
 	if l.Effort != "" {
 		args = append(args, "--reasoning-effort", l.Effort)
 	}
 	// Grok has no mode that is prompt-free and deny-by-default: `dontAsk` is a
-	// Claude name Grok accepts but maps to `default`, which prompts in a tab,
-	// and headless mode runs with full tool access. So a Lane runs under
+	// Claude name Grok accepts but maps to `default`. Headless mode runs
+	// with full tool access. So a Lane runs under
 	// always-approve, and the Maestro hook is the policy: it runs before
 	// every call and denies what the Lane policy in lane.json does not allow
 	// (hooks and deny rules still apply in always-approve). The workspace
@@ -112,7 +101,7 @@ func (g *Grok) build(l Launch, tab bool) (*Command, error) {
 	if !sandboxed {
 		enforcement = BestEffort
 	}
-	return &Command{Cmd: cmd, Enforcement: enforcement, Flags: flags, PromptStdin: false, ReportByText: l.Access == "read" && !tab}, nil
+	return &Command{Cmd: cmd, Enforcement: enforcement, Flags: flags, PromptStdin: false, ReportByText: l.Access == "read"}, nil
 }
 
 // within reports whether path sits inside root, by path text alone.
@@ -138,9 +127,54 @@ type grokParser struct {
 	thought       strings.Builder
 	thoughtDenied bool
 	textBreak     bool
+	readableText  string
 }
 
 func (p *grokParser) Outcome() *Outcome { return p.out }
+
+func (p *grokParser) Readable(line []byte) []string {
+	flush := func() []string {
+		if p.readableText == "" {
+			return nil
+		}
+		lines := strings.Split(p.readableText, "\n")
+		p.readableText = ""
+		return lines
+	}
+	if len(line) == 0 {
+		return flush()
+	}
+	var ev struct {
+		Type string `json:"type"`
+		Data string `json:"data"`
+		Tool string `json:"toolName"`
+	}
+	if json.Unmarshal(line, &ev) != nil {
+		return nil
+	}
+	switch ev.Type {
+	case "text":
+		p.readableText += ev.Data
+		var lines []string
+		for {
+			line, rest, found := strings.Cut(p.readableText, "\n")
+			if !found {
+				return lines
+			}
+			lines = append(lines, line)
+			p.readableText = rest
+		}
+	case "tool_call":
+		lines := flush()
+		if ev.Tool != "" {
+			lines = append(lines, "tool: "+ev.Tool)
+		}
+		return lines
+	case "usage", "end", "error":
+		return flush()
+	}
+	return nil
+}
 
 func (p *grokParser) Line(line []byte) bool {
 	text := strings.TrimSpace(string(line))

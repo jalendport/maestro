@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -60,32 +59,10 @@ func (c *Codex) Enforcement(access string) string {
 }
 
 func (c *Codex) Build(l Launch) (*Command, error) {
-	return c.build(l, false)
-}
-
-func (c *Codex) BuildTab(l Launch) (*Command, error) {
-	return c.build(l, true)
-}
-
-func (c *Codex) build(l Launch, tab bool) (*Command, error) {
 	if c.bin == "" {
 		return nil, fmt.Errorf("codex is not installed")
 	}
 	args := []string{"exec", "--json", "-m", l.Model, "--skip-git-repo-check", "-C", l.Root, "-c", "approval_policy=never"}
-	root := l.Root
-	if tab {
-		if l.Access == "read" {
-			root = l.RunFolder
-		}
-		args = []string{l.Pointer, "-m", l.Model, "-C", root, "-c", "approval_policy=never"}
-		projectRoot := l.Root
-		if resolved, err := filepath.EvalSymlinks(projectRoot); err == nil {
-			projectRoot = resolved
-		}
-		// An inline table preserves dots and quotes in the project path; the
-		// CLI splits dotted override keys without parsing quoted TOML keys.
-		args = append(args, "-c", fmt.Sprintf("projects={%q={trust_level=\"trusted\"}}", projectRoot))
-	}
 	if l.Effort != "" {
 		args = append(args, "-c", "model_reasoning_effort="+l.Effort)
 	}
@@ -98,10 +75,6 @@ func (c *Codex) build(l Launch, tab bool) (*Command, error) {
 		// the Lane's last message is the Report and Codex writes it for us.
 		flags = append(flags, "-s", "read-only", "-o", l.ReportPath)
 		reportByText = true
-		if tab {
-			flags = []string{"-s", "workspace-write"}
-			reportByText = false
-		}
 	case "edit":
 		writable = append([]string{l.RunFolder}, l.Dirs...)
 		// The sandbox protects .agents/ like .git/, so the Run folder is opened by name.
@@ -118,20 +91,59 @@ func (c *Codex) build(l Launch, tab bool) (*Command, error) {
 	}
 	flags = append(flags, "-c", "sandbox_workspace_write.writable_roots="+string(roots))
 	args = append(args, flags...)
-	if !tab {
-		args = append(args, "-")
-	}
+	args = append(args, "-")
 	cmd := exec.Command(c.bin, args...)
-	cmd.Dir = root
+	cmd.Dir = l.Root
 	cmd.Env = l.Env
-	return &Command{Cmd: cmd, Enforcement: c.Enforcement(l.Access), Flags: flags, PromptStdin: !tab, ReportByText: reportByText}, nil
+	return &Command{Cmd: cmd, Enforcement: c.Enforcement(l.Access), Flags: flags, PromptStdin: true, ReportByText: reportByText}, nil
 }
 
 func (c *Codex) NewParser() Parser { return &codexParser{out: &Outcome{}} }
 
-type codexParser struct{ out *Outcome }
+type codexParser struct {
+	out       *Outcome
+	readTools map[string]bool
+}
 
 func (p *codexParser) Outcome() *Outcome { return p.out }
+
+func (p *codexParser) Readable(line []byte) []string {
+	var ev struct {
+		Type string `json:"type"`
+		Item struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+			Text string `json:"text"`
+			Tool string `json:"tool"`
+		} `json:"item"`
+	}
+	if json.Unmarshal(line, &ev) != nil {
+		return nil
+	}
+	if ev.Type == "item.completed" && ev.Item.Type == "agent_message" && ev.Item.Text != "" {
+		return []string{ev.Item.Text}
+	}
+	if ev.Type == "item.started" || ev.Type == "item.completed" {
+		name := ""
+		switch ev.Item.Type {
+		case "command_execution", "file_change", "web_search":
+			name = ev.Item.Type
+		case "mcp_tool_call":
+			name = ev.Item.Tool
+		}
+		if name == "" || (ev.Item.ID != "" && p.readTools[ev.Item.ID]) {
+			return nil
+		}
+		if ev.Item.ID != "" {
+			if p.readTools == nil {
+				p.readTools = map[string]bool{}
+			}
+			p.readTools[ev.Item.ID] = true
+		}
+		return []string{"tool: " + name}
+	}
+	return nil
+}
 
 func (p *codexParser) Line(line []byte) bool {
 	var ev struct {

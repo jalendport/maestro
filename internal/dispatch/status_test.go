@@ -16,7 +16,7 @@ func TestStatusWithoutStartTime(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			rec := &Record{Task: "never-started", State: state, DurationS: 60, Outcome: Outcome{Outcome: OutcomeCancelled}}
 			got := Status(rec)
-			if !strings.Contains(got, "attempt 0  —  tab no") {
+			if !strings.Contains(got, "attempt 0  —") || strings.Contains(got, "tab") {
 				t.Fatalf("elapsed time without a start: %s", got)
 			}
 		})
@@ -56,10 +56,13 @@ func TestListStandaloneDispatches(t *testing.T) {
 	if len(got) != 2 || got[0].Task != "live" || got[1].Task != "recent" {
 		t.Fatalf("Dispatches: %+v", got)
 	}
-	for _, value := range []string{"live", "Task title", "codex-sol high", "attempt 2", "1m00s", "tab yes", "running"} {
+	for _, value := range []string{"live", "Task title", "codex-sol high", "attempt 2", "1m00s", "running"} {
 		if !strings.Contains(Status(got[0]), value) {
 			t.Fatalf("missing %q: %s", value, Status(got[0]))
 		}
+	}
+	if strings.Contains(Status(got[0]), "tab") {
+		t.Fatal("Dispatch status has a tab column")
 	}
 	if !strings.Contains(Status(got[1]), "unverified") {
 		t.Fatal("recent result has no outcome")

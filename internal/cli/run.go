@@ -666,32 +666,3 @@ func (a *app) answerCmd() *cobra.Command {
 	_ = c.MarkFlagRequired("relay")
 	return c
 }
-
-func (a *app) tellCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "tell <task> <text>",
-		Short: "Send a note into a running Lane (Solo tab only)",
-		Args:  cobra.MinimumNArgs(2),
-		RunE: func(_ *cobra.Command, args []string) error {
-			env, err := a.env(false)
-			if err != nil {
-				return err
-			}
-			if env.Solo == nil {
-				return fmt.Errorf("tell works only inside Solo")
-			}
-			folder, ok := dispatch.FindTask(env.Root, args[0])
-			if !ok {
-				return fmt.Errorf("no task %q under %s", args[0], env.Root)
-			}
-			rec, err := dispatch.LoadRecord(folder)
-			if err != nil || rec.SoloProcess == 0 || rec.State != "running" {
-				return fmt.Errorf("task %s has no running Solo tab", args[0])
-			}
-			if err := env.Solo.Client.SendInput(rec.SoloProcess, strings.Join(args[1:], " ")+"\n"); err != nil {
-				return err
-			}
-			return a.result(map[string]any{"task": args[0], "state": "sent"}, "task %s: note sent", args[0])
-		},
-	}
-}

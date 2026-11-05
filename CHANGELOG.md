@@ -7,13 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+- Added `maestro doctor --canary [harness]` to check each Harness with a small read Dispatch and store version-specific launch, hook, and Report results; the hook part does not apply to Codex, and the Canary uses only its Wall limit
+- Added `maestro watch` to follow Dispatch events, model text, and tool names, with one terminal View per Dispatch inside Solo and `close_tabs` control
+
 ### Changed
+- Changed the default of `max_per_account` to no Account cap; `max_total` still applies across Runs
+- Changed `solo_tool` to a key with no effect; old user files still load, and `maestro doctor` reports the key
+- Changed every Lane to run as a headless child process on the one-shot path, inside Solo and outside it, with the same launch arguments, environment, Brief, and Report rules; a Lane inside Solo no longer gets Solo MCP tools or `SOLO_` variables
 - Changed rendered Briefs and Brief format help to leave push rules to the user; a Lane that may commit must commit only the files it changed for that Task
 - Changed the default Frontier chain to try `codex-astra`, then `claude-fable`
-- Changed Claude and Antigravity edit Lanes to relay commands outside the allow list on both the one-shot path and the tab path; Antigravity edit Lanes use Maestro's limits with no vendor print timeout
+- Changed Claude and Antigravity edit Lanes to relay commands outside the allow list on the one-shot path; Antigravity edit Lanes use Maestro's limits with no vendor print timeout
+
+### Removed
+- Removed the Lane tab path, its launch shapes, tab Budget Harvest, and Solo agent tool discovery; every Lane uses the one-shot path
+- Removed `maestro tell` and `maestro roster solo`, which used Lane tabs and Solo agent tool discovery
 
 ### Fixed
-- Fixed Grok Lane tabs that waited on folder trust: Maestro now passes `--trust` for the project root
+- Fixed Tasks that wait for an Account slot so they do no Budget refresh, Router call, or snapshot while they wait; a lost slot keeps its Route for the next claim
+- Fixed Grok text in the View so chunks join and keep their own line breaks
+- Fixed slow Solo View calls so the Lane gets its Pointer and runs without a wait; `close_tabs` also applies to a View that opens late
+- Fixed Route statistics to leave out Canary Ledger rows
+- Fixed the skill's `tab` rule, the Solo row in `maestro doctor`, and the stated Grok transcript limit
+- Fixed a race between Run supervisors that could start more Dispatches than `max_total` or a set `max_per_account` permits
 - Fixed one-shot Grok Lanes that stopped at the Idle limit during work: Maestro now reads `streaming-json` output line by line
 
 ## 1.2.0 - 2026-10-14

@@ -279,96 +279,31 @@ func (c *Client) Timer(projectID, deliveryProcess int, delay time.Duration, body
 	return err
 }
 
-// Spawn starts an agent tab from a preset with extra arguments.
-func (c *Client) Spawn(projectID, toolID int, name string, extraArgs []string) (int, error) {
-	res, err := c.Call("spawn_agent", map[string]any{"project_id": projectID, "agent_tool_id": toolID, "name": name, "extra_args": extraArgs})
+// OpenTerminal opens a shell for a Dispatch view.
+func (c *Client) OpenTerminal(projectID int, name string) (int, error) {
+	res, err := c.Call("spawn_process", map[string]any{"project_id": projectID, "kind": "terminal", "name": name})
 	if err != nil {
 		return 0, err
 	}
 	var out struct {
 		ProcessID int `json:"process_id"`
-		Process   struct {
-			ID int `json:"id"`
-		} `json:"process"`
 	}
-	_ = json.Unmarshal(res, &out)
-	if out.ProcessID == 0 {
-		out.ProcessID = out.Process.ID
+	if err := json.Unmarshal(res, &out); err != nil {
+		return 0, err
 	}
 	if out.ProcessID == 0 {
-		return 0, fmt.Errorf("spawn_agent returned no process id: %s", string(res))
+		return 0, fmt.Errorf("solo spawn_process returned no process id")
 	}
 	return out.ProcessID, nil
 }
 
-// SendInput types text into a process.
-func (c *Client) SendInput(processID int, text string) error {
-	_, err := c.Call("send_input", map[string]any{"process_id": processID, "input": text})
+// StartView sends the view command once; no later input is needed.
+func (c *Client) StartView(processID int, command string) error {
+	_, err := c.Call("send_input", map[string]any{"process_id": processID, "input": command + "\n"})
 	return err
 }
 
-// ProcessState is what get_process_status reports that Maestro reads.
-type ProcessState struct {
-	Status      string  `json:"status"` // Running | Exited | ...
-	Idle        bool    `json:"idle"`
-	IdleSeconds float64 `json:"idle_seconds"`
-	Uptime      float64 `json:"uptime_seconds"`
-}
-
-// Status returns a process's status and Solo's own idle reading.
-func (c *Client) Status(processID int) (ProcessState, error) {
-	res, err := c.Call("get_process_status", map[string]any{"process_id": processID})
-	if err != nil {
-		return ProcessState{}, err
-	}
-	var out struct {
-		Status     string  `json:"status"`
-		Uptime     float64 `json:"uptime_seconds"`
-		AgentState struct {
-			Idle        bool    `json:"idle"`
-			IdleSeconds float64 `json:"idle_seconds"`
-		} `json:"agent_state"`
-	}
-	_ = json.Unmarshal(res, &out)
-	return ProcessState{Status: out.Status, Idle: out.AgentState.Idle, IdleSeconds: out.AgentState.IdleSeconds, Uptime: out.Uptime}, nil
-}
-
-// SendKeys sends raw PTY bytes (Enter, Esc, arrows).
-func (c *Client) SendKeys(processID int, keys []byte) error {
-	ints := make([]int, len(keys))
-	for i, b := range keys {
-		ints[i] = int(b)
-	}
-	_, err := c.Call("send_input", map[string]any{"process_id": processID, "bytes": ints})
-	return err
-}
-
-// Running reports whether a status word means the process is alive.
-func (s ProcessState) Running() bool {
-	return strings.EqualFold(s.Status, "running")
-}
-
-// Output returns the last lines of a process's output.
-func (c *Client) Output(processID, lines int) (string, error) {
-	res, err := c.Call("get_process_output", map[string]any{"process_id": processID, "lines": lines})
-	if err != nil {
-		return "", err
-	}
-	var out struct {
-		Output *string  `json:"output"`
-		Lines  []string `json:"lines"`
-	}
-	if json.Unmarshal(res, &out) == nil && out.Output != nil {
-		return *out.Output, nil
-	}
-	var s string
-	if json.Unmarshal(res, &s) == nil {
-		return s, nil
-	}
-	return string(res), nil
-}
-
-// CloseProcess closes a tab.
+// CloseProcess closes a view terminal.
 func (c *Client) CloseProcess(processID int) error {
 	_, err := c.Call("close_process", map[string]any{"process_id": processID})
 	return err

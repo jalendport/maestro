@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 type Lane struct {
@@ -21,12 +22,44 @@ type Lane struct {
 	Allow     []string `json:"allow"`
 	Checks    []string `json:"checks"`
 	Commit    bool     `json:"commit"`
-	Tab       bool     `json:"tab"`
 }
 
 type Verdict struct {
 	Kind   string
 	Reason string
+}
+
+const FileJudgment = "hook-judgment.json"
+
+// Judgment is evidence written by Maestro after it judges a Lane tool call.
+type Judgment struct {
+	Harness string    `json:"harness"`
+	Tool    string    `json:"tool"`
+	Verdict string    `json:"verdict"`
+	At      time.Time `json:"at"`
+}
+
+func RecordJudgment(folder string, call *Call, verdict Verdict) error {
+	if call.Tool == "" {
+		return nil
+	}
+	b, err := json.Marshal(Judgment{Harness: call.Harness, Tool: call.Tool, Verdict: verdict.Kind, At: time.Now()})
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(folder, FileJudgment), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if os.IsExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(b)
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
 
 func (v Verdict) verdict() Verdict { return v }

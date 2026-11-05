@@ -1,5 +1,5 @@
 // Package harness holds one adapter per Harness: how to find it, read its
-// catalog, build the one-shot and tab commands for a read or edit Dispatch, and parse
+// catalog, build the one-shot commands for a read or edit Dispatch, and parse
 // its headless stream. A new Harness is a code change here, never config.
 package harness
 
@@ -45,7 +45,6 @@ type Launch struct {
 	Pointer         string
 	Env             []string
 	ClaudeAuto      bool
-	InSolo          bool
 	WallLimit       time.Duration // agy takes a print timeout
 }
 
@@ -88,7 +87,6 @@ type Signal struct {
 
 // Outcome is what a parser knows when the process ends.
 type Outcome struct {
-	TabWorked bool // tab output changed after its first screen
 	SessionID string
 	ModelRan  string
 	Text      string // the final assistant message
@@ -106,6 +104,9 @@ type Parser interface {
 	// Line reports whether the line counts as new output (resets the Idle limit).
 	Line(line []byte) bool
 	Outcome() *Outcome
+	// Readable returns model text and tool names; unknown lines return nothing.
+	// A nil line flushes text at the end of the stream.
+	Readable(line []byte) []string
 }
 
 // Harness is one adapter.
@@ -118,7 +119,6 @@ type Harness interface {
 	// Enforcement for an Access value; NoShape when the Harness has no such shape.
 	Enforcement(access string) string
 	Build(l Launch) (*Command, error)
-	BuildTab(l Launch) (*Command, error)
 	NewParser() Parser
 }
 

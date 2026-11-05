@@ -272,7 +272,7 @@ func TestOneShotRelayHarness(t *testing.T) {
 	folder := os.Getenv("MAESTRO_TASK_FOLDER")
 	control := controlFolder(t, folder)
 	lane, ok := hook.LoadLane(control)
-	if !ok || lane.Tab || lane.Access != brief.AccessEdit {
+	if !ok || lane.Access != brief.AccessEdit {
 		t.Fatalf("expected a one-shot edit Lane: %+v", lane)
 	}
 	call := &hook.Call{Harness: lane.Harness, Tool: "Bash", CWD: lane.Root, Input: map[string]any{"command": "go run main.go"}}
@@ -322,9 +322,11 @@ func TestRunOnceEditRelayAnswerAndDeadline(t *testing.T) {
 				if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				r := &roster.Roster{}
+				client, callsPath := deferredSoloClient(t)
+				r := &roster.Roster{Harness: map[string]config.Harness{harnessName: {}}}
 				r.Router.Backend = "rules"
-				env := &Env{Root: root, Roster: r, Reg: harness.New(map[string]string{harnessName: bin})}
+				env := &Env{Root: root, Roster: r, Reg: harness.New(map[string]string{harnessName: bin}),
+					Solo: &SoloLink{Client: client, ProjectID: 1, Orchestrator: 42}}
 				task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessEdit,
 					Route: &router.Route{Harness: harnessName}, WallLimit: "2s", IdleLimit: "2s"}
 				control := controlFolder(t, folder)
@@ -374,19 +376,23 @@ func TestRunOnceEditRelayAnswerAndDeadline(t *testing.T) {
 				if err != nil || !strings.Contains(string(report), "\n"+want+"\n") {
 					t.Fatalf("Harness did not receive the answer: %s, %v", report, err)
 				}
+				calls, err := os.ReadFile(callsPath)
+				if err != nil || strings.Count(string(calls), `"name":"timer_set"`) != 1 || strings.Contains(string(calls), `"name":"spawn_agent"`) || !strings.Contains(string(calls), "Maestro relay:") {
+					t.Fatalf("Solo Relay wake-up: %s, %v", calls, err)
+				}
 			})
 		}
 	}
 }
 
-func TestArchiveAttemptPreservesBaselineTabLogAndLane(t *testing.T) {
+func TestArchiveAttemptPreservesBaselineAndLane(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	folder := t.TempDir()
 	control := controlFolder(t, folder)
 	if err := os.MkdirAll(control, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{FileBaseline, "tab.log"} {
+	for _, name := range []string{FileBaseline} {
 		if err := os.WriteFile(filepath.Join(folder, name), []byte(name), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -397,7 +403,7 @@ func TestArchiveAttemptPreservesBaselineTabLogAndLane(t *testing.T) {
 		}
 	}
 	archiveAttempt(folder, 1)
-	for _, name := range []string{FileBaseline, "tab.log", "lane.json", "answer-allow", "answer-deny", "relay.json", "relay.lock", "relay-answer-0123456789abcdef.json", "relay-answer-fedcba9876543210.json"} {
+	for _, name := range []string{FileBaseline, "lane.json", "answer-allow", "answer-deny", "relay.json", "relay.lock", "relay-answer-0123456789abcdef.json", "relay-answer-fedcba9876543210.json"} {
 		b, err := os.ReadFile(filepath.Join(folder, FileAttempts, "1", name))
 		if err != nil || string(b) != name {
 			t.Fatalf("archive %s: %q, %v", name, b, err)
@@ -497,47 +503,50 @@ func TestRunOnceWritesLaneForEveryHarnessAndAccess(t *testing.T) {
 	}
 }
 
-func TestRunOnceAgyUsesSoloTab(t *testing.T) {
+func TestRunOnceAgyUsesOneShotInSolo(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	root, folder := t.TempDir(), t.TempDir()
 	t.Setenv("MAESTRO_TEST_REPORT", filepath.Join(folder, FileReport))
 	client, callsPath := deferredSoloClient(t)
-	env := &Env{Root: root, Roster: &roster.Roster{Harness: map[string]config.Harness{"agy": {SoloTool: 9}}},
-		Reg: harness.New(map[string]string{"agy": "/must-not-run-one-shot"}), Solo: &SoloLink{Client: client, ProjectID: 1}}
+	bin := filepath.Join(t.TempDir(), "agy")
+	argsPath := filepath.Join(t.TempDir(), "args")
+	t.Setenv("MAESTRO_TEST_ARGS", argsPath)
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$MAESTRO_TEST_ARGS\"\nprintf '## Answer\\nPASS\\nPOSITION: confirmed\\n' > \"$MAESTRO_TEST_REPORT\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := &Env{Root: root, Roster: &roster.Roster{Harness: map[string]config.Harness{"agy": {}}},
+		Reg: harness.New(map[string]string{"agy": bin}), Solo: &SoloLink{Client: client, ProjectID: 1}}
 	task := &Task{Project: root, Folder: folder, Run: "council", Task: "seat", Access: brief.AccessRead, Council: true,
 		Route: &router.Route{Harness: "agy", Model: "gemini-3.8-flash", Effort: "high"}, WallLimit: "1m", IdleLimit: "1m"}
 	rec := runOnce(env, task, &brief.Brief{Title: "Council"}, 1, nil)
-	if rec.SoloProcess != 42 || rec.Outcome.Outcome != OutcomeAnswered || rec.Outcome.ReportByText {
-		t.Fatalf("Antigravity tab outcome: %+v", rec.Outcome)
+	if rec.SoloProcess != 8 || rec.Outcome.Outcome != OutcomeAnswered || rec.Outcome.ReportByText {
+		t.Fatalf("Antigravity one-shot outcome: %+v", rec.Outcome)
 	}
 	lane, ok := hook.LoadLane(controlFolder(t, folder))
-	if !ok || !lane.Tab || lane.Harness != "agy" || lane.Access != brief.AccessRead {
-		t.Fatalf("tab permissions: %+v", lane)
+	if !ok || lane.Harness != "agy" || lane.Access != brief.AccessRead {
+		t.Fatalf("one-shot permissions: %+v", lane)
 	}
 	calls, err := os.ReadFile(callsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var spawn struct {
-		Params struct {
-			Name      string `json:"name"`
-			Arguments struct {
-				ExtraArgs []string `json:"extra_args"`
-			} `json:"arguments"`
-		} `json:"params"`
+	if strings.Count(string(calls), `"name":"spawn_process"`) != 1 || strings.Count(string(calls), `"name":"send_input"`) != 1 || strings.Count(string(calls), `"name":"close_process"`) != 1 {
+		t.Fatalf("unexpected Solo calls: %s", calls)
 	}
-	if err := json.Unmarshal([]byte(strings.Split(string(calls), "\n")[0]), &spawn); err != nil {
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"--sandbox", "--model", "gemini-3.8-flash", "--effort", "high", "--prompt-interactive", brief.Pointer(filepath.Join(folder, FileBrief))}
-	if spawn.Params.Name != "spawn_agent" || !reflect.DeepEqual(spawn.Params.Arguments.ExtraArgs, want) {
-		t.Fatalf("tab launch: %+v, want %q", spawn, want)
+	briefRel, _ := filepath.Rel(root, filepath.Join(folder, FileBrief))
+	want := []string{"--sandbox", "--output-format", "json", "--model", "gemini-3.8-flash-high", "--print-timeout", "1m0s", "--disable-slash-commands", "-p", brief.Pointer(briefRel)}
+	if !reflect.DeepEqual(strings.Split(strings.TrimSuffix(string(args), "\n"), "\n"), want) {
+		t.Fatalf("one-shot launch: %s, want %q", args, want)
 	}
 }
 
 func TestRunOnceClaudeReadUsesAbsolutePaths(t *testing.T) {
-	for _, tab := range []bool{false, true} {
-		t.Run(fmt.Sprintf("tab=%t", tab), func(t *testing.T) {
+	for _, inSolo := range []bool{false, true} {
+		t.Run(fmt.Sprintf("solo=%t", inSolo), func(t *testing.T) {
 			t.Setenv("MAESTRO_HOME", t.TempDir())
 			t.Setenv("CODEX_HOME", t.TempDir())
 			root := t.TempDir()
@@ -554,15 +563,12 @@ func TestRunOnceClaudeReadUsesAbsolutePaths(t *testing.T) {
 			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			env := &Env{Root: root, Roster: &roster.Roster{Harness: map[string]config.Harness{"claude": {SoloTool: 9}}}, Reg: harness.New(map[string]string{"claude": bin})}
-			callsPath := ""
-			if tab {
-				t.Setenv("MAESTRO_TEST_REPORT", filepath.Join(folder, FileReport))
-				client, calls := deferredSoloClient(t)
-				callsPath = calls
+			env := &Env{Root: root, Roster: &roster.Roster{Harness: map[string]config.Harness{"claude": {}}}, Reg: harness.New(map[string]string{"claude": bin})}
+			if inSolo {
+				client, _ := deferredSoloClient(t)
 				env.Solo = &SoloLink{Client: client, ProjectID: 1}
 			}
-			task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessRead, Council: tab,
+			task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessRead,
 				Route: &router.Route{Harness: "claude", Model: "opus"}, WallLimit: "1m", IdleLimit: "1m"}
 			absoluteFile := filepath.Join(root, "absolute.go")
 			b := &brief.Brief{Files: []string{"main.go", absoluteFile}}
@@ -570,34 +576,15 @@ func TestRunOnceClaudeReadUsesAbsolutePaths(t *testing.T) {
 			if rec.Outcome.Outcome != OutcomeAnswered {
 				t.Fatalf("outcome: %+v", rec.Outcome)
 			}
-			pointer := ""
-			if tab {
-				calls, err := os.ReadFile(callsPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var spawn struct {
-					Params struct {
-						Arguments struct {
-							ExtraArgs []string `json:"extra_args"`
-						} `json:"arguments"`
-					} `json:"params"`
-				}
-				if err := json.Unmarshal([]byte(strings.Split(string(calls), "\n")[0]), &spawn); err != nil {
-					t.Fatal(err)
-				}
-				pointer = spawn.Params.Arguments.ExtraArgs[0]
-			} else {
-				data, err := os.ReadFile(pointerPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				pointer = string(data)
-				cwd, err := os.ReadFile(cwdPath)
-				resolvedFolder, resolveErr := filepath.EvalSymlinks(folder)
-				if err != nil || resolveErr != nil || strings.TrimSpace(string(cwd)) != resolvedFolder {
-					t.Fatalf("working directory=%q, errors=%v/%v", cwd, err, resolveErr)
-				}
+			data, err := os.ReadFile(pointerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pointer := string(data)
+			cwd, err := os.ReadFile(cwdPath)
+			resolvedFolder, resolveErr := filepath.EvalSymlinks(folder)
+			if err != nil || resolveErr != nil || strings.TrimSpace(string(cwd)) != resolvedFolder {
+				t.Fatalf("working directory=%q, errors=%v/%v", cwd, err, resolveErr)
 			}
 			if !strings.HasPrefix(pointer, brief.Pointer(filepath.Join(folder, FileBrief))) || !strings.Contains(pointer, root) {
 				t.Fatalf("Pointer: %s", pointer)
