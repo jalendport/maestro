@@ -3,6 +3,7 @@ package run
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/council"
 	"github.com/jalendport/maestro/internal/discovery"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/harness"
@@ -75,6 +77,8 @@ func TestPlanCheckFakeLane(t *testing.T) {
 	}{
 		{name: "none", findings: "none"},
 		{name: "finding", findings: "task 2: missing path; fix: correct the path", held: true},
+		{name: "dash finding", findings: "- task 2: missing path; fix: correct the path", held: true},
+		{name: "star finding", findings: "* task 2: missing path; fix: correct the path", held: true},
 		{name: "timeout", timeout: true},
 		{name: "unshaped", findings: "- bad finding"},
 		{name: "failed", findings: "fail"},
@@ -114,7 +118,7 @@ func TestPlanCheckFakeLane(t *testing.T) {
 				t.Fatalf("result: %+v", s)
 			}
 			if tc.held {
-				if strings.Join(s.Approval, ",") != "plan check: "+tc.findings {
+				if strings.Join(s.Approval, ",") != "plan check: "+strings.TrimPrefix(strings.TrimPrefix(tc.findings, "- "), "* ") {
 					t.Fatalf("findings: %v", s.Approval)
 				}
 				writeCheckPlan(t, plan, 1)
@@ -127,6 +131,57 @@ func TestPlanCheckFakeLane(t *testing.T) {
 			}
 			if (tc.timeout || tc.name == "unshaped" || tc.name == "failed") && !strings.Contains(Status(s), "plan check: no result (") {
 				t.Fatalf("no failure note: %s", Status(s))
+			}
+			if !tc.held && s.Pid != os.Getpid() {
+				t.Fatalf("Run lost its supervisor before the loop: %+v", s)
+			}
+			if !tc.held {
+				saved, err := Load(s.Folder)
+				if err != nil || saved.Pid != os.Getpid() {
+					t.Fatalf("saved Run lost its supervisor before the loop: %+v, %v", saved, err)
+				}
+			}
+		})
+	}
+}
+
+func TestFailedPlanCouncilDetachPrintsNoStartedLine(t *testing.T) {
+	oldDetach := detachCouncil
+	detachCouncil = func(string) error { return fmt.Errorf("cannot start Council") }
+	t.Cleanup(func() { detachCouncil = oldDetach })
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	oldStderr := os.Stderr
+	os.Stderr = writer
+	defer func() { os.Stderr = oldStderr }()
+	startPlanCouncil(&council.Council{Slug: "r-test-plan"})
+	writer.Close()
+	output, err := io.ReadAll(reader)
+	if err != nil || !strings.Contains(string(output), "cannot start Council") || strings.Contains(string(output), "started") {
+		t.Fatalf("detach output: %s, %v", output, err)
+	}
+}
+
+func TestApproveRecoversDeadPlanCheck(t *testing.T) {
+	for _, pid := range []int{0, 1 << 30} {
+		t.Run(fmt.Sprint(pid), func(t *testing.T) {
+			env, plan, _ := planCheckEnv(t, "none", false)
+			s, err := Create(env, plan, CreateOpts{NoCouncil: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.Pid, s.StartedAt = pid, time.Now().Add(-time.Minute)
+			if err := s.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := Approve(env, s); err != nil {
+				t.Fatal(err)
+			}
+			if s.State != StateLive || s.PlanCheck != "done" || s.PlanCheckNote != "plan check: no result (supervisor gone)" {
+				t.Fatalf("dead check did not permit approval: %+v", s)
 			}
 		})
 	}

@@ -292,7 +292,7 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 		t.Fatalf("collected end Council = %+v, error = %v", review, err)
 	}
 
-	for _, findings := range []string{"none", "task 2: missing path; fix: correct the path"} {
+	for _, findings := range []string{"none", "- task 2: missing path; fix: correct the path", "cancel"} {
 		t.Run("detached Plan check "+findings, func(t *testing.T) {
 			root := t.TempDir()
 			marker := filepath.Join(root, ".agents", "release-check")
@@ -317,17 +317,48 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 			if !strings.Contains(out, "plan check running") {
 				t.Fatalf("missing running hold: %s", out)
 			}
+			if !strings.Contains(out, "Next: maestro wait r-0001") || strings.Contains(out, "maestro approve") {
+				t.Fatalf("wrong next command for a check-only hold: %s", out)
+			}
 			folder := filepath.Join(config.RunsDir(root), "r-0001")
 			held, err := run.Load(folder)
 			if err != nil || held.State != run.StateHeld || held.PlanCheck != "running" {
 				t.Fatalf("held check: %+v, %v", held, err)
+			}
+			if findings == "cancel" {
+				checkFolder := filepath.Join(folder, "plan-check")
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					rec, err := dispatch.LoadRecord(checkFolder)
+					if err == nil && rec.State == "running" && dispatch.ProcessAlive(rec) {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("Plan check Lane did not start")
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				invokeCheck(0, "cancel", held.Run)
+				invokeCheck(0, "wait", held.Run)
+				cancelled, err := run.Load(folder)
+				if err != nil || cancelled.State != run.StateCancelled || cancelled.PlanCheck != "done" || cancelled.Pid != 0 {
+					t.Fatalf("Run did not cancel: %+v, %v", cancelled, err)
+				}
+				rec, err := dispatch.LoadRecord(checkFolder)
+				if err != nil || rec.Outcome.Outcome != dispatch.OutcomeCancelled || dispatch.ProcessAlive(rec) {
+					t.Fatalf("Plan check Lane did not cancel: %+v, %v", rec, err)
+				}
+				if _, err := os.Stat(filepath.Join(folder, "control", "cancel")); !os.IsNotExist(err) {
+					t.Fatalf("cancel marker remains: %v", err)
+				}
+				return
 			}
 			write(marker, "", 0o644)
 			if findings == "none" {
 				invokeCheck(0, "wait", held.Run)
 			} else {
 				out := invokeCheck(2, "wait", held.Run)
-				if !strings.Contains(out, "plan check: "+findings) || !strings.Contains(out, "maestro approve "+held.Run) {
+				if !strings.Contains(out, "plan check: "+strings.TrimPrefix(findings, "- ")) || !strings.Contains(out, "maestro approve "+held.Run) {
 					t.Fatalf("missing finding: %s", out)
 				}
 				write(filepath.Join(root, "plan.md"), strings.Replace(source, "Plan check fixture", "Corrected Plan", 1), 0o644)

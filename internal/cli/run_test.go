@@ -63,7 +63,7 @@ func TestAddSelectsLiveRun(t *testing.T) {
 			if target == nil {
 				want := "--run <id>"
 				if selection == "missing" {
-					want = "Run r-missing is not live"
+					want = "Run r-missing is not live or paused"
 				}
 				if err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("add: %s, %v; want %s", output, err, want)
@@ -86,6 +86,57 @@ func TestAddSelectsLiveRun(t *testing.T) {
 						t.Fatalf("queued Brief: %+v, %v", queued, err)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestAddSelectsPausedRun(t *testing.T) {
+	for _, selection := range []string{"finish", "blocked", "explicit", "ambiguous", "finished", "paused without work"} {
+		t.Run(selection, func(t *testing.T) {
+			first, second := liveRunsFixture(t)
+			for _, s := range []*run.State{first, second} {
+				run.RemoveIndex(s.Project, s.Run)
+				s.State, s.Pid = run.StatePaused, 0
+				s.FinishPending = true
+			}
+			second.State = run.StateFinished
+			args := []string{"add", filepath.Join(t.TempDir(), "fix.md")}
+			switch selection {
+			case "blocked":
+				first.FinishPending, first.Tasks[0].State = false, run.TaskBlocked
+			case "explicit":
+				second.State = run.StatePaused
+				args = append(args, "--run", first.Run)
+			case "ambiguous":
+				second.State = run.StatePaused
+			case "finished":
+				first.State = run.StateFinished
+			case "paused without work":
+				first.FinishPending = false
+			}
+			for _, s := range []*run.State{first, second} {
+				if err := s.Save(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			b := &brief.Brief{Fields: brief.Fields{Title: "Fix the failure", Access: brief.AccessEdit}, Goal: "Fix the failure.", Done: "The checks pass."}
+			if err := brief.Write(b, args[1]); err != nil {
+				t.Fatal(err)
+			}
+			output, err := waitCommand(t, args...)
+			if selection == "ambiguous" || selection == "finished" || selection == "paused without work" {
+				if err == nil {
+					t.Fatalf("accepted unavailable Run: %s", output)
+				}
+				return
+			}
+			if err != nil || !strings.Contains(output, "task queued on run "+first.Run) {
+				t.Fatalf("add paused Run: %s, %v", output, err)
+			}
+			markers, err := filepath.Glob(filepath.Join(first.Folder, "control", "add-*.md"))
+			if err != nil || len(markers) != 1 {
+				t.Fatalf("queued Brief: %v, %v", markers, err)
 			}
 		})
 	}

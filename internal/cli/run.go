@@ -69,7 +69,11 @@ func (a *app) runCmd() *cobra.Command {
 				for _, ap := range s.Approval {
 					ui.Outf("approval needed: %s", ap)
 				}
-				ui.Outf("run %s held.  Fold any findings into the Plan file, then: maestro approve %s", s.Run, s.Run)
+				if s.PlanCheck == "running" && len(s.Approval) == 1 && s.Approval[0] == "plan check running" {
+					ui.Outf("run %s held.  Next: maestro wait %s", s.Run, s.Run)
+				} else {
+					ui.Outf("run %s held.  Fold any findings into the Plan file, then: maestro approve %s", s.Run, s.Run)
+				}
 				return &proc.ExitError{Code: proc.CodeOrchestrator}
 			}
 			return a.startRun(env, s, wait)
@@ -310,7 +314,7 @@ func (a *app) addCmd() *cobra.Command {
 	var runID string
 	c := &cobra.Command{
 		Use:   "add <brief.md> [--run <id>]",
-		Short: "Add a Task to the live Run",
+		Short: "Add a Task to a live or paused Run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			env, err := a.env(false)
@@ -327,13 +331,33 @@ func (a *app) addCmd() *cobra.Command {
 				}
 			}
 			if len(live) == 0 {
-				if runID != "" {
-					return fmt.Errorf("Run %s is not live in %s", runID, env.Root)
+				entries, err := dispatch.RunFolders(env.Root)
+				if err != nil && !os.IsNotExist(err) {
+					return err
 				}
-				return fmt.Errorf("no live run in %s; use maestro run or maestro dispatch", env.Root)
+				for _, entry := range entries {
+					folder := filepath.Join(config.RunsDir(env.Root), entry.Name())
+					s, err := run.Load(folder)
+					if err != nil || s.Project != env.Root || s.State != run.StatePaused || (runID != "" && s.Run != runID) {
+						continue
+					}
+					eligible := s.FinishPending
+					for _, task := range s.Tasks {
+						eligible = eligible || task.State == run.TaskBlocked
+					}
+					if eligible {
+						live = append(live, run.Index{Run: s.Run, Project: s.Project, Folder: folder})
+					}
+				}
+			}
+			if len(live) == 0 {
+				if runID != "" {
+					return fmt.Errorf("Run %s is not live or paused with a pending Finish or blocked Task in %s", runID, env.Root)
+				}
+				return fmt.Errorf("no live or paused Run accepts a Task in %s; use maestro run or maestro dispatch", env.Root)
 			}
 			if len(live) > 1 {
-				return fmt.Errorf("more than one Run is live; use maestro add %s --run <id>", args[0])
+				return fmt.Errorf("more than one Run accepts a Task; use maestro add %s --run <id>", args[0])
 			}
 			idx := live[0]
 			src, err := os.ReadFile(args[0])
@@ -347,7 +371,7 @@ func (a *app) addCmd() *cobra.Command {
 			return a.result(map[string]any{"run": idx.Run, "state": "queued", "brief": args[0]}, "task queued on run %s", idx.Run)
 		},
 	}
-	c.Flags().StringVar(&runID, "run", "", "id of the live Run")
+	c.Flags().StringVar(&runID, "run", "", "id of the live or paused Run")
 	return c
 }
 
@@ -400,6 +424,9 @@ func (a *app) cancelCmd() *cobra.Command {
 			}
 			if err := os.WriteFile(filepath.Join(folder, "control", "cancel"), nil, 0o644); err != nil {
 				return err
+			}
+			if s.PlanCheck == "running" && (run.SupervisorAlive(s) || (s.Pid == 0 && time.Since(s.StartedAt) < 5*time.Second)) {
+				return a.result(map[string]any{"run": s.Run, "state": "cancel_requested"}, "run %s cancel requested", s.Run)
 			}
 			for _, idx := range live {
 				if idx.Project == env.Root && idx.Run == s.Run {
@@ -697,13 +724,21 @@ func (a *app) waitRun(folder string) error {
 		}
 		if s.PlanCheck == "running" {
 			if time.Since(started) > waitProcessGrace && !run.SupervisorAlive(s) {
-				return fmt.Errorf("run %s: Plan check supervisor is gone; see %s", s.Run, filepath.Join(folder, "supervisor.log"))
+				if err := run.RecoverPlanCheck(s); err != nil {
+					return err
+				}
 			}
-			waitSleep(waitPollInterval)
-			continue
+			if s.PlanCheck == "running" {
+				waitSleep(waitPollInterval)
+				continue
+			}
 		}
 		if s.State == run.StateHeld {
-			return a.printWaitItem(&waitItem{Kind: "run_held", Run: s.Run, Reason: strings.Join(s.Approval, "; "), NextCommand: "maestro approve " + s.Run})
+			reasons := append([]string{}, s.Approval...)
+			if s.PlanCheckNote != "" {
+				reasons = append(reasons, s.PlanCheckNote)
+			}
+			return a.printWaitItem(&waitItem{Kind: "run_held", Run: s.Run, Reason: strings.Join(reasons, "; "), NextCommand: "maestro approve " + s.Run})
 		}
 		if item, err := runWaitItem(s); err != nil {
 			return err

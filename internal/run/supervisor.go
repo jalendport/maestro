@@ -99,10 +99,7 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 		} else {
 			s.Councils = append(s.Councils, c.Slug)
 			_ = s.Save()
-			if err := council.Detach(c.Path); err != nil {
-				ui.Warnf("plan council: %v", err)
-			}
-			ui.Eventf("council", "plan council %s started (%d seats); maestro wait %s", c.Slug, len(c.Seats), c.Slug)
+			startPlanCouncil(c)
 		}
 	}
 	if needsPlanCheck(env, plan, o) {
@@ -115,6 +112,16 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 		}
 	}
 	return s, nil
+}
+
+var detachCouncil = council.Detach
+
+func startPlanCouncil(c *council.Council) {
+	if err := detachCouncil(c.Path); err != nil {
+		ui.Warnf("plan council: %v", err)
+		return
+	}
+	ui.Eventf("council", "plan council %s started (%d seats); maestro wait %s", c.Slug, len(c.Seats), c.Slug)
 }
 
 func routePlan(env *dispatch.Env, s *State, plan *brief.Plan) (bool, error) {
@@ -178,6 +185,9 @@ func routePlan(env *dispatch.Env, s *State, plan *brief.Plan) (bool, error) {
 // Approve routes the current Plan file under the held Run's id, without
 // another Council. A failed parse or Route leaves the saved Run held.
 func Approve(env *dispatch.Env, s *State) error {
+	if err := RecoverPlanCheck(s); err != nil {
+		return err
+	}
 	if s.PlanCheck == "running" {
 		return fmt.Errorf("run %s: plan check running; use maestro wait %s", s.Run, s.Run)
 	}
@@ -269,7 +279,8 @@ func Start(env *dispatch.Env, folder string) error {
 	if err != nil {
 		return err
 	}
-	if s.PlanCheck == "running" {
+	checked := s.PlanCheck == "running"
+	if checked {
 		if err := executePlanCheck(env, s); err != nil {
 			return err
 		}
@@ -289,7 +300,7 @@ func Start(env *dispatch.Env, folder string) error {
 		if s.State == StateFinished || s.State == StateCancelled {
 			return fmt.Errorf("Run %s is %s", s.Run, s.State)
 		}
-		if SupervisorAlive(s) {
+		if SupervisorAlive(s) && !(checked && s.Pid == os.Getpid()) {
 			return fmt.Errorf("Run %s already has a live supervisor", s.Run)
 		}
 		return WriteIndex(s)

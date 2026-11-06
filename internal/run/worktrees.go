@@ -157,7 +157,7 @@ func shareFiles(a, b *TaskState) bool {
 					return true
 				}
 			}
-			if len(pair[0].Touch) > 0 && len(verify.ScopeViolations([]string{file}, pair[0].Touch, "")) == 0 {
+			if len(pair[0].Touch) > 0 && verify.InTouch(file, pair[0].Touch) {
 				return true
 			}
 		}

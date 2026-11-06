@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +56,50 @@ func TestWaitPlanCheck(t *testing.T) {
 				t.Fatalf("wait did not continue through Run: %v; %s", err, output)
 			}
 		})
+	}
+}
+
+func TestWaitRecoversDeadPlanCheck(t *testing.T) {
+	for _, pid := range []int{0, 1 << 30} {
+		t.Run(map[bool]string{false: "dead", true: "never started"}[pid == 0], func(t *testing.T) {
+			_, s := waitFixture(t)
+			s.State, s.PlanCheck, s.Pid = run.StateHeld, "running", pid
+			s.StartedAt = time.Now().Add(-time.Minute)
+			s.Approval = []string{"plan check running", "another approval trigger"}
+			if err := s.Save(); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				output, err := waitCommand(t, "wait", s.Run)
+				if code, ok := proc.Code(err); !ok || code != proc.CodeOrchestrator {
+					t.Fatalf("wait: %s, %v", output, err)
+				}
+				for _, want := range []string{"no result (supervisor gone)", "another approval trigger", "maestro approve " + s.Run} {
+					if !strings.Contains(output, want) {
+						t.Fatalf("missing %q: %s", want, output)
+					}
+				}
+			}
+			saved, err := run.Load(s.Folder)
+			if err != nil || saved.PlanCheck != "done" || saved.State != run.StateHeld {
+				t.Fatalf("recovered check: %+v, %v", saved, err)
+			}
+		})
+	}
+}
+
+func TestCancelLivePlanCheckQueuesOnItsSupervisor(t *testing.T) {
+	_, s := waitFixture(t)
+	s.State, s.PlanCheck, s.Pid = run.StateHeld, "running", os.Getpid()
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	output, err := waitCommand(t, "cancel", s.Run)
+	if err != nil || !strings.Contains(output, "cancel requested") {
+		t.Fatalf("cancel: %s, %v", output, err)
+	}
+	if _, err := os.Stat(filepath.Join(s.Folder, "control", "cancel")); err != nil {
+		t.Fatal(err)
 	}
 }
 

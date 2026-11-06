@@ -1,6 +1,7 @@
 package run
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/dispatch"
@@ -119,15 +121,62 @@ func executePlanCheck(env *dispatch.Env, s *State) error {
 	}
 	t, err := dispatch.LoadTask(filepath.Join(s.Folder, "plan-check"))
 	var rec *dispatch.Record
-	if err == nil {
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	cancel := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			// Keep the marker for the Run supervisor to cancel the Run's Tasks.
+			if fileExists(filepath.Join(s.Folder, "control", "cancel")) {
+				close(cancel)
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	if err == nil && !fileExists(filepath.Join(s.Folder, "control", "cancel")) {
+		t.Cancel = cancel
 		rec, err = dispatch.Execute(env, t)
 	}
 	finishPlanCheck(s, rec, err)
-	s.Pid = 0
+	if fileExists(filepath.Join(s.Folder, "control", "cancel")) {
+		s.State = StateLive
+	}
+	if s.State == StateHeld {
+		s.Pid = 0
+	}
 	return s.Save()
 }
 
-var planFinding = regexp.MustCompile(`^task [1-9][0-9]*: .+; fix: .+$`)
+// RecoverPlanCheck releases a held Run when its check supervisor is gone.
+func RecoverPlanCheck(s *State) error {
+	if s.PlanCheck != "running" || SupervisorAlive(s) || (s.Pid == 0 && time.Since(s.StartedAt) < 5*time.Second) {
+		return nil
+	}
+	return withControlLock(s.Folder, func() error {
+		current, err := Load(s.Folder)
+		if err != nil {
+			return err
+		}
+		if current.PlanCheck == "running" && !SupervisorAlive(current) {
+			finishPlanCheck(current, nil, fmt.Errorf("supervisor gone"))
+			current.State, current.Pid = StateHeld, 0
+			if err := current.Save(); err != nil {
+				return err
+			}
+		}
+		*s = *current
+		return nil
+	})
+}
+
+var planFinding = regexp.MustCompile(`^([-*] )?task [1-9][0-9]*: .+; fix: .+$`)
 
 func planCheckFindings(rec *dispatch.Record, err error) ([]string, string) {
 	if err != nil {
@@ -152,10 +201,11 @@ func planCheckFindings(rec *dispatch.Record, err error) ([]string, string) {
 		return nil, ""
 	}
 	lines := strings.Split(findings, "\n")
-	for _, line := range lines {
+	for i, line := range lines {
 		if !planFinding.MatchString(line) {
 			return nil, "unshaped Findings"
 		}
+		lines[i] = strings.TrimPrefix(strings.TrimPrefix(line, "- "), "* ")
 	}
 	return lines, ""
 }

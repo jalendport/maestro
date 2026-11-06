@@ -262,6 +262,28 @@ func TestIndependentTasksStartTogetherAndLand(t *testing.T) {
 	}
 }
 
+func TestTestFileDoesNotOrderDisjointTasks(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	s := &State{Mode: "worktree", Tasks: []*TaskState{
+		{Number: 1, Access: brief.AccessEdit, Files: []string{"internal/run/worktrees.go"}, Touch: []string{"internal/run/**"}},
+		{Number: 2, Access: brief.AccessEdit, Files: []string{"internal/cli/run.go", "internal/cli/hook_test.go"}, Touch: []string{"internal/cli/**"}},
+	}}
+	setOrder(s)
+	if len(s.Tasks[1].After) != 0 {
+		t.Fatalf("test file ordered disjoint Tasks: %v", s.Tasks[1].After)
+	}
+	s.Tasks[0].Touch = []string{"internal/**", "!internal/cli/**"}
+	setOrder(s)
+	if len(s.Tasks[1].After) != 0 {
+		t.Fatalf("excluded path ordered Tasks: %v", s.Tasks[1].After)
+	}
+	s.Tasks[0].Touch = []string{"internal/**"}
+	setOrder(s)
+	if len(s.Tasks[1].After) != 1 || s.Tasks[1].After[0] != 1 {
+		t.Fatalf("declared overlap did not order Tasks: %v", s.Tasks[1].After)
+	}
+}
+
 func TestOverlapRunsInPlanOrder(t *testing.T) {
 	sup := worktreeSupervisor(t)
 	first, second := sup.State.Tasks[0], sup.State.Tasks[1]
