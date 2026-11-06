@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/jalendport/maestro/internal/adapter"
@@ -20,7 +21,11 @@ import (
 )
 
 func (a *app) hookCmd() *cobra.Command {
-	return &cobra.Command{
+	return a.hookCommand(hook.QueueAwake)
+}
+
+func (a *app) hookCommand(awake func(*roster.Roster, string)) *cobra.Command {
+	c := &cobra.Command{
 		Use:    "hook [claude|codex|grok|agy]",
 		Short:  "Hook Carrier entry point for PreToolUse and Reminder events (called by the Adapters)",
 		Long:   "Read the Harness's PreToolUse or Reminder event payload on stdin. Apply the scoped spawn rule and Lane permissions to tool calls. The hook Carrier writes the Reminder for an Orchestrator in scope on UserPromptSubmit (Claude Code and Codex) or PreInvocation (Antigravity). Grok uses a rules file Carrier.",
@@ -59,13 +64,28 @@ func (a *app) hookCmd() *cobra.Command {
 			if call.Event == "ignore" {
 				return nil
 			}
+			if call.Event == "stop" {
+				if r, err := roster.Load(); err == nil {
+					awake(r, "stop")
+				}
+				if call.Harness == "agy" {
+					fmt.Fprintln(os.Stdout, `{"decision":"allow"}`)
+				} else if call.Harness == "codex" {
+					fmt.Fprintln(os.Stdout, `{}`)
+				}
+				return nil
+			}
 			if call.Event == "reminder" {
 				scope := ""
-				if r, err := roster.Load(); err == nil {
+				r, err := roster.Load()
+				if err == nil {
 					scope = r.Hook.Scope
 				}
-				if out := hook.RenderReminder(call, scope, run.ReminderItems); out != nil {
+				if out := hook.RenderReminder(call, scope, SkillMD, run.ReminderItems); out != nil {
 					fmt.Fprintln(os.Stdout, string(out))
+					if hook.ReminderInScope(call, scope) {
+						awake(r, "reminder")
+					}
 				}
 				return nil
 			}
@@ -97,6 +117,7 @@ func (a *app) hookCmd() *cobra.Command {
 							input, err := json.Marshal(call.Input)
 							answer := ""
 							if err == nil {
+								defer waitAwake()()
 								answer, err = dispatch.RelayWait(folder, dispatch.RelayRequest{ToolName: call.Tool, ToolInput: input})
 							}
 							verdict = hook.Verdict{Kind: "deny", Reason: answer}
@@ -126,6 +147,27 @@ func (a *app) hookCmd() *cobra.Command {
 			return nil
 		},
 	}
+	c.AddCommand(&cobra.Command{
+		Use:    "awake <reminder|stop> <pid> <event-time>",
+		Hidden: true,
+		Args:   cobra.ExactArgs(3),
+		RunE: func(_ *cobra.Command, args []string) error {
+			pid, err := strconv.Atoi(args[1])
+			if err != nil {
+				return nil
+			}
+			at, err := strconv.ParseInt(args[2], 10, 64)
+			if err != nil {
+				return nil
+			}
+			r, err := roster.Load()
+			if err == nil {
+				hook.TurnAwake(pid, args[0], r.KeepAwake(), at)
+			}
+			return nil
+		},
+	})
+	return c
 }
 
 // SkillMD is the embedded skill file, set by main.

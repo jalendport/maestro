@@ -161,6 +161,11 @@ func (a *app) loadEnv(refresh, persist bool) (*dispatch.Env, error) {
 	if err != nil {
 		return nil, err
 	}
+	accounts := make([]string, 0, len(r.Accounts))
+	for id := range r.Accounts {
+		accounts = append(accounts, id)
+	}
+	bf.Prune(accounts)
 	env := &dispatch.Env{Roster: r, Disc: disc, Reg: reg, Project: project, Root: root, Budget: bf}
 	if solo.InSolo() {
 		env.Solo = dispatch.ConnectSolo()
@@ -185,7 +190,7 @@ func (a *app) renderHelp() {
 	ui.Fprintln(out, "  "+ui.Name.Render("answer <task> allow|deny --relay <id>")+" Answer a relayed permission prompt")
 	ui.Fprintln(out, "  "+ui.Name.Render("approve <run>")+"            Approve a breakdown that was held for approval")
 	ui.Fprintln(out, "  "+ui.Name.Render("resume <run> --task <n>")+"  (--lane F[:E] | --brief <file> | --skip)  Continue a paused Run")
-	ui.Fprintln(out, "  "+ui.Name.Render("clean [--older-than 30d]")+" Remove old Run and Council folders (never the ledger)")
+	ui.Fprintln(out, "  "+ui.Name.Render("clean [--older-than 30d]")+" Remove old Run, Council, control, and cache folders; keep the Ledger and budget.json")
 	ui.Fprintln(out, "")
 	ui.Fprintln(out, ui.Section.Render("Setup and facts"))
 	ui.Fprintln(out, "  "+ui.Name.Render("doctor")+"                   Check Harnesses, versions, logins, the Jev key, and Solo")

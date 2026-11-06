@@ -13,6 +13,7 @@ import (
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/jev"
 	"github.com/jalendport/maestro/internal/ledger"
+	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/router"
 	"github.com/jalendport/maestro/internal/solo"
 	"github.com/jalendport/maestro/internal/ui"
@@ -26,6 +27,9 @@ func Start(env *dispatch.Env, folder string) (*Council, error) {
 	}
 	if c.State == "finished" {
 		return c, nil
+	}
+	if stop := proc.KeepAwake(env.Roster.KeepAwake()); stop != nil {
+		defer stop()
 	}
 	todoFor(env, c)
 	// Rehydrate families.

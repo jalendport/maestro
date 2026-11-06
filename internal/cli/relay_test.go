@@ -48,6 +48,8 @@ func answerOpenRelay(control, answer string) <-chan relayReply {
 }
 
 func TestRelayCommandUsesEnvironmentAndProjectLookup(t *testing.T) {
+	t.Setenv("PATH", "") // The Relay test must not start the machine's caffeinate.
+	t.Cleanup(dispatch.SetRelayPollForTest(time.Millisecond))
 	for _, useEnv := range []bool{false, true} {
 		t.Setenv("MAESTRO_HOME", t.TempDir())
 		root := t.TempDir()
@@ -152,7 +154,7 @@ func TestCleanRemovesRunAndCouncilControlFolders(t *testing.T) {
 	}
 }
 
-func TestCleanKeepsOtherProjectAndLiveArtifacts(t *testing.T) {
+func TestCleanRemovesOtherProjectControlAndKeepsRecentArtifacts(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	root, other := t.TempDir(), t.TempDir()
 	t.Chdir(root)
@@ -169,7 +171,18 @@ func TestCleanKeepsOtherProjectAndLiveArtifacts(t *testing.T) {
 				t.Fatal(err)
 			}
 			policy := filepath.Join(control, "lane.json")
-			if err := os.WriteFile(policy, []byte(project), 0o600); err != nil {
+			body, err := json.Marshal(map[string]string{"run_folder": folder})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(policy, body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ended := time.Now()
+			if artifact == "r-0001" {
+				ended = old
+			}
+			if err := (&dispatch.Record{Path: folder, State: "ended", EndedAt: ended}).Save(); err != nil {
 				t.Fatal(err)
 			}
 			if artifact == "r-0001" {
@@ -179,6 +192,9 @@ func TestCleanKeepsOtherProjectAndLiveArtifacts(t *testing.T) {
 			}
 			if project == root && artifact == "r-0001" {
 				removed = append(removed, policy, folder)
+			} else if artifact == "r-0001" {
+				removed = append(removed, policy)
+				kept = append(kept, folder)
 			} else {
 				kept = append(kept, policy, folder)
 			}
@@ -226,7 +242,7 @@ func TestCleanRemovesOnlyOldUnkeyedControlEntries(t *testing.T) {
 	captureStdout(t, command.Execute)
 	for _, name := range []string{"r-0001", "old-file", "recent", "0123456789abcdef", "0123456789abcdeg"} {
 		_, err := os.Stat(filepath.Join(config.Home(), "control", name))
-		keep := name == "recent" || name == "0123456789abcdef"
+		keep := name == "recent"
 		if keep && err != nil || !keep && !os.IsNotExist(err) {
 			t.Fatalf("control entry %s: keep=%v, error=%v", name, keep, err)
 		}

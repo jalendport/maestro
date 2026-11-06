@@ -112,6 +112,9 @@ func Parse(harness string, payload []byte) (*Call, error) {
 			}
 		}
 	}
+	if (harness == "claude" || harness == "codex") && raw["hook_event_name"] == "Stop" || harness == "agy" && raw["executionNum"] != nil && raw["terminationReason"] != nil {
+		c.Event = "stop"
+	}
 	return c, nil
 }
 

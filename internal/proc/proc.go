@@ -65,7 +65,7 @@ func KeepAwake(on bool) func() {
 		if err != nil {
 			return nil
 		}
-		c := exec.Command(path, "-s", "-w", strconv.Itoa(os.Getpid()))
+		c := exec.Command(path, "-i", "-s", "-w", strconv.Itoa(os.Getpid()))
 		if err := c.Start(); err != nil {
 			return nil
 		}

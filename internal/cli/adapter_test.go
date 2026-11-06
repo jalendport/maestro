@@ -17,10 +17,10 @@ import (
 
 func TestAdapterPrintsExactHookSet(t *testing.T) {
 	for _, tc := range []struct{ harness, want string }{
-		{"claude", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":660,"type":"command"}],"matcher":"Agent|Task|Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__solo__spawn_agent|mcp__solo__spawn_process"}],"UserPromptSubmit":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}]}]}}`},
-		{"codex", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook codex","timeout":10,"type":"command"}],"matcher":"Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process"}],"UserPromptSubmit":[{"hooks":[{"command":"maestro hook codex","timeout":10,"type":"command"}]}]}}`},
+		{"claude", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":660,"type":"command"}],"matcher":"Agent|Task|Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__solo__spawn_agent|mcp__solo__spawn_process"}],"Stop":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}]}],"UserPromptSubmit":[{"hooks":[{"command":"maestro hook","timeout":10,"type":"command"}]}]}}`},
+		{"codex", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook codex","timeout":10,"type":"command"}],"matcher":"Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process"}],"Stop":[{"hooks":[{"command":"maestro hook codex","timeout":10,"type":"command"}]}],"UserPromptSubmit":[{"hooks":[{"command":"maestro hook codex","timeout":10,"type":"command"}]}]}}`},
 		{"grok", `{"hooks":{"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":660,"type":"command"}]}]}}`},
-		{"agy", `{"maestro":{"PreInvocation":[{"command":"maestro hook agy","timeout":30,"type":"command"}],"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":660,"type":"command"}],"matcher":"run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents"}]}}`},
+		{"agy", `{"maestro":{"PreInvocation":[{"command":"maestro hook agy","timeout":30,"type":"command"}],"PreToolUse":[{"hooks":[{"command":"maestro hook","timeout":660,"type":"command"}],"matcher":"run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents"}],"Stop":[{"command":"maestro hook agy","timeout":10,"type":"command"}]}}`},
 	} {
 		t.Run(tc.harness, func(t *testing.T) {
 			home := t.TempDir()
@@ -119,7 +119,7 @@ func TestAdapterCommandHelp(t *testing.T) {
 }
 
 func TestAdapterGrokPrintsConfigPath(t *testing.T) {
-	for _, maestroHome := range []string{"", filepath.Join(t.TempDir(), "home with spaces")} {
+	for _, maestroHome := range []string{t.TempDir(), filepath.Join(t.TempDir(), "home with spaces")} {
 		t.Run(maestroHome, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
@@ -128,10 +128,7 @@ func TestAdapterGrokPrintsConfigPath(t *testing.T) {
 			command := (&app{}).adapterCmd()
 			command.SetArgs([]string{"grok"})
 			output := captureStdout(t, command.Execute)
-			want := "~/.maestro/config.toml"
-			if maestroHome != "" {
-				want = filepath.Join(maestroHome, "config.toml")
-			}
+			want := filepath.Join(maestroHome, "config.toml")
 			if !strings.Contains(output, "`"+want+"`") {
 				t.Fatal(output)
 			}
@@ -247,6 +244,37 @@ func TestDoctorRequiresReminderForInstalledHarness(t *testing.T) {
 	command = (&app{}).doctorCmd()
 	output = captureStdout(t, command.Execute)
 	if !strings.Contains(output, "skill ok, link ok, hook ok, reminder ok") {
+		t.Fatal(output)
+	}
+	data, err = os.ReadFile(spec.HookFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc["hooks"]["Stop"]) == 0 {
+		t.Fatal("install did not write Stop")
+	}
+	delete(doc["hooks"], "Stop")
+	data, err = json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(spec.HookFile, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command = (&app{}).doctorCmd()
+	output = captureStdout(t, func() error { doctorErr = command.Execute(); return nil })
+	if code, ok := proc.Code(doctorErr); !ok || code != 1 || !strings.Contains(output, "reminder ok, Stop missing") {
+		t.Fatalf("doctor without Stop = %v, %q", doctorErr, output)
+	}
+	install := (&app{}).adapterInstallCmd()
+	install.SetArgs([]string{"claude"})
+	_ = captureStdout(t, install.Execute)
+	command = (&app{}).doctorCmd()
+	output = captureStdout(t, command.Execute)
+	if !strings.Contains(output, "reminder ok, Stop ok") {
 		t.Fatal(output)
 	}
 }

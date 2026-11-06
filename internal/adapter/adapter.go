@@ -38,18 +38,18 @@ func Spec(harness string) (HarnessSpec, bool) {
 	case "claude":
 		return HarnessSpec{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__solo__spawn_agent|mcp__solo__spawn_process", 660, "A new Claude Code session loads the hook.", promptEvents()}, true
 	case "codex":
-		return HarnessSpec{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse and UserPromptSubmit hooks.", []HookEvent{{Name: "PreToolUse", Matcher: true, Command: "maestro hook codex"}, {Name: "UserPromptSubmit", Command: "maestro hook codex"}}}, true
+		return HarnessSpec{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse, UserPromptSubmit, and Stop hooks.", []HookEvent{{Name: "PreToolUse", Matcher: true, Command: "maestro hook codex"}, {Name: "UserPromptSubmit", Command: "maestro hook codex"}, {Name: "Stop", Command: "maestro hook codex"}}}, true
 	case "grok":
 		// Every tool call must reach the Lane hook, including unknown MCP tools.
 		return HarnessSpec{".agents/skills/maestro", ".grok/hooks/maestro.json", "", 660, "A new Grok session binds the hook.", []HookEvent{{Name: "PreToolUse"}}}, true
 	case "agy":
-		return HarnessSpec{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "PreInvocation", Direct: true, Command: "maestro hook agy", Timeout: 30}}}, true
+		return HarnessSpec{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "PreInvocation", Direct: true, Command: "maestro hook agy", Timeout: 30}, {Name: "Stop", Direct: true, Command: "maestro hook agy", Timeout: 10}}}, true
 	}
 	return HarnessSpec{}, false
 }
 
 func promptEvents() []HookEvent {
-	return []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit", Timeout: 10}}
+	return []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit", Timeout: 10}, {Name: "Stop", Timeout: 10}}
 }
 
 // Paths resolves a Harness's files for install, status, and printed steps.
@@ -136,6 +136,9 @@ func Install(harness string, home string, skill string) Result {
 	record("link", link, state, err)
 	path := spec.HookFile
 	states, err := ensureHooks(harness, path, spec)
+	if len(states) > 2 && states[0] == "unchanged" && states[2] != "unchanged" {
+		states[0] = "updated"
+	}
 	record("hook", path, states[0], err)
 	if harness == "grok" {
 		path = ReminderFile(home)
@@ -194,6 +197,7 @@ type Status struct {
 	Link       string
 	Hook       string
 	Reminder   string
+	Stop       string
 	Overall    string
 	HookReason string
 }
@@ -222,6 +226,9 @@ func State(harness string, home string) Status {
 		}
 		states := hookStates(harness, spec.HookFile, spec)
 		s.Hook = states[0]
+		if len(states) > 2 {
+			s.Stop = states[2]
+		}
 		if s.Hook != "missing" {
 			s.HookReason = disabledReason(harness, spec.HookFile, home)
 			if s.HookReason != "" {
@@ -235,7 +242,7 @@ func State(harness string, home string) Status {
 		}
 	}
 	s.Overall = "partial"
-	if s.Skill == "ok" && s.Link == "ok" && s.Hook == "ok" && s.Reminder == "ok" {
+	if s.Skill == "ok" && s.Link == "ok" && s.Hook == "ok" && s.Reminder == "ok" && (s.Stop == "" || s.Stop == "ok") {
 		s.Overall = "ok"
 	}
 	if s.Skill == "missing" && s.Link == "missing" && s.Hook == "missing" && s.Reminder == "missing" {

@@ -110,8 +110,8 @@ func caffeinatePID(t *testing.T, log string, starts int) int {
 				t.Fatalf("caffeinate starts = %d, want %d", len(lines), starts)
 			}
 			fields := strings.Fields(lines[starts-1])
-			want := fmt.Sprintf("-s -w %d", os.Getpid())
-			if len(fields) != 4 || strings.Join(fields[1:], " ") != want {
+			want := fmt.Sprintf("-i -s -w %d", os.Getpid())
+			if len(fields) != 5 || strings.Join(fields[1:], " ") != want {
 				t.Fatalf("caffeinate log = %q, want PID and %q", lines[starts-1], want)
 			}
 			pid, err := strconv.Atoi(fields[0])

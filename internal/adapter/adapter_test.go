@@ -75,10 +75,10 @@ func TestSpecs(t *testing.T) {
 		t.Fatal(Harnesses)
 	}
 	want := []HarnessSpec{
-		{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__solo__spawn_agent|mcp__solo__spawn_process", 660, "A new Claude Code session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit", Timeout: 10}}},
-		{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse and UserPromptSubmit hooks.", []HookEvent{{Name: "PreToolUse", Matcher: true, Command: "maestro hook codex"}, {Name: "UserPromptSubmit", Command: "maestro hook codex"}}},
+		{".claude/skills/maestro", ".claude/settings.json", "Agent|Task|Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__solo__spawn_agent|mcp__solo__spawn_process", 660, "A new Claude Code session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "UserPromptSubmit", Timeout: 10}, {Name: "Stop", Timeout: 10}}},
+		{".agents/skills/maestro", ".codex/hooks.json", "Agent|mcp__solo__spawn_agent|mcp__solo__spawn_process", 10, "Start Codex, open /hooks, and trust the Maestro PreToolUse, UserPromptSubmit, and Stop hooks.", []HookEvent{{Name: "PreToolUse", Matcher: true, Command: "maestro hook codex"}, {Name: "UserPromptSubmit", Command: "maestro hook codex"}, {Name: "Stop", Command: "maestro hook codex"}}},
 		{".agents/skills/maestro", ".grok/hooks/maestro.json", "", 660, "A new Grok session binds the hook.", []HookEvent{{Name: "PreToolUse"}}},
-		{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "PreInvocation", Direct: true, Command: "maestro hook agy", Timeout: 30}}},
+		{".gemini/antigravity-cli/skills/maestro", ".gemini/config/hooks.json", "run_command|write_to_file|replace_file_content|multi_replace_file_content|invoke_subagent|define_subagent|manage_subagents", 660, "A new Antigravity session loads the hook.", []HookEvent{{Name: "PreToolUse", Matcher: true}, {Name: "PreInvocation", Direct: true, Command: "maestro hook agy", Timeout: 30}, {Name: "Stop", Direct: true, Command: "maestro hook agy", Timeout: 10}}},
 	}
 	for i, name := range Harnesses {
 		if got, ok := Spec(name); !ok || !reflect.DeepEqual(got, want[i]) {
@@ -103,7 +103,11 @@ func TestInstallEachHarness(t *testing.T) {
 			if r.Harness != name || r.Next != spec.Next {
 				t.Fatal(r)
 			}
-			if got := State(name, home); got != (Status{Harness: name, Skill: "ok", Link: "ok", Hook: "ok", Reminder: "ok", Overall: "ok"}) {
+			stop := "ok"
+			if name == "grok" {
+				stop = ""
+			}
+			if got := State(name, home); got != (Status{Harness: name, Skill: "ok", Link: "ok", Hook: "ok", Reminder: "ok", Stop: stop, Overall: "ok"}) {
 				t.Fatal(got)
 			}
 			if string(read(t, SkillFile())) != "shared skill\n" {
@@ -345,7 +349,10 @@ func TestHookMergeOrderAndIndent(t *testing.T) {
 						t.Fatal("changed", k)
 					}
 				}
-				for _, k := range []string{"Stop", "PostToolUse"} {
+				if !equal(before.get("hooks").get("Stop").array[0], after.get("hooks").get("Stop").array[0]) {
+					t.Fatal("changed foreign Stop entry")
+				}
+				for _, k := range []string{"PostToolUse"} {
 					if !equal(before.get("hooks").get(k), after.get("hooks").get(k)) {
 						t.Fatal("changed", k)
 					}

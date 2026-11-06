@@ -27,6 +27,33 @@ func ReminderRule() string {
 	return "# Maestro\n\nThis rule applies inside a project that holds `.agents/maestro.toml`, or everywhere when `[hook] scope = \"all\"` in `" + path + "`. Elsewhere, ignore it. If your prompt points you at a Maestro Brief file, you are a Lane, not the Orchestrator: ignore this rule and follow the Brief.\n\n" + Reminder + "\n"
 }
 
+// StaleHarnesses compares installed Adapter text with the binary's text.
+// Missing or unreadable files do not add a warning; doctor checks those.
+func StaleHarnesses(home, skill string) []string {
+	data, err := os.ReadFile(SkillFile())
+	skillStale := err == nil && string(data) != skill
+	data, err = os.ReadFile(ReminderFile(home))
+	grokStale := err == nil && string(data) != ReminderRule()
+	var stale []string
+	for _, harness := range Harnesses {
+		if harness == "grok" && grokStale {
+			stale = append(stale, harness)
+			continue
+		}
+		if skillStale {
+			spec, _ := Paths(harness, home)
+			if _, err := os.Lstat(spec.Link); err != nil {
+				continue
+			}
+			// Codex and Grok share a skill link; check each Adapter's hook file.
+			if _, err := os.Lstat(spec.HookFile); err == nil {
+				stale = append(stale, harness)
+			}
+		}
+	}
+	return stale
+}
+
 func ensureReminder(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	state := "updated"

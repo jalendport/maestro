@@ -18,6 +18,28 @@ func TestReminderText(t *testing.T) {
 	}
 }
 
+func TestStaleHarnessesUnder5ms(t *testing.T) {
+	home := testHome(t)
+	skill := strings.Repeat("Current skill text.\n", 1000)
+	for _, harness := range Harnesses {
+		if result := Install(harness, home, skill); result.Err != nil {
+			t.Fatal(result.Err)
+		}
+	}
+	put(t, SkillFile(), strings.Repeat("Old skill text.\n", 1000))
+	put(t, ReminderFile(home), "Old Grok rules.\n")
+	start := time.Now()
+	stale := StaleHarnesses(home, skill)
+	elapsed := time.Since(start)
+	if got := strings.Join(stale, ", "); got != "claude, codex, grok, agy" {
+		t.Fatalf("stale Harnesses = %q", got)
+	}
+	if elapsed >= 5*time.Millisecond {
+		t.Fatalf("stale Adapter check took %s; want under 5 ms", elapsed)
+	}
+	t.Logf("stale Adapter check: %s", elapsed)
+}
+
 func TestReminderHookInstallAndState(t *testing.T) {
 	for _, tc := range []struct{ harness, key, event, want string }{
 		{"claude", "hooks", "UserPromptSubmit", `[{"hooks":[{"type":"command","command":"maestro hook","timeout":10}]}]`},
@@ -42,7 +64,7 @@ func TestReminderHookInstallAndState(t *testing.T) {
 			}
 			for _, state := range []string{"missing", "wrong", "ok"} {
 				set := hookSet(spec)
-				set.object = set.object[:1]
+				set.object = append(set.object[:1], set.object[2:]...)
 				if state == "wrong" {
 					set.set(tc.event, array(object(member{"command", scalar("maestro hook old")})))
 					if tc.harness != "agy" {
@@ -208,12 +230,9 @@ func TestGrokReminderFile(t *testing.T) {
 func TestGrokReminderTracksMaestroHome(t *testing.T) {
 	home := testHome(t)
 	path := ReminderFile(home)
-	for _, maestroHome := range []string{"", filepath.Join(t.TempDir(), "home with spaces")} {
+	for _, maestroHome := range []string{t.TempDir(), filepath.Join(t.TempDir(), "home with spaces")} {
 		t.Setenv("MAESTRO_HOME", maestroHome)
-		want := "~/.maestro/config.toml"
-		if maestroHome != "" {
-			want = filepath.Join(maestroHome, "config.toml")
-		}
+		want := filepath.Join(maestroHome, "config.toml")
 		if !strings.Contains(ReminderRule(), "`"+want+"`") {
 			t.Fatal(ReminderRule())
 		}

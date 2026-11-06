@@ -478,7 +478,8 @@ func (a *app) cleanCmd() *cobra.Command {
 	var olderThan string
 	c := &cobra.Command{
 		Use:   "clean",
-		Short: "Remove old Run and Council folders (never the ledger)",
+		Short: "Remove old Run, Council, control, and cache folders; keep the Ledger and budget.json",
+		Long:  "Remove old Run and Council folders in this project, old or orphan control folders across all project keys, and old cache folders. Keep live Runs and the latest Canary files per Harness. Never touch the Ledger or budget.json.",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			d, err := time.ParseDuration(strings.Replace(olderThan, "d", "h", 1))
 			if err != nil {
@@ -496,9 +497,27 @@ func (a *app) cleanCmd() *cobra.Command {
 				return fmt.Errorf("the home directory cannot be a project root; change to a project folder")
 			}
 			live := map[string]bool{}
+			protected := map[string]bool{}
 			for _, idx := range run.LiveRuns() {
 				live[idx.Folder] = true
+				control, err := config.ControlDirForFolder(idx.Folder)
+				if err != nil {
+					return err
+				}
+				protected[control] = true
 			}
+			canaries, err := latestCanaryFolders()
+			if err != nil {
+				return err
+			}
+			for folder := range canaries {
+				control, err := config.ControlDirForFolder(filepath.Join(config.RunsDir(folder), "canary"))
+				if err != nil {
+					return err
+				}
+				protected[control] = true
+			}
+			cutoff := time.Now().Add(-d)
 			removed := 0
 			for _, dir := range []string{config.RunsDir(root), config.CouncilsDir(root)} {
 				entries, _ := os.ReadDir(dir)
@@ -508,12 +527,22 @@ func (a *app) cleanCmd() *cobra.Command {
 				for _, e := range entries {
 					p := filepath.Join(dir, e.Name())
 					st, err := os.Stat(p)
-					if err != nil || !st.IsDir() || live[p] || dispatch.HasRunningRecord(p) || time.Since(st.ModTime()) < d {
+					if err != nil || !st.IsDir() || live[p] || !st.ModTime().Before(cutoff) {
+						continue
+					}
+					keep, err := hasCurrentRecord(p, cutoff)
+					if err != nil {
+						return err
+					}
+					if keep {
 						continue
 					}
 					control, err := config.ControlDirForFolder(p)
 					if err != nil {
 						return err
+					}
+					if protected[control] {
+						continue
 					}
 					if err := os.RemoveAll(p); err == nil {
 						if err := os.RemoveAll(control); err != nil {
@@ -525,26 +554,15 @@ func (a *app) cleanCmd() *cobra.Command {
 					}
 				}
 			}
-			controlRoot := filepath.Join(config.Home(), "control")
-			entries, err := os.ReadDir(controlRoot)
-			if err != nil && !os.IsNotExist(err) {
+			controls, err := cleanControlFolders(cutoff, protected)
+			if err != nil {
 				return err
 			}
-			for _, entry := range entries {
-				if config.IsProjectKey(entry.Name()) {
-					continue
-				}
-				path := filepath.Join(controlRoot, entry.Name())
-				st, err := entry.Info()
-				if err != nil {
-					return err
-				}
-				if time.Since(st.ModTime()) >= d {
-					if err := os.RemoveAll(path); err != nil {
-						return err
-					}
-				}
+			cached, err := cleanCacheFolders(cutoff, canaries)
+			if err != nil {
+				return err
 			}
+			removed += controls + cached
 			return a.result(map[string]any{"removed": removed, "older_than": olderThan}, "removed %d folder(s) older than %s", removed, olderThan)
 		},
 	}
@@ -587,6 +605,12 @@ func (a *app) printRunReport(folder string) error {
 
 // waitRun returns when a Run ends or needs the Orchestrator.
 func (a *app) waitRun(folder string) error {
+	var stop func()
+	defer func() {
+		if stop != nil {
+			stop()
+		}
+	}()
 	started := time.Now()
 	for {
 		s, err := run.Load(folder)
@@ -602,12 +626,15 @@ func (a *app) waitRun(folder string) error {
 		} else if item != nil {
 			return a.printWaitItem(item)
 		}
-		if time.Since(started) > 5*time.Second {
+		if stop == nil && run.SupervisorAlive(s) {
+			stop = waitAwake()
+		}
+		if time.Since(started) > waitProcessGrace {
 			if !run.SupervisorAlive(s) {
 				return &proc.ExitError{Code: proc.CodeFailed, Message: fmt.Sprintf("run %s: its supervisor is gone before the run ended; see %s", s.Run, filepath.Join(folder, "supervisor.log"))}
 			}
 		}
-		time.Sleep(2 * time.Second)
+		waitSleep(waitPollInterval)
 	}
 }
 

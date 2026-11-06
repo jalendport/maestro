@@ -34,6 +34,8 @@ func reminderJSON(t *testing.T, path string, value any) {
 func liveReminderFixture(t *testing.T) (string, *run.State, *run.State, string) {
 	t.Helper()
 	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GROK_HOME", t.TempDir())
 	t.Setenv("MAESTRO_LANE", "")
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	// The Reminder must work without a Harness, Solo helper, or network client.

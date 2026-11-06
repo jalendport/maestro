@@ -8,11 +8,14 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jalendport/maestro/internal/adapter"
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/hook"
+	"github.com/jalendport/maestro/internal/roster"
 )
 
 func runHookPayload(t *testing.T, payload string, harness string) string {
@@ -21,7 +24,12 @@ func runHookPayload(t *testing.T, payload string, harness string) string {
 }
 
 func runHookPayloadRaw(t *testing.T, payload string, harness string) string {
+	return runHookWithAwake(t, payload, harness, func(*roster.Roster, string) {})
+}
+
+func runHookWithAwake(t *testing.T, payload string, harness string, awake func(*roster.Roster, string)) string {
 	t.Helper()
+	t.Setenv("PATH", "") // Hook tests must not start the machine's caffeinate.
 	input, err := os.CreateTemp(t.TempDir(), "payload")
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +44,7 @@ func runHookPayloadRaw(t *testing.T, payload string, harness string) string {
 	previous := os.Stdin
 	os.Stdin = input
 	defer func() { os.Stdin = previous }()
-	command := (&app{}).hookCmd()
+	command := (&app{}).hookCommand(awake)
 	if harness != "" {
 		command.SetArgs([]string{harness})
 	}
@@ -95,6 +103,7 @@ func TestHookCommandAntigravityLane(t *testing.T) {
 }
 
 func TestHookCommandAntigravityRelay(t *testing.T) {
+	t.Cleanup(dispatch.SetRelayPollForTest(time.Millisecond))
 	for _, answer := range []string{"allow", "deny"} {
 		t.Run(answer, func(t *testing.T) {
 			t.Setenv("MAESTRO_HOME", t.TempDir())
@@ -144,14 +153,16 @@ func TestHookCommandAntigravityRelay(t *testing.T) {
 }
 
 func TestHookCommandLaneFallback(t *testing.T) {
+	const acceptedCommands = "[, basename, cargo --version, cat, composer --version, composer show, cut, date, df, diff, dirname, docker --version, docker compose config, docker compose ps, docker images, docker info, docker ps, docker version, du, echo, file, find, git blame, git branch, git describe, git diff, git log, git ls-files, git rev-parse, git show, git status, git tag, go doc, go env, go list, go version, grep, head, jq, ls, node --version, npm --version, npm ls, npm view, php --version, pip --version, pip list, pip show, pnpm --version, pnpm ls, pwd, python3 --version, realpath, rg, rustc --version, sed, sort, stat, tail, test, tr, tree, uniq, wc, which, yarn --version, yq"
+	const readLaneReason = "read Lane: command not on the read-only list; accepted commands: " + acceptedCommands
 	for _, tc := range []struct {
 		name, lane, harness, payload, want string
 	}{
 		{"outside Lane", "", "agy", `{"toolCall":{"name":"run_command","args":{"CommandLine":"go run main.go"}}}`, `{"decision":"allow"}`},
 		{"missing Lane", "", "agy", `{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/outside"}}}`, `{"decision":"deny","reason":"no readable Lane policy"}`},
 		{"invalid Lane", "not JSON", "agy", `{"toolCall":{"name":"write_to_file","args":{"TargetFile":"/outside"}}}`, `{"decision":"deny","reason":"no readable Lane policy"}`},
-		{"Grok", `{"access":"read","root":"/project"}`, "grok", `{"toolName":"run_terminal_command","toolInput":{"command":"go run main.go"},"cwd":"/project"}`, `{"decision":"deny","reason":"read Lane: command not on the read-only list"}`},
-		{"Claude", `{"access":"read","root":"/project"}`, "claude", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"},"cwd":"/project"}`, `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"read Lane: command not on the read-only list"}}`},
+		{"Grok", `{"access":"read","root":"/project"}`, "grok", `{"toolName":"run_terminal_command","toolInput":{"command":"go run main.go"},"cwd":"/project"}`, `{"decision":"deny","reason":"` + readLaneReason + `"}`},
+		{"Claude", `{"access":"read","root":"/project"}`, "claude", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"},"cwd":"/project"}`, `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"` + readLaneReason + `"}}`},
 		{"Codex", `{"access":"read"}`, "codex", `{"tool_name":"Bash","tool_input":{"command":"go run main.go"}}`, ""},
 		{"bad payload", `{"access":"read"}`, "agy", "not JSON", `{"decision":"deny","reason":"Lane payload unreadable: payload is not JSON: invalid character 'o' in literal null (expecting 'u')"}`},
 	} {
@@ -291,6 +302,8 @@ func TestHookCommandTranscriptLane(t *testing.T) {
 
 func TestHookCommandReminder(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GROK_HOME", t.TempDir())
 	t.Setenv("MAESTRO_LANE", "")
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	project := t.TempDir()
@@ -437,6 +450,8 @@ func TestHookCommandReminderInsideLane(t *testing.T) {
 
 func TestHookCommandReminderFirstUserPrompt(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GROK_HOME", t.TempDir())
 	t.Setenv("MAESTRO_LANE", "")
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	cwd := t.TempDir()
@@ -469,7 +484,7 @@ func TestHookCommandReminderFirstUserPrompt(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				want := string(hook.RenderReminder(&hook.Call{Harness: harness}, "all", nil))
+				want := string(hook.RenderReminder(&hook.Call{Harness: harness}, "all", SkillMD, nil))
 				if tc.lane {
 					want = ""
 				}

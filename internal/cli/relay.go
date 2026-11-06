@@ -33,6 +33,7 @@ func (a *app) relayCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer waitAwake()()
 			return dispatch.Relay(control, cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}

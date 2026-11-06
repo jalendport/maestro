@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"strings"
 
 	"github.com/jalendport/maestro/internal/adapter"
 	"github.com/jalendport/maestro/internal/config"
@@ -25,9 +26,23 @@ func isReminderEvent(c *Call, raw map[string]any) bool {
 // RenderReminder writes the Reminder in the Harness's shape. An empty scope
 // keeps a Reminder event out of scope when the Roster cannot load. liveItems
 // reads project state only after the prompt is in scope and outside a Lane.
-func RenderReminder(c *Call, scope string, liveItems func(string) string) []byte {
+func RenderReminder(c *Call, scope, skill string, liveItems func(string) string) []byte {
 	if c.Harness == "grok" {
 		return nil
+	}
+	if !ReminderInScope(c, scope) {
+		if c.Harness == "agy" {
+			return []byte(`{}`)
+		}
+		return nil
+	}
+	return renderReminder(c, skill, liveItems)
+}
+
+// ReminderInScope excludes Lanes and prompts outside the configured scope.
+func ReminderInScope(c *Call, scope string) bool {
+	if c.Harness == "grok" || scope == "" {
+		return false
 	}
 	lane := os.Getenv("MAESTRO_TASK_FOLDER") != "" || os.Getenv("MAESTRO_LANE") != ""
 	if !lane && (c.Harness == "claude" || c.Harness == "codex") {
@@ -37,20 +52,19 @@ func RenderReminder(c *Call, scope string, liveItems func(string) string) []byte
 		var err error
 		_, lane, err = FindLaneFolder(c)
 		if err != nil {
-			if c.Harness == "agy" {
-				return []byte(`{}`)
-			}
-			return nil
+			return false
 		}
 	}
-	inScope := scope != "" && (scope == "all" || inProject(c.CWD)) && !lane
-	if !inScope {
-		if c.Harness == "agy" {
-			return []byte(`{}`)
-		}
-		return nil
-	}
+	return (scope == "all" || inProject(c.CWD)) && !lane
+}
+
+func renderReminder(c *Call, skill string, liveItems func(string) string) []byte {
 	reminder := adapter.Reminder
+	if home, err := os.UserHomeDir(); err == nil {
+		if stale := adapter.StaleHarnesses(home, skill); len(stale) != 0 {
+			reminder += "\nAdapter stale (" + strings.Join(stale, ", ") + "): run maestro adapter install"
+		}
+	}
 	if liveItems != nil {
 		cwd := c.CWD
 		if cwd == "" {

@@ -20,6 +20,9 @@ func TestParseReminderEvents(t *testing.T) {
 		{"Claude detected", "", `{"hook_event_name":"UserPromptSubmit","cwd":"/project","transcript_path":"/transcript"}`, "claude", "reminder", "/project", "/transcript"},
 		{"Claude named", "claude", `{"hook_event_name":"UserPromptSubmit","cwd":"/project","transcript_path":"/transcript"}`, "claude", "reminder", "/project", "/transcript"},
 		{"Codex named", "codex", `{"hook_event_name":"UserPromptSubmit","cwd":"/project","transcript_path":"/transcript"}`, "codex", "reminder", "/project", "/transcript"},
+		{"Claude Stop", "", `{"hook_event_name":"Stop","cwd":"/project"}`, "claude", "stop", "/project", ""},
+		{"Codex Stop", "codex", `{"hook_event_name":"Stop","cwd":"/project"}`, "codex", "stop", "/project", ""},
+		{"Antigravity Stop", "agy", `{"executionNum":1,"terminationReason":"model_stop","fullyIdle":true,"workspacePaths":["/project"]}`, "agy", "stop", "/project", ""},
 		{"Antigravity detected", "", `{"invocationNum":1,"workspacePaths":["/first","/second"],"transcriptPath":"/transcript"}`, "agy", "reminder", "/first", "/transcript"},
 		{"Antigravity named", "agy", `{"workspacePaths":["/first","/second"]}`, "agy", "reminder", "/first", ""},
 		{"Antigravity workspace detected", "", `{"workspacePaths":["/first"]}`, "agy", "reminder", "/first", ""},
@@ -43,6 +46,9 @@ func TestParseReminderEvents(t *testing.T) {
 }
 
 func TestReminderPromptPointer(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GROK_HOME", t.TempDir())
 	t.Setenv("MAESTRO_LANE", "")
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	transcript := filepath.Join(t.TempDir(), "empty.jsonl")
@@ -85,7 +91,7 @@ func TestReminderPromptPointer(t *testing.T) {
 					if call.Prompt != tc.prompt {
 						t.Fatalf("prompt = %q, want %q", call.Prompt, tc.prompt)
 					}
-					out := RenderReminder(call, "all", nil)
+					out := RenderReminder(call, "all", "skill", nil)
 					if tc.lane && out != nil || !tc.lane && !strings.Contains(string(out), adapter.Reminder) {
 						t.Fatalf("Lane = %v, output = %s", tc.lane, out)
 					}
@@ -117,6 +123,9 @@ func TestParseToolCallPrecedesReminder(t *testing.T) {
 }
 
 func TestReminderShapesAndScope(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GROK_HOME", t.TempDir())
 	t.Setenv("MAESTRO_LANE", "")
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	project := t.TempDir()
@@ -155,7 +164,7 @@ func TestReminderShapesAndScope(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					out := RenderReminder(call, tc.scope, nil)
+					out := RenderReminder(call, tc.scope, "skill", nil)
 					var want any
 					if call.Harness == "agy" {
 						want = map[string]any{}
@@ -184,6 +193,9 @@ func TestReminderShapesAndScope(t *testing.T) {
 }
 
 func TestReminderAntigravityProcessDirectory(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GROK_HOME", t.TempDir())
 	t.Setenv("MAESTRO_LANE", "")
 	t.Setenv("MAESTRO_TASK_FOLDER", "")
 	root := t.TempDir()
@@ -196,7 +208,7 @@ func TestReminderAntigravityProcessDirectory(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := string(RenderReminder(call, "projects", nil)); got != `{}` {
+		if got := string(RenderReminder(call, "projects", "skill", nil)); got != `{}` {
 			t.Fatalf("outside project: %s", got)
 		}
 	}
@@ -208,7 +220,7 @@ func TestReminderAntigravityProcessDirectory(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := string(RenderReminder(call, "projects", nil)); !strings.Contains(got, `"injectSteps"`) {
+		if got := string(RenderReminder(call, "projects", "skill", nil)); !strings.Contains(got, `"injectSteps"`) {
 			t.Fatalf("inside project: %s", got)
 		}
 	}
@@ -249,7 +261,7 @@ func TestReminderTranscriptError(t *testing.T) {
 		if harness == "agy" {
 			want = "{}"
 		}
-		if got := string(RenderReminder(call, "all", nil)); got != want {
+		if got := string(RenderReminder(call, "all", "skill", nil)); got != want {
 			t.Fatalf("%s = %q, want %q", harness, got, want)
 		}
 	}

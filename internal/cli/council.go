@@ -157,6 +157,12 @@ func (a *app) councilSupervisorCmd() *cobra.Command {
 
 // waitCouncil blocks until a Council ends, then prints the Merge.
 func (a *app) waitCouncil(folder string) error {
+	var stop func()
+	defer func() {
+		if stop != nil {
+			stop()
+		}
+	}()
 	started := time.Now()
 	for {
 		c, err := council.Load(folder)
@@ -166,10 +172,13 @@ func (a *app) waitCouncil(folder string) error {
 		if c.State == "finished" {
 			return a.printCouncilMerge(c)
 		}
+		if stop == nil && council.SupervisorAlive(c) {
+			stop = waitAwake()
+		}
 		if time.Since(started) > 5*time.Second && !council.SupervisorAlive(c) {
 			return &proc.ExitError{Code: proc.CodeFailed, Message: fmt.Sprintf("council %s: its supervisor is gone; see %s", c.Slug, filepath.Join(folder, "supervisor.log"))}
 		}
-		time.Sleep(2 * time.Second)
+		waitSleep(waitPollInterval)
 	}
 }
 

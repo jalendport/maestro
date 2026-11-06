@@ -1,0 +1,3 @@
+#!/bin/sh
+# Use on PATH for the full test suite so no test starts macOS caffeinate.
+exec /bin/sleep 300
