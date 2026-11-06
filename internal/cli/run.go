@@ -28,7 +28,7 @@ func (a *app) runCmd() *cobra.Command {
 	var wait, council, noCouncil bool
 	c := &cobra.Command{
 		Use:     "run <plan.md>",
-		Short:   "Run every Task of a Plan file (one live Run per project)",
+		Short:   "Run every Task of a Plan file",
 		Long:    "Parse a Plan file, print the provisional Routes, hold for approval when a trigger fires, else start the per-Run supervisor. --wait keeps the supervisor in this process.",
 		Args:    cobra.ExactArgs(1),
 		PreRunE: refreshSkill,
@@ -118,6 +118,16 @@ func printPlan(s *run.State) {
 		}
 	}
 	ui.Outf("%s", run.ModeLine(s))
+	if notice, err := run.StartNotice(s); err != nil {
+		ui.Warnf("%v", err)
+	} else if notice != "" {
+		ui.Outf("%s", notice)
+	}
+	for _, idx := range run.LiveRuns() {
+		if idx.Project == s.Project && idx.Run != s.Run {
+			ui.Outf("another Run is live: %s", idx.Run)
+		}
+	}
 }
 
 func cutRunTitle(s string, n int) string {

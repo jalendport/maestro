@@ -392,31 +392,27 @@ func TestFinish(t *testing.T) {
 	}
 }
 
-func TestFinishRejectsMovedUserBranch(t *testing.T) {
+func TestFinishRebasesOntoMovedUserBranch(t *testing.T) {
 	root := repository(t)
 	r := openRun(t, root)
 	w := addTask(t, r, "a")
 	commitTask(t, w, "a.txt", "a\n")
-	merged := mergeTask(t, r, "a").Head
+	mergeTask(t, r, "a")
+	w = addTask(t, r, "b")
+	commitTask(t, w, "b.txt", "b\n")
+	mergeTask(t, r, "b")
 	write(t, root, "user.txt", "user\n")
 	tgit(t, root, "add", "user.txt")
 	tgit(t, root, "commit", "-m", "Add user change")
 	current := tgit(t, root, "rev-parse", "HEAD")
-	err := r.Finish(true)
-	if err == nil || !strings.Contains(err.Error(), r.Base) || !strings.Contains(err.Error(), current) {
-		t.Fatalf("moved branch error: %v", err)
-	}
-	if got := tgit(t, root, "rev-parse", r.Branch); got != merged {
-		t.Fatalf("Run branch not kept: %s", got)
-	}
-	// After the Run branch is rebased onto the moved user branch, Finish lands it.
-	tgit(t, root, "rebase", "master", r.Branch)
-	tgit(t, root, "checkout", "master")
 	if err := r.Finish(true); err != nil {
-		t.Fatalf("Finish after rebase: %v", err)
+		t.Fatal(err)
 	}
-	if got := tgit(t, root, "rev-parse", "HEAD^"); got != current {
+	if got := tgit(t, root, "rev-parse", "HEAD~2"); got != current {
 		t.Fatalf("user commit lost: %s", got)
+	}
+	if got := tgit(t, root, "rev-list", "--count", current+"..HEAD"); got != "2" {
+		t.Fatalf("Task commits lost: %s", got)
 	}
 	if _, err := os.Stat(filepath.Join(root, "a.txt")); err != nil {
 		t.Fatalf("Task change not landed: %v", err)
@@ -691,12 +687,9 @@ func TestMessageEmptySummary(t *testing.T) {
 
 func TestOpenDetachedHEAD(t *testing.T) {
 	root := repository(t)
-	r := openRun(t, root)
 	tgit(t, root, "checkout", "--detach")
-	for _, id := range []string{"detached", r.ID} {
-		if _, err := Open(root, id); !errors.Is(err, ErrNoBranch) {
-			t.Fatalf("Open %s error: %v", id, err)
-		}
+	if _, err := Open(root, "detached"); !errors.Is(err, ErrNoBranch) {
+		t.Fatalf("Open error: %v", err)
 	}
 }
 

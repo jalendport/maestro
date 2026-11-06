@@ -130,10 +130,12 @@ func TestWorktreeModeReasons(t *testing.T) {
 				runGit(t, sup.Env.Root, "checkout", "--detach")
 			case "tree has uncommitted changes":
 				runWrite(t, filepath.Join(sup.Env.Root, "dirty.txt"), "dirty")
+				want = ""
 			case "worktrees off":
 				sup.Env.Roster.Run.Worktrees = &off
 			case "one edit task":
 				sup.State.Tasks = sup.State.Tasks[:1]
+				want = ""
 			case "project off":
 				sup.Env.Project = &config.Project{Worktrees: &off}
 				want = "worktrees off"
@@ -143,7 +145,7 @@ func TestWorktreeModeReasons(t *testing.T) {
 				want = "worktrees off"
 			}
 			chooseMode(sup.Env, sup.State)
-			if sup.State.ModeReason != want || (sup.State.Mode == "worktree") != (reason == "") {
+			if sup.State.ModeReason != want || (sup.State.Mode == "worktree") != (want == "") {
 				t.Fatalf("mode: %s (%s)", sup.State.Mode, sup.State.ModeReason)
 			}
 			if err := sup.State.Save(); err != nil {
@@ -165,7 +167,7 @@ func TestDependencyFolderMode(t *testing.T) {
 		{name: "no touch", access: brief.AccessEdit},
 		{name: "general pattern", access: brief.AccessEdit, touch: []string{"**"}},
 		{name: "explicit folder", access: brief.AccessEdit, touch: []string{"node_modules/**"}, reason: "task 2 touches node_modules"},
-		{name: "read Task", access: brief.AccessRead, touch: []string{"node_modules/**"}},
+		{name: "read Task", access: brief.AccessRead, touch: []string{"node_modules/**"}, reason: "task 2 touches node_modules"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sup := worktreeSupervisor(t)
@@ -285,7 +287,8 @@ func TestTreeTaskCommitUsesFilledTemplateAfterGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	template := "{title}\n\nRun {run}, Task {task}, {family}, {model}\n{summary}\nCo-Authored-By: {lane}"
-	sup.Env.Project = &config.Project{CommitMessage: &template, Checks: []string{"true"}}
+	off := false
+	sup.Env.Project = &config.Project{Worktrees: &off, CommitMessage: &template, Checks: []string{"true"}}
 	sup.Env.Roster.Commit.Identities = map[string]string{"codex": "Custom Lane <lane@example.test>"}
 	chooseMode(sup.Env, sup.State)
 	sup.schedule()
@@ -459,18 +462,16 @@ func TestFinishPausesAndRetriesWithoutLane(t *testing.T) {
 	for range 2 {
 		takeResult(t, sup)
 	}
-	base := runGit(t, sup.Env.Root, "rev-parse", "HEAD")
-	runWrite(t, filepath.Join(sup.Env.Root, "user.txt"), "user change\n")
-	runGit(t, sup.Env.Root, "add", "user.txt")
-	runGit(t, sup.Env.Root, "commit", "-m", "Add user change")
+	runWrite(t, filepath.Join(sup.Env.Root, "first.txt"), "user change\n")
 	if err := sup.end(StateFinished); err != nil {
 		t.Fatal(err)
 	}
-	if !sup.State.FinishPending || sup.State.State != StatePaused || !strings.Contains(sup.State.PauseReason, "user branch moved") || !strings.Contains(Report(sup.State), "--finish") {
+	if !sup.State.FinishPending || sup.State.State != StatePaused || !strings.Contains(sup.State.PauseReason, "uncommitted changes in first.txt overlap the Run") || !strings.Contains(Report(sup.State), "--finish") {
 		t.Fatalf("Finish did not pause: %+v", sup.State)
 	}
-	runGit(t, sup.Env.Root, "branch", "user-backup")
-	runGit(t, sup.Env.Root, "reset", "--hard", base)
+	if err := os.Remove(filepath.Join(sup.Env.Root, "first.txt")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := QueueResume(sup.State.Folder, Resume{Finish: true}); err != nil {
 		t.Fatal(err)
 	}

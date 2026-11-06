@@ -110,10 +110,6 @@ func Open(root, run string) (Run, error) {
 		return Run{}, err
 	}
 	r := Run{Root: root, ID: run, Branch: "maestro/" + run + "/run", dir: dir}
-	branch, err := git(root, "", "symbolic-ref", "--quiet", "HEAD")
-	if err != nil {
-		return Run{}, fmt.Errorf("%w: %w", ErrNoBranch, err)
-	}
 	data, err := os.ReadFile(filepath.Join(dir, "run.json"))
 	if err == nil {
 		var saved Run
@@ -131,6 +127,10 @@ func Open(root, run string) (Run, error) {
 	}
 	if !os.IsNotExist(err) {
 		return Run{}, err
+	}
+	branch, err := git(root, "", "symbolic-ref", "--quiet", "HEAD")
+	if err != nil {
+		return Run{}, fmt.Errorf("%w: %w", ErrNoBranch, err)
 	}
 	r.Base, err = head(root, "HEAD")
 	if err != nil {
@@ -208,6 +208,43 @@ func (r Run) Add(task string, touch ...[]string) (Worktree, error) {
 		return Worktree{}, err
 	}
 	_, err = Link(r.Root, w.Dir, touch...)
+	return w, err
+}
+
+// Read reuses a detached Worktree left by a stopped supervisor.
+func (r Run) Read(task string) (Worktree, error) {
+	w, err := r.task(task)
+	if err != nil {
+		return Worktree{}, err
+	}
+	w.Branch = ""
+	if _, err := os.Stat(filepath.Join(w.Dir, ".git")); err == nil {
+		common := func(dir string) (string, error) {
+			out, err := git(r.Root, dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+			if err != nil {
+				return "", err
+			}
+			return filepath.EvalSymlinks(strings.TrimSpace(out))
+		}
+		rootGit, err := common(r.Root)
+		if err != nil {
+			return Worktree{}, err
+		}
+		readGit, err := common(w.Dir)
+		if err != nil || readGit != rootGit {
+			return Worktree{}, fmt.Errorf("read Worktree at %s is not in this repository", w.Dir)
+		}
+		branch, err := git(r.Root, w.Dir, "branch", "--show-current")
+		if err != nil || strings.TrimSpace(branch) != "" {
+			return Worktree{}, fmt.Errorf("read Worktree at %s is not detached", w.Dir)
+		}
+		if _, err := git(r.Root, w.Dir, "reset", "--hard", r.Branch); err != nil {
+			return Worktree{}, err
+		}
+	} else if _, err := git(r.Root, "", "worktree", "add", "--detach", w.Dir, r.Branch); err != nil {
+		return Worktree{}, err
+	}
+	_, err = Link(r.Root, w.Dir)
 	return w, err
 }
 
@@ -565,30 +602,54 @@ func (r Run) Finish(commit bool) error {
 	if string(stage) == "reset" {
 		return r.finishReset(stagePath)
 	}
-	// The Run branch must contain the user's branch. A user branch that moved
-	// lands after the Run branch is rebased onto it.
-	if current != r.Base {
-		if _, err := git(r.Root, "", "merge-base", "--is-ancestor", current, "refs/heads/"+r.Branch); err != nil {
-			return fmt.Errorf("Finish merge: user branch moved: base %s, current %s; rebase Run branch %s onto the user branch, or reset the user branch to the base", r.Base, current, r.Branch)
+	if err := r.checkUserBranch(); err != nil {
+		return err
+	}
+	if string(stage) == "squash" {
+		paths, err := r.landingPaths()
+		if err != nil {
+			return err
+		}
+		// A failed marker write can leave the full squash in the index.
+		args := append([]string{"diff", "--cached", "--quiet", r.Branch, "--"}, literalPaths(paths)...)
+		if _, err := git(r.Root, "", args...); err == nil {
+			if err := os.WriteFile(stagePath, []byte("reset"), 0o644); err != nil {
+				return fmt.Errorf("Finish record squash: %w", err)
+			}
+			return r.finishReset(stagePath)
 		}
 	}
-	branch, err := git(r.Root, "", "symbolic-ref", "--quiet", "HEAD")
-	if err != nil {
-		return fmt.Errorf("Finish check user branch: %w", err)
-	}
-	if strings.TrimSpace(branch) != r.UserBranch {
-		return fmt.Errorf("Finish check user branch: needs %s checked out", r.UserBranch)
+	if _, err := git(r.Root, "", "merge-base", "--is-ancestor", current, "refs/heads/"+r.Branch); err != nil {
+		if err := r.rebaseLanding(current); err != nil {
+			return err
+		}
 	}
 	dirty, err := Dirty(r.Root)
 	if err != nil {
 		return fmt.Errorf("Finish check dirty tree: %w", err)
 	}
-	if len(dirty) != 0 {
-		return fmt.Errorf("Finish check dirty tree: needs a clean user tree: %s", strings.Join(dirty, ", "))
+	paths, err := r.landingPaths()
+	if err != nil {
+		return err
+	}
+	var overlap []string
+	for _, path := range dirty {
+		for _, changed := range paths {
+			if path == changed || strings.HasPrefix(path, changed+"/") || strings.HasPrefix(changed, path+"/") {
+				overlap = append(overlap, path)
+				break
+			}
+		}
+	}
+	if len(overlap) != 0 {
+		return fmt.Errorf("landing blocked: uncommitted changes in %s overlap the Run; commit or stash them, then maestro resume %s --finish", strings.Join(overlap, ", "), r.ID)
 	}
 	mode := "--ff-only"
 	if !commit {
 		mode = "--squash"
+		if err := os.WriteFile(stagePath, []byte("squash"), 0o644); err != nil {
+			return fmt.Errorf("Finish record squash start: %w", err)
+		}
 	}
 	if _, err := git(r.Root, "", "merge", mode, r.Branch); err != nil {
 		return fmt.Errorf("Finish merge: %w", err)
@@ -610,12 +671,18 @@ func (r Run) Finish(commit bool) error {
 }
 
 func (r Run) finishReset(stagePath string) error {
-	branch, err := git(r.Root, "", "symbolic-ref", "--quiet", "HEAD")
-	if err != nil || strings.TrimSpace(branch) != r.UserBranch {
-		return fmt.Errorf("Finish reset: needs user branch %s checked out: %v", r.UserBranch, err)
+	if err := r.checkUserBranch(); err != nil {
+		return err
 	}
-	if _, err := git(r.Root, "", "reset", "--mixed", "HEAD"); err != nil {
-		return fmt.Errorf("Finish reset: %w", err)
+	paths, err := r.landingPaths()
+	if err != nil {
+		return err
+	}
+	if len(paths) > 0 {
+		args := append([]string{"restore", "--staged", "--"}, literalPaths(paths)...)
+		if _, err := git(r.Root, "", args...); err != nil {
+			return fmt.Errorf("Finish reset: %w", err)
+		}
 	}
 	if err := os.WriteFile(stagePath, []byte("remove"), 0o644); err != nil {
 		return fmt.Errorf("Finish record reset: %w", err)
@@ -623,6 +690,55 @@ func (r Run) finishReset(stagePath string) error {
 	_, err = remove(r.Root, r.ID, true)
 	if err != nil {
 		return fmt.Errorf("Finish remove: %w", err)
+	}
+	return nil
+}
+
+func (r Run) checkUserBranch() error {
+	branch, err := git(r.Root, "", "symbolic-ref", "--quiet", "HEAD")
+	if err != nil || strings.TrimSpace(branch) != r.UserBranch {
+		return fmt.Errorf("user branch %s is not checked out", strings.TrimPrefix(r.UserBranch, "refs/heads/"))
+	}
+	return nil
+}
+
+func literalPaths(paths []string) []string {
+	literal := make([]string, len(paths))
+	for i, path := range paths {
+		literal[i] = ":(literal)" + path
+	}
+	return literal
+}
+
+func (r Run) landingPaths() ([]string, error) {
+	out, err := git(r.Root, "", "diff", "--no-renames", "--name-only", "-z", r.UserBranch, r.Branch)
+	if err != nil {
+		return nil, fmt.Errorf("Finish read paths: %w", err)
+	}
+	return strings.FieldsFunc(out, func(r rune) bool { return r == 0 }), nil
+}
+
+func (r Run) rebaseLanding(current string) (rebaseErr error) {
+	// The common base excludes user commits from an earlier landing retry.
+	base, err := git(r.Root, "", "merge-base", r.UserBranch, r.Branch)
+	if err != nil {
+		return fmt.Errorf("Finish read landing base: %w", err)
+	}
+	dir := filepath.Join(r.dir, "landing")
+	if _, err := git(r.Root, "", "worktree", "add", dir, r.Branch); err != nil {
+		return fmt.Errorf("Finish prepare landing: %w", err)
+	}
+	defer func() {
+		_, err := git(r.Root, "", "worktree", "remove", "--force", dir)
+		rebaseErr = errors.Join(rebaseErr, err)
+	}()
+	if _, err := git(r.Root, dir, "rebase", "--onto", current, strings.TrimSpace(base)); err != nil {
+		paths, pathErr := unmerged(r.Root, dir)
+		_, abortErr := git(r.Root, dir, "rebase", "--abort")
+		if len(paths) > 0 {
+			err = fmt.Errorf("landing conflict in %s; Run branch %s; resolve on the Run branch, then maestro resume %s --finish", strings.Join(paths, ", "), r.Branch, r.ID)
+		}
+		return errors.Join(err, pathErr, abortErr)
 	}
 	return nil
 }

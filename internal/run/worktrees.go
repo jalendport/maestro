@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/jalendport/maestro/internal/brief"
-	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/ui"
 	"github.com/jalendport/maestro/internal/verify"
@@ -22,29 +21,16 @@ func chooseMode(env *dispatch.Env, s *State) {
 	if env.Project != nil && env.Project.Worktrees != nil {
 		enabled = enabled && *env.Project.Worktrees
 	}
-	edits := 0
-	for _, t := range s.Tasks {
-		if t.Access == brief.AccessEdit {
-			edits++
-		}
-	}
 	switch {
 	case !enabled:
 		s.ModeReason = "worktrees off"
-	case edits <= 1:
-		s.ModeReason = "one edit task"
 	default:
 		if err := exec.Command("git", "-C", s.Project, "rev-parse", "--verify", "HEAD").Run(); err != nil {
 			s.ModeReason = "tree has no git history"
-		} else if dirty, err := worktree.Dirty(s.Project); err != nil {
-			s.ModeReason = "cannot read tree: " + err.Error()
-		} else if len(dirty) > 0 {
-			s.ModeReason = "tree has uncommitted changes"
+		} else if err := exec.Command("git", "-C", s.Project, "symbolic-ref", "--quiet", "HEAD").Run(); err != nil {
+			s.ModeReason = "HEAD is not on a branch"
 		} else {
 			for _, task := range s.Tasks {
-				if task.Access != brief.AccessEdit {
-					continue
-				}
 				links, err := worktree.Link(s.Project, "", task.Touch)
 				if err != nil {
 					s.ModeReason = "cannot read dependencies: " + err.Error()
@@ -80,6 +66,26 @@ func ModeLine(s *State) string {
 		reason = "tree mode"
 	}
 	return "worktrees: off (" + reason + ": Tasks run one at a time)"
+}
+
+// StartNotice names the commit that Tasks use when the project has dirty files.
+func StartNotice(s *State) (string, error) {
+	if s.Mode != "worktree" {
+		return "", nil
+	}
+	dirty, err := worktree.Dirty(s.Project)
+	if err != nil || len(dirty) == 0 {
+		return "", err
+	}
+	r, err := worktree.Open(s.Project, s.Run)
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.Command("git", "-C", s.Project, "rev-parse", "--short", r.Base).Output()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("tree has uncommitted changes: Tasks start from %s; your uncommitted work is not in them", strings.TrimSpace(string(out))), nil
 }
 
 func depends(s *State, task, target *TaskState, seen map[*TaskState]bool) bool {
@@ -164,16 +170,10 @@ func (sup *Supervisor) taskWorkdir(task *TaskState, b *brief.Brief) error {
 	}
 	sup.State.RunBranch = r.Branch
 	if task.Access == brief.AccessRead {
-		control, err := config.ControlDirForFolder(sup.State.Folder)
-		if err != nil {
-			return err
+		w, err := r.Read(task.ID)
+		if w.Dir != "" {
+			task.Workdir = w.Dir
 		}
-		dir := filepath.Join(config.Home(), "worktrees", filepath.Base(filepath.Dir(control)), sup.State.Run, task.ID)
-		if out, err := exec.Command("git", "-C", sup.State.Project, "worktree", "add", "--detach", dir, r.Branch).CombinedOutput(); err != nil {
-			return fmt.Errorf("read Worktree: %w: %s", err, strings.TrimSpace(string(out)))
-		}
-		task.Workdir = dir
-		_, err = worktree.Link(sup.State.Project, dir)
 		return err
 	}
 	w, err := r.Add(task.ID, b.Touch)
@@ -184,7 +184,7 @@ func (sup *Supervisor) taskWorkdir(task *TaskState, b *brief.Brief) error {
 }
 
 func (sup *Supervisor) removeReadWorktree(task *TaskState) error {
-	if sup.State.Mode != "worktree" || task.Access != brief.AccessRead || task.Workdir == "" {
+	if task.Access != brief.AccessRead || task.Workdir == "" {
 		return nil
 	}
 	if out, err := exec.Command("git", "-C", sup.State.Project, "worktree", "remove", "--force", task.Workdir).CombinedOutput(); err != nil {

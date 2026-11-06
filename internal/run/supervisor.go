@@ -1,7 +1,6 @@
 package run
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -53,9 +52,6 @@ type CreateOpts struct {
 // breakdown needs approval. A held Plan can start a detached Council when
 // requested, large, or unclear. Create does not start any Task.
 func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
-	if idx, live := LiveRunFor(env.Root); live {
-		return nil, fmt.Errorf("Run %s is live; use maestro add", idx.Run)
-	}
 	plan, err := brief.ParsePlan(planPath)
 	if err != nil {
 		return nil, err
@@ -173,9 +169,6 @@ func Approve(env *dispatch.Env, s *State) error {
 	if s.State != StateHeld {
 		return fmt.Errorf("run %s is %s, not held", s.Run, s.State)
 	}
-	if idx, live := LiveRunFor(env.Root); live {
-		return fmt.Errorf("Run %s is live; use maestro add", idx.Run)
-	}
 	plan, err := brief.ParsePlan(s.Plan)
 	if err != nil {
 		return err
@@ -187,7 +180,7 @@ func Approve(env *dispatch.Env, s *State) error {
 	}
 	next.State, next.Approval = StateLive, nil
 	next.Commit = plan.Defaults.Commit != nil && *plan.Defaults.Commit
-	chooseMode(env, &next)
+	setOrder(&next)
 	if err := next.Save(); err != nil {
 		return err
 	}
@@ -267,7 +260,7 @@ func Start(env *dispatch.Env, folder string) error {
 func (sup *Supervisor) loop() error {
 	s := sup.State
 	if s.Mode == "" {
-		chooseMode(sup.Env, s)
+		s.Mode, s.ModeReason = "tree", "saved Run has no mode"
 	}
 	s.State = StateLive
 	s.Pid = os.Getpid()
@@ -288,10 +281,7 @@ func (sup *Supervisor) loop() error {
 	sup.consumeControl()
 	if s.Mode == "worktree" && !sup.cancelled {
 		r, err := worktree.Open(s.Project, s.Run)
-		if errors.Is(err, worktree.ErrNoBranch) {
-			s.Mode, s.ModeReason = "tree", "HEAD is not on a branch"
-			setOrder(s)
-		} else if err != nil {
+		if err != nil {
 			sup.pause(err.Error())
 		} else {
 			s.RunBranch = r.Branch

@@ -21,7 +21,7 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Worktree** — a separate git checkout for one Task, outside the project tree. An edit Task uses a Task branch; a read Task uses a detached checkout at the Run branch head.
 - **Run branch** — the branch `maestro/<run>/run` that holds the commits of a Run, made from the user's HEAD when the Run starts.
 - **Task branch** — the branch `maestro/<run>/<task>` that holds one Task's commits, made from the Run branch when the Task starts.
-- **Worktree mode** — a Run mode in which edit Tasks use separate Worktrees and Maestro merges their commits into the Run branch.
+- **Worktree mode** — a Run mode in which edit Tasks use separate Worktrees and Maestro merges their commits into the Run branch. The main checkout is never changed except at landing.
 - **Tree mode** — a Run mode in which edit Tasks use the project tree one at a time.
 - **Brief** — the text a Lane receives for one Task: the goal, the definition of done, the files, the checks, and the permission mode.
 - **Tier** — a rung on the strength ladder that Lane families sit on: Light, Daily, Heavy, Frontier. "One Tier up" means the next rung.

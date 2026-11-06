@@ -58,6 +58,7 @@ func TestWorktreeWaitAndResumeFlags(t *testing.T) {
 }
 
 func TestRunPrintsModeAndOrder(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	for _, mode := range []string{"worktree", "tree"} {
 		t.Run(mode, func(t *testing.T) {
 			s := &run.State{Title: "Plan", Mode: mode, Tasks: []*run.TaskState{
@@ -66,8 +67,8 @@ func TestRunPrintsModeAndOrder(t *testing.T) {
 			}}
 			want := "worktrees: on"
 			if mode == "tree" {
-				s.ModeReason = "tree has uncommitted changes"
-				want = "worktrees: off (tree has uncommitted changes: Tasks run one at a time)"
+				s.ModeReason = "worktrees off"
+				want = "worktrees: off (worktrees off: Tasks run one at a time)"
 			}
 			out := captureStdout(t, func() error { printPlan(s); return nil })
 			routes := strings.Index(out, "Second")
@@ -77,6 +78,53 @@ func TestRunPrintsModeAndOrder(t *testing.T) {
 				t.Fatalf("run printout:\n%s", out)
 			}
 		})
+	}
+}
+
+func TestRunPrintsDirtyBaseAndAnotherLiveRun(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_AUTHOR_NAME", "Test User")
+	t.Setenv("GIT_AUTHOR_EMAIL", "user@example.test")
+	t.Setenv("GIT_COMMITTER_NAME", "Test User")
+	t.Setenv("GIT_COMMITTER_EMAIL", "user@example.test")
+	root := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-b", "master")
+	if err := os.WriteFile(filepath.Join(root, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-m", "Start test repository")
+	r, err := worktree.Open(root, "r-new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = worktree.Remove(root, r.ID) })
+	if err := os.WriteFile(filepath.Join(root, "base.txt"), []byte("user work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := &run.State{Run: "r-other", Project: root}
+	if err := run.WriteIndex(other); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() error {
+		printPlan(&run.State{Run: r.ID, Project: root, Mode: "worktree"})
+		return nil
+	})
+	for _, want := range []string{"worktrees: on", "tree has uncommitted changes: Tasks start from " + git("rev-parse", "--short", r.Base) + "; your uncommitted work is not in them", "another Run is live: r-other"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q: %s", want, out)
+		}
 	}
 }
 
