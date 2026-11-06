@@ -233,6 +233,8 @@ Worktrees link ignored dependency folders and exclude the links from git status.
 
 Each read Task of a Worktree-mode Run uses a detached Worktree at the Run branch head, with dependency links. A review that waits for edit Tasks sees their merged work. Maestro removes the read Worktree when the Task ends. Grok Lanes keep the workspace sandbox in a Worktree and return the Report by message; extra writable directories outside the Worktree still make the launch `best-effort`.
 
+Use `maestro wait <run>` while a Plan check runs; after a landing check failure, `maestro add <brief> [--run <id>]` queues the fix Task on the paused Run and `maestro resume <run> --finish` lands. Put a standalone Dispatch's hand fix in the kept Worktree that `maestro wait` names, then use `maestro dispatch --finish <task>`.
+
 Worktree-mode Runs can share a project, and tree mode needs the checkout to itself; `maestro approve` chooses the mode again from the current Plan, and with more than one live Run `maestro add <brief> --run <id>` names the Run. Quote braces in read-only commands, for example `git log '@{u}'..`.
 
 A standalone edit Dispatch uses a Worktree when Worktrees are on, the repository has a commit, HEAD is on a branch, and the Brief's `touch` names no refused dependency folder; otherwise `maestro dispatch` prints `worktrees: off (<reason>)` and uses the project tree. After the gate, Maestro commits and lands the Task with the Brief's `commit` setting. A blocked landing keeps the Worktree and Run branch; `maestro wait <task>` returns exit 2 with `maestro dispatch --finish <task>`, which retries the landing without a new Lane. `maestro clean` removes old standalone Worktrees and keeps branches with commits that did not land.

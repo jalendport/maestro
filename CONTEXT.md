@@ -22,7 +22,7 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Run** — one invocation of Maestro on a plan: its Tasks, their Routes and Dispatches, the checks, and the report back to the Orchestrator.
 - **Worktree** — a separate git checkout for one Task, outside the project tree. An edit Task in a Run or a standalone Dispatch uses a Task branch; a read Task in a Run uses a detached checkout at the Run branch head.
 - **Run branch** — the branch `maestro/<run>/run` that holds the commits of a Run, made from the user's HEAD when the Run starts. A standalone edit Dispatch uses its Task id in place of `<run>`.
-- **Task branch** — the branch `maestro/<run>/<task>` that holds one Task's commits, made from the Run branch when the Task starts. A standalone edit Dispatch uses its Task id in place of `<run>`.
+- **Task branch** — the branch `maestro/<run>/<task>` that holds one Task's commits, made from the Run branch when the Task starts. A standalone edit Dispatch uses `d-<run>-<task>` in place of `<run>` in its branch names. A standalone edit Dispatch uses its Task id in place of `<run>`.
 - **Worktree mode** — a Run or standalone edit Dispatch mode in which edit Tasks use separate Worktrees and Maestro merges their commits into the Run branch. The main checkout is never changed except at landing.
 - **Tree mode** — a Run or standalone edit Dispatch mode that uses the project tree. In a Run, edit Tasks run one at a time.
 - **Container-bound check** — a check whose command runs in a container bound to the project folder. A Run or standalone Dispatch with such a check uses tree mode.
