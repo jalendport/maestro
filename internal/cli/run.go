@@ -144,14 +144,10 @@ func (a *app) startRun(env *dispatch.Env, s *run.State, wait bool) error {
 		}
 		return a.printRunReport(s.Folder)
 	}
-	if err := detachRun(s.Folder); err != nil {
+	if err := proc.Detach(s.Folder, "_run", true, false); err != nil {
 		return err
 	}
 	return a.result(s, "run %s started  (maestro status %s; maestro wait %s)", s.Run, s.Run, s.Run)
-}
-
-func detachRun(folder string) error {
-	return proc.Detach(folder, "_run", true)
 }
 
 func (a *app) runSupervisorCmd() *cobra.Command {

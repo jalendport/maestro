@@ -114,7 +114,9 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 	return s, nil
 }
 
-var detachCouncil = council.Detach
+var detachCouncil = func(folder string) error {
+	return proc.Detach(folder, "_council", false, true)
+}
 
 func startPlanCouncil(c *council.Council) {
 	if err := detachCouncil(c.Path); err != nil {
@@ -1161,7 +1163,7 @@ func (sup *Supervisor) end(state string) error {
 		})
 	}
 	if review != nil {
-		if err := council.Detach(review.Path); err != nil {
+		if err := proc.Detach(review.Path, "_council", false, true); err != nil {
 			ui.Warnf("end-of-run council: %v", err)
 		}
 	}

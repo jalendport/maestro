@@ -86,7 +86,7 @@ func preparePlanCheck(env *dispatch.Env, s *State) error {
 
 // detachPlanCheck starts the Run supervisor, which first collects the check.
 var detachPlanCheck = func(folder string) error {
-	return proc.Detach(folder, "_run", true)
+	return proc.Detach(folder, "_run", true, false)
 }
 
 func executePlanCheck(env *dispatch.Env, s *State) error {

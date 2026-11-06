@@ -26,14 +26,25 @@ func TestMain(m *testing.M) {
 
 func TestDetachLogAndPID(t *testing.T) {
 	t.Setenv("MAESTRO_DETACH_TEST", "1")
-	for _, verb := range []string{"_council", "_supervise", "_run"} {
-		t.Run(verb, func(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		verb      string
+		appendLog bool
+		writePID  bool
+	}{
+		{"council", "_council", false, true},
+		{"dispatch", "_supervise", false, true},
+		{"run", "_run", true, false},
+		{"append with pid", "_run", true, true},
+		{"replace without pid", "_council", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			folder := t.TempDir()
 			logPath := filepath.Join(folder, "supervisor.log")
 			if err := os.WriteFile(logPath, []byte("previous\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if err := Detach(folder, verb, verb == "_run"); err != nil {
+			if err := Detach(folder, tc.verb, tc.appendLog, tc.writePID); err != nil {
 				t.Fatal(err)
 			}
 			var pid, group int
@@ -44,11 +55,13 @@ func TestDetachLogAndPID(t *testing.T) {
 					t.Fatal(err)
 				}
 				text := string(log)
-				if verb == "_run" {
+				if tc.appendLog {
 					if !strings.HasPrefix(text, "previous\n") {
-						t.Fatalf("Run log lost its prior content: %q", text)
+						t.Fatalf("supervisor log lost its prior content: %q", text)
 					}
 					text = strings.TrimPrefix(text, "previous\n")
+				} else if strings.HasPrefix(text, "previous\n") {
+					t.Fatalf("supervisor log kept its prior content: %q", text)
 				}
 				if n, _ := fmt.Sscanf(text, "%d %d", &pid, &group); n == 2 {
 					break
@@ -59,9 +72,9 @@ func TestDetachLogAndPID(t *testing.T) {
 				t.Fatalf("supervisor pid=%d group=%d", pid, group)
 			}
 			data, err := os.ReadFile(filepath.Join(folder, "supervisor.pid"))
-			if verb == "_run" {
+			if !tc.writePID {
 				if !os.IsNotExist(err) {
-					t.Fatalf("Run pid file: %q, %v", data, err)
+					t.Fatalf("unexpected supervisor pid file: %q, %v", data, err)
 				}
 			} else if err != nil || string(data) != strconv.Itoa(pid) {
 				t.Fatalf("supervisor pid file: %q, %v", data, err)
@@ -78,8 +91,8 @@ func TestDetachRejectsPIDWriteFailure(t *testing.T) {
 			if err := os.Mkdir(filepath.Join(folder, "supervisor.pid"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			var failure *DetachError
-			if err := Detach(folder, verb, false); !errors.As(err, &failure) || failure.Operation != "pid" {
+			var failure *os.PathError
+			if err := Detach(folder, verb, false, true); !errors.As(err, &failure) || !strings.HasPrefix(err.Error(), "write supervisor pid: ") || failure.Path != filepath.Join(folder, "supervisor.pid") {
 				t.Fatalf("pid write error = %v", err)
 			}
 		})

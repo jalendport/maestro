@@ -110,10 +110,6 @@ func reviewTaskOpts(env *dispatch.Env, id string, o *council.Opts) error {
 	return nil
 }
 
-func detachCouncil(folder string) error {
-	return proc.Detach(folder, "_council", false)
-}
-
 func (a *app) councilSupervisorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "_council <folder>",
@@ -183,7 +179,7 @@ func (a *app) startCouncil(env *dispatch.Env, c *council.Council, wait bool) err
 		}
 		return a.printCouncilMerge(done)
 	}
-	if err := detachCouncil(c.Path); err != nil {
+	if err := proc.Detach(c.Path, "_council", false, true); err != nil {
 		return err
 	}
 	return a.result(map[string]any{"slug": c.Slug, "seats": c.Seats, "state": c.State}, "council %s started.  Collect with: maestro wait %s", c.Slug, c.Slug)

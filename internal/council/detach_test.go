@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/jalendport/maestro/internal/proc"
 )
 
 const detachTestEnv = "MAESTRO_COUNCIL_DETACH_TEST"
@@ -40,7 +42,7 @@ func TestDetachCallerProcess(t *testing.T) {
 	if folder == "" {
 		return
 	}
-	if err := Detach(folder); err != nil {
+	if err := proc.Detach(folder, "_council", false, true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -81,8 +83,8 @@ func TestDetachSurvivesCallerExit(t *testing.T) {
 }
 
 func TestDetachLogError(t *testing.T) {
-	err := Detach(filepath.Join(t.TempDir(), "missing"))
-	if err == nil || !strings.Contains(err.Error(), "create Council supervisor log") {
+	err := proc.Detach(filepath.Join(t.TempDir(), "missing"), "_council", false, true)
+	if err == nil || !strings.Contains(err.Error(), "create supervisor log") {
 		t.Fatalf("Detach error = %v", err)
 	}
 }
@@ -93,8 +95,8 @@ func TestDetachPIDError(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(folder, "supervisor.pid"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	err := Detach(folder)
-	if err == nil || !strings.Contains(err.Error(), "write Council supervisor pid") {
+	err := proc.Detach(folder, "_council", false, true)
+	if err == nil || !strings.Contains(err.Error(), "write supervisor pid") {
 		t.Fatalf("Detach error = %v", err)
 	}
 }

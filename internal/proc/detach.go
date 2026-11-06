@@ -1,6 +1,7 @@
 package proc
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,19 +9,11 @@ import (
 	"syscall"
 )
 
-type DetachError struct {
-	Operation string
-	Err       error
-}
-
-func (e *DetachError) Error() string { return e.Err.Error() }
-func (e *DetachError) Unwrap() error { return e.Err }
-
-// Detach starts a supervisor in its own session and records its pid for _council and _supervise.
-func Detach(folder, verb string, appendLog bool) error {
+// Detach starts a supervisor in its own session with the chosen log and pid settings.
+func Detach(folder, verb string, appendLog, writePID bool) error {
 	self, err := os.Executable()
 	if err != nil {
-		return &DetachError{"find", err}
+		return fmt.Errorf("find supervisor executable: %w", err)
 	}
 	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	mode := os.FileMode(0o666)
@@ -30,20 +23,20 @@ func Detach(folder, verb string, appendLog bool) error {
 	}
 	logFile, err := os.OpenFile(filepath.Join(folder, "supervisor.log"), flags, mode)
 	if err != nil {
-		return &DetachError{"log", err}
+		return fmt.Errorf("create supervisor log: %w", err)
 	}
 	defer logFile.Close()
 	cmd := exec.Command(self, verb, folder)
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
-		return &DetachError{"start", err}
+		return fmt.Errorf("start supervisor: %w", err)
 	}
-	if verb == "_council" || verb == "_supervise" {
+	if writePID {
 		if err := os.WriteFile(filepath.Join(folder, "supervisor.pid"), []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
-			return &DetachError{"pid", err}
+			return fmt.Errorf("write supervisor pid: %w", err)
 		}
 	}
 	return cmd.Process.Release()

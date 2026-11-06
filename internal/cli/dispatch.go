@@ -103,7 +103,7 @@ func (a *app) dispatchCmd() *cobra.Command {
 				}
 				return exit(dispatch.Print(rec, a.json))
 			}
-			if err := detach(t.Folder); err != nil {
+			if err := proc.Detach(t.Folder, "_supervise", false, true); err != nil {
 				return err
 			}
 			if a.json {
@@ -121,12 +121,6 @@ func (a *app) dispatchCmd() *cobra.Command {
 	c.Flags().StringVar(&level, "level", "", "Judgment level estimate")
 	c.Flags().BoolVar(&wait, "wait", false, "block until the Task ends and print its result")
 	return c
-}
-
-// detach starts "maestro _supervise <folder>" as its own session so the
-// Dispatch outlives this command. Its stderr goes to supervisor.log.
-func detach(folder string) error {
-	return proc.Detach(folder, "_supervise", false)
 }
 
 func (a *app) superviseCmd() *cobra.Command {
