@@ -42,6 +42,7 @@ Size a Task for ten to twenty Lane minutes. Prefer four to six independent Tasks
 
 Parallel Tasks in Worktrees merge at the end of each Task. Write the Plan so they do not conflict:
 
+- A Task title is the commit subject when the Plan says `commit: true`: an imperative verb, sentence case, four to ten words, no period (`Close the environment-prefix hole in the hook`, not `The hook: environment prefixes`).
 - `Files` is the precise list of code files the Task changes. Maestro orders Tasks whose `Files` overlap.
 - `touch` is wide: the whole packages the Task changes, every test file that asserts the behavior (in other packages too), and every doc file the shared rules name (`docs/**`, `CONTEXT.md`, `skills/maestro/**`). A `touch` that leaves out a test or a doc costs one blocked attempt and one resume.
 - In a Plan with more than one edit Task, Lanes do not edit `CHANGELOG.md` or `README.md`: parallel edits to the same section conflict at every merge. Tell each Lane to put its changelog line in the Summary of its Report. After the Run, you write `CHANGELOG.md` and the README once.
