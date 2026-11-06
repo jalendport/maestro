@@ -52,19 +52,15 @@ func OrchestratorPID(r *roster.Roster, parent int, lookup func(int) (proc.Proces
 // QueueAwake starts a detached worker after the Reminder is written. It does
 // not wait for a control lock or a caffeinate process.
 func QueueAwake(r *roster.Roster, event string) {
-	queueAwake(r, event, os.Getppid(), proc.LookupProcess, detachAwake)
+	queueAwake(r, event, os.Getppid(), detachAwake)
 }
 
-func queueAwake(r *roster.Roster, event string, parent int, lookup func(int) (proc.Process, error), start func(string, int, int64)) {
+func queueAwake(r *roster.Roster, event string, parent int, start func(string, int, int64)) {
 	at := time.Now().UnixNano()
-	if event == "reminder" && !r.KeepAwake() {
+	if r == nil || !r.KeepAwake() {
 		return
 	}
-	pid := OrchestratorPID(r, parent, lookup)
-	if pid == 0 {
-		return
-	}
-	start(event, pid, at)
+	start(event, parent, at)
 }
 
 func detachAwake(event string, pid int, at int64) {
@@ -79,9 +75,59 @@ func detachAwake(event string, pid int, at int64) {
 	}
 }
 
-// TurnAwake runs in the detached worker. A lock keeps concurrent events for
-// one Orchestrator from leaving more than one caffeinate alive.
-func TurnAwake(pid int, event string, on bool, at int64) {
+// TurnAwake finds the Orchestrator and updates its lease in the detached worker.
+func TurnAwake(r *roster.Roster, parent int, event string, at int64) {
+	turnAwake(r, parent, event, at, proc.LookupProcess)
+}
+
+func turnAwake(r *roster.Roster, parent int, event string, at int64, lookup func(int) (proc.Process, error)) {
+	_ = PruneAwake(config.Home())
+	if r == nil || !r.KeepAwake() {
+		return
+	}
+	pid := OrchestratorPID(r, parent, lookup)
+	updateAwake(pid, event, true, at)
+}
+
+// PruneAwake removes lease records for Orchestrator processes that have ended.
+// home is the Maestro home directory. Clean can use the same lease lock.
+func PruneAwake(home string) error {
+	dir := filepath.Join(home, "control", "awake")
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	return pruneAwake(dir)
+}
+
+func pruneAwake(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 1 || entry.IsDir() || proc.Alive(pid) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// A lock keeps concurrent events for one Orchestrator from leaving more than
+// one caffeinate alive.
+func updateAwake(pid int, event string, on bool, at int64) {
 	if pid <= 1 || (event != "reminder" && event != "stop") {
 		return
 	}

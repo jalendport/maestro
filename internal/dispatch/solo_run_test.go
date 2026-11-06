@@ -169,6 +169,7 @@ func testSoloRunWake(t *testing.T, status string, answered bool, blocked string)
 				Arguments struct {
 					Body    string
 					Process int `json:"delivery_process_id"`
+					DelayMS int `json:"delay_ms"`
 				}
 			}
 		}
@@ -178,7 +179,7 @@ func testSoloRunWake(t *testing.T, status string, answered bool, blocked string)
 		if call.Params.Name == "todo_comment_create" && !strings.Contains(call.Params.Arguments.Body, "Task complete") {
 			t.Fatalf("Report comment: %s", line)
 		}
-		if call.Params.Name == "timer_set" && (call.Params.Arguments.Process != 42 || !strings.Contains(call.Params.Arguments.Body, "Maestro "+wantKind+":") || !strings.HasSuffix(call.Params.Arguments.Body, ". Run: "+wantCommand)) {
+		if call.Params.Name == "timer_set" && (call.Params.Arguments.Process != 42 || call.Params.Arguments.DelayMS != 1000 || !strings.Contains(call.Params.Arguments.Body, "Maestro "+wantKind+":") || !strings.HasSuffix(call.Params.Arguments.Body, ". Run: "+wantCommand)) {
 			t.Fatalf("Run wake-up: %s", line)
 		}
 		if call.Params.Name == "timer_set" && blocked != "" && (!strings.Contains(call.Params.Arguments.Body, "cause environment") || !strings.Contains(call.Params.Arguments.Body, blocked)) {

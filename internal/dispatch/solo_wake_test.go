@@ -50,7 +50,7 @@ func wakeBodies(t *testing.T, path string) []string {
 		}
 		if call.Params.Name == "timer_set" {
 			args := call.Params.Arguments
-			if args.ProjectID != 1 || args.ProcessID != 42 || args.DelayMS != 0 || strings.Contains(args.Body, "\n") {
+			if args.ProjectID != 1 || args.ProcessID != 42 || args.DelayMS != 1000 || strings.Contains(args.Body, "\n") {
 				t.Fatalf("wake-up: %s", line)
 			}
 			bodies = append(bodies, args.Body)

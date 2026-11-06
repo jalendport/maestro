@@ -65,7 +65,7 @@ func (a *app) hookCommand(awake func(*roster.Roster, string)) *cobra.Command {
 				return nil
 			}
 			if call.Event == "stop" {
-				if r, err := roster.Load(); err == nil {
+				if r, err := roster.Load(); err == nil && r.KeepAwake() && hook.ReminderInScope(call, r.Hook.Scope) {
 					awake(r, "stop")
 				}
 				if call.Harness == "agy" {
@@ -83,7 +83,7 @@ func (a *app) hookCommand(awake func(*roster.Roster, string)) *cobra.Command {
 				}
 				if out := hook.RenderReminder(call, scope, SkillMD, run.ReminderItems); out != nil {
 					fmt.Fprintln(os.Stdout, string(out))
-					if hook.ReminderInScope(call, scope) {
+					if r != nil && r.KeepAwake() && hook.ReminderInScope(call, scope) {
 						awake(r, "reminder")
 					}
 				}
@@ -162,7 +162,7 @@ func (a *app) hookCommand(awake func(*roster.Roster, string)) *cobra.Command {
 			}
 			r, err := roster.Load()
 			if err == nil {
-				hook.TurnAwake(pid, args[0], r.KeepAwake(), at)
+				hook.TurnAwake(r, pid, args[0], at)
 			}
 			return nil
 		},

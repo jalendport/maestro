@@ -43,7 +43,7 @@ func awakeFixture(t *testing.T) (*roster.Roster, string) {
 	h := r.Harness["codex"]
 	h.Bin = filepath.Join(dir, "custom-codex")
 	r.Harness["codex"] = h
-	t.Cleanup(func() { TurnAwake(os.Getpid(), "stop", true, time.Now().Add(time.Hour).UnixNano()) })
+	t.Cleanup(func() { updateAwake(os.Getpid(), "stop", true, time.Now().Add(time.Hour).UnixNano()) })
 	return r, log
 }
 
@@ -104,11 +104,11 @@ func awakeStarts(t *testing.T, path string, count int) {
 
 func TestReminderAwakeRefreshAndStop(t *testing.T) {
 	r, log := awakeFixture(t)
-	start := func(event string, pid int, at int64) { TurnAwake(pid, event, r.KeepAwake(), at) }
-	queueAwake(r, "reminder", 99, awakeLookup(r), start)
+	start := func(event string, parent int, at int64) { turnAwake(r, parent, event, at, awakeLookup(r)) }
+	queueAwake(r, "reminder", 99, start)
 	awakeStarts(t, log, 1)
 	first := awakeRecord(t)
-	queueAwake(r, "reminder", 99, awakeLookup(r), start)
+	queueAwake(r, "reminder", 99, start)
 	awakeStarts(t, log, 2)
 	second := awakeRecord(t)
 	if first == second {
@@ -123,7 +123,7 @@ func TestReminderAwakeRefreshAndStop(t *testing.T) {
 	if err != nil || call.Event != "stop" {
 		t.Fatalf("Stop = %+v, %v", call, err)
 	}
-	queueAwake(r, call.Event, 99, awakeLookup(r), start)
+	queueAwake(r, call.Event, 99, start)
 	waitAwakeState(t, func() bool { return !proc.Alive(second) })
 	if got := awakeRecord(t); got != 0 {
 		t.Fatalf("Stop kept a caffeinate pid: %d", got)
@@ -136,20 +136,76 @@ func TestReminderAwakeOffAndNoAncestor(t *testing.T) {
 	r.Failure.KeepAwake = &off
 	called := false
 	start := func(string, int, int64) { called = true }
-	queueAwake(r, "reminder", 99, awakeLookup(r), start)
+	queueAwake(r, "reminder", 99, start)
 	if called {
 		t.Fatal("keep_awake=false queued work")
 	}
 	r.Failure.KeepAwake = nil
-	queueAwake(r, "reminder", 99, func(int) (proc.Process, error) {
+	turnAwake(r, 99, "reminder", time.Now().UnixNano(), func(int) (proc.Process, error) {
 		return proc.Process{Parent: 1, Executable: "/other/program"}, nil
-	}, start)
-	if called {
-		t.Fatal("no Harness ancestor queued work")
-	}
-	TurnAwake(os.Getpid(), "reminder", false, time.Now().UnixNano())
+	})
+	updateAwake(os.Getpid(), "reminder", false, time.Now().UnixNano())
 	if _, err := os.Stat(log); !os.IsNotExist(err) {
 		t.Fatalf("started caffeinate: %v", err)
+	}
+}
+
+func TestQueueAwakeLeavesProcessWalkAndRecordToWorker(t *testing.T) {
+	r, log := awakeFixture(t)
+	var event string
+	var parent int
+	var at int64
+	queueAwake(r, "reminder", 99, func(e string, p int, timestamp int64) {
+		event, parent, at = e, p, timestamp
+	})
+	if parent != 99 || event != "reminder" || at == 0 {
+		t.Fatalf("worker arguments = %s, %d, %d", event, parent, at)
+	}
+	if _, err := os.Stat(filepath.Join(config.Home(), "control", "awake")); !os.IsNotExist(err) {
+		t.Fatalf("hook wrote lease state before the worker: %v", err)
+	}
+	lookups := 0
+	turnAwake(r, parent, event, at, func(pid int) (proc.Process, error) {
+		lookups++
+		return awakeLookup(r)(pid)
+	})
+	if lookups != 2 {
+		t.Fatalf("worker process lookups = %d, want 2", lookups)
+	}
+	awakeStarts(t, log, 1)
+}
+
+func TestTurnAwakePrunesDeadOrchestratorRecords(t *testing.T) {
+	r, _ := awakeFixture(t)
+	dead := exec.Command("/bin/sleep", "60")
+	if err := dead.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dead.Process.Kill() })
+	if err := dead.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = dead.Wait()
+	dir := filepath.Join(config.Home(), "control", "awake")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	livePath := filepath.Join(dir, strconv.Itoa(os.Getpid()))
+	deadPath := filepath.Join(dir, strconv.Itoa(dead.Process.Pid))
+	for _, path := range []string{livePath, deadPath} {
+		if err := os.WriteFile(path, []byte(`{"event":1}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Prune even when no ancestor matches this worker's parent.
+	turnAwake(r, 99, "stop", time.Now().UnixNano(), func(int) (proc.Process, error) {
+		return proc.Process{Parent: 1, Executable: "/other/program"}, nil
+	})
+	if _, err := os.Stat(deadPath); !os.IsNotExist(err) {
+		t.Fatalf("dead Orchestrator record remains: %v", err)
+	}
+	if data, err := os.ReadFile(livePath); err != nil || string(data) != `{"event":1}` {
+		t.Fatalf("live Orchestrator record changed: %s, %v", data, err)
 	}
 }
 
@@ -157,7 +213,7 @@ func TestTurnAwakeReplacesDeadAndOrdersWorkers(t *testing.T) {
 	_, log := awakeFixture(t)
 	pid := os.Getpid()
 	firstAt := time.Now().UnixNano()
-	TurnAwake(pid, "reminder", true, firstAt)
+	updateAwake(pid, "reminder", true, firstAt)
 	awakeStarts(t, log, 1)
 	old := awakeRecord(t)
 	p, err := os.FindProcess(old)
@@ -168,11 +224,11 @@ func TestTurnAwakeReplacesDeadAndOrdersWorkers(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitAwakeState(t, func() bool { return !proc.Alive(old) })
-	TurnAwake(pid, "reminder", true, firstAt+1)
+	updateAwake(pid, "reminder", true, firstAt+1)
 	awakeStarts(t, log, 2)
 	current := awakeRecord(t)
-	TurnAwake(pid, "stop", true, firstAt+3)
-	TurnAwake(pid, "reminder", true, firstAt+2)
+	updateAwake(pid, "stop", true, firstAt+3)
+	updateAwake(pid, "reminder", true, firstAt+2)
 	waitAwakeState(t, func() bool { return !proc.Alive(current) })
 	if got := awakeRecord(t); got != 0 {
 		t.Fatalf("late worker restarted a finished turn: %d", got)
@@ -186,7 +242,7 @@ func TestTurnAwakeConcurrentEventsKeepOneProcess(t *testing.T) {
 	at := time.Now().UnixNano()
 	for i := range 8 {
 		workers.Add(1)
-		go func() { defer workers.Done(); TurnAwake(pid, "reminder", true, at+int64(i)) }()
+		go func() { defer workers.Done(); updateAwake(pid, "reminder", true, at+int64(i)) }()
 	}
 	workers.Wait()
 	if !proc.Alive(awakeRecord(t)) {
@@ -231,7 +287,7 @@ func TestTurnAwakeDoesNotKillReusedPID(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(os.Getpid())), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	TurnAwake(os.Getpid(), "stop", true, time.Now().UnixNano())
+	updateAwake(os.Getpid(), "stop", true, time.Now().UnixNano())
 	if !proc.Alive(other.Process.Pid) {
 		t.Fatal("stale record stopped a different process")
 	}

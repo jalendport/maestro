@@ -160,7 +160,7 @@ func (l *SoloLink) WakeIf(kind, id, title, harnessName, relayID, verb string, pe
 	if kind == "relay" {
 		body = fmt.Sprintf("Maestro %s: id=%q title=%q harness=%q relay=%q. Run: %s", kind, id, title, harnessName, relayID, verb)
 	}
-	if err := l.Client.Timer(l.ProjectID, l.Orchestrator, 0, body); err != nil {
+	if err := l.Client.Timer(l.ProjectID, l.Orchestrator, time.Second, body); err != nil {
 		ui.Warnf("solo wake-up: %v", err)
 	}
 }
