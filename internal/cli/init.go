@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/spf13/cobra"
@@ -21,7 +22,8 @@ const projectTemplate = `# Maestro project file. Its presence puts this project 
 `
 
 func (a *app) initCmd() *cobra.Command {
-	return &cobra.Command{
+	var write bool
+	c := &cobra.Command{
 		Use:   "init",
 		Short: "Write the project file .agents/maestro.toml, which puts the project in hook scope",
 		Args:  cobra.NoArgs,
@@ -45,6 +47,39 @@ func (a *app) initCmd() *cobra.Command {
 			if err != nil && !os.IsNotExist(err) {
 				return err
 			}
+			existing := err == nil
+			source := projectTemplate
+			if existing {
+				content, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				source = string(content)
+			}
+			defaults := detectProjectStack(root)
+			if !existing {
+				// The empty checks example must not hide the stack's suggestions.
+				if len(defaults.checks) > 0 {
+					source = strings.Replace(source, "# checks = []", "# checks = "+projectArray(defaults.checks), 1)
+				}
+			}
+			merged, err := mergeProjectDefaults(source, defaults)
+			if err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+			if existing {
+				state := "unchanged"
+				if write && merged != source {
+					if err := os.WriteFile(path, []byte(merged), info.Mode().Perm()); err != nil {
+						return err
+					}
+					state = "updated"
+				}
+				if !write && merged != source {
+					return a.result(map[string]string{"path": path, "state": state, "proposed": merged}, "%s %s\nProposed Project file (use --write to merge):\n%s", state, path, merged)
+				}
+				return a.result(map[string]string{"path": path, "state": state}, "%s %s", state, path)
+			}
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				return err
 			}
@@ -54,7 +89,7 @@ func (a *app) initCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				_, err = f.WriteString(projectTemplate)
+				_, err = f.WriteString(merged)
 				closeErr := f.Close()
 				if err != nil {
 					return err
@@ -67,4 +102,6 @@ func (a *app) initCmd() *cobra.Command {
 			return a.result(map[string]string{"path": path, "state": state}, "%s %s", state, path)
 		},
 	}
+	c.Flags().BoolVar(&write, "write", false, "Merge detected stack values into an existing Project file")
+	return c
 }

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/jalendport/maestro/internal/adapter"
@@ -120,6 +122,9 @@ func (a *app) doctorCmd() *cobra.Command {
 			for _, key := range env.Project.Unknown {
 				rows = append(rows, doctorRow{Name: "config", Detail: config.ProjectFile(env.Root), State: fmt.Sprintf("unknown key %q (ignored)", key)})
 			}
+			if _, err := os.Stat(config.ProjectFile(env.Root)); err == nil {
+				rows = append(rows, projectDoctorWarnings(env.Root, env.Project)...)
+			}
 			rt := env.NewRouter()
 			failing := 0
 			for _, f := range env.Roster.Families {
@@ -134,6 +139,9 @@ func (a *app) doctorCmd() *cobra.Command {
 			for _, name := range adapter.Harnesses {
 				state := adapter.State(name, home)
 				detail := fmt.Sprintf("skill %s, link %s, hook %s, reminder %s", state.Skill, state.Link, state.Hook, state.Reminder)
+				if state.Stop != "" {
+					detail += ", Stop " + state.Stop
+				}
 				if state.HookReason != "" {
 					detail += "; " + state.HookReason
 				}
@@ -161,6 +169,30 @@ func (a *app) doctorCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&canary, "canary", false, "Run one Canary per installed Harness, or for the named Harness (uses your Account)")
 	return c
+}
+
+func projectDoctorWarnings(root string, project *config.Project) []doctorRow {
+	var rows []doctorRow
+	warn := func(message string) {
+		rows = append(rows, doctorRow{Name: "project", Detail: config.ProjectFile(root), State: "warning: " + message})
+	}
+	if len(project.Checks) == 0 {
+		warn("no active checks")
+	}
+	for _, check := range project.Checks {
+		words := strings.Fields(check)
+		if len(words) == 0 || words[0] != "docker" {
+			continue
+		}
+		for _, dir := range project.Dirs {
+			if filepath.Clean(config.ExpandHome(dir)) == filepath.Clean(config.ExpandHome("~/.docker")) {
+				return rows
+			}
+		}
+		warn("Docker check needs ~/.docker in dirs")
+		break
+	}
+	return rows
 }
 
 func canaryState(result *dispatch.CanaryResult, version, name string) (string, bool) {
