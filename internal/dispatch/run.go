@@ -977,7 +977,7 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 		if !c.OK {
 			failedChecks++
 		}
-		if c.Reason != "" && !c.Skipped && !(report.Status == brief.StatusPartial && len(report.Blocked) > 0) {
+		if c.Reason != "" && !c.Skipped && !(c.FailureClass == FailStall && report.Status == brief.StatusPartial && len(report.Blocked) > 0) {
 			rec.Outcome.Outcome = OutcomeFailed
 			rec.Outcome.FailureClass = c.FailureClass
 			rec.Outcome.ErrorText = fmt.Sprintf("check failed: %s: %s", c.Command, c.Reason)

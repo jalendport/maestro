@@ -126,8 +126,12 @@ func Status(rec *Record) string {
 		text += fmt.Sprintf("workdir %s\n", rec.Workdir)
 	}
 	var gate Gate
-	if json.Unmarshal(rec.Verification.Gate, &gate) == nil && gate.Verdict == "" && gate.Cause != "" {
-		text += fmt.Sprintf("gate     cause %s (%s)\n", gate.Cause, gate.CauseSource)
+	if json.Unmarshal(rec.Verification.Gate, &gate) == nil {
+		if gate.Scored {
+			text += fmt.Sprintf("gate     satisfies %.2f  verdict %s  risk %s\n", gate.Satisfies, gate.Verdict, gate.Risk)
+		} else if gate.Cause != "" {
+			text += fmt.Sprintf("gate     cause %s (%s)\n", gate.Cause, gate.CauseSource)
+		}
 	}
 	return text + RelayEvents(rec)
 }

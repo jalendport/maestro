@@ -23,11 +23,12 @@ const (
 
 // Gate is the Jev verification gate's answer.
 type Gate struct {
-	Satisfies         float64         `json:"satisfies,omitempty"`
+	Scored            bool            `json:"scored"`
+	Satisfies         float64         `json:"satisfies"`
 	Verdict           string          `json:"verdict,omitempty"`
-	VerdictConfidence float64         `json:"verdict_confidence,omitempty"`
+	VerdictConfidence float64         `json:"verdict_confidence"`
 	Risk              string          `json:"risk,omitempty"`
-	RiskConfidence    float64         `json:"risk_confidence,omitempty"`
+	RiskConfidence    float64         `json:"risk_confidence"`
 	Model             string          `json:"jev_model,omitempty"`
 	ElapsedMS         int64           `json:"elapsed_ms,omitempty"`
 	DiffBytes         int             `json:"diff_bytes,omitempty"`
@@ -122,6 +123,7 @@ func askGate(env *Env, t *Task, rec *Record, b *brief.Brief, report *brief.Repor
 	}
 	risk := resp.Answers["risk"]
 	g := &Gate{
+		Scored:    full,
 		Satisfies: resp.Answers["satisfies"].Noul,
 		Verdict:   resp.Answers["verdict"].Choice, VerdictConfidence: resp.Answers["verdict"].Confidence,
 		Risk: risk.Legend[fmt.Sprint(int(risk.Score+0.5))], RiskConfidence: risk.Confidence,

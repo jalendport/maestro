@@ -166,6 +166,9 @@ func TestPartialBlockedReportKeepsBadResultAfterCheckStall(t *testing.T) {
 				want := FailStall
 				if blocked {
 					want = FailBad
+					if rec.Outcome.ErrorText != "" {
+						t.Fatalf("Stall replaced the Report error text: %s", rec.Outcome.ErrorText)
+					}
 					if cause := rec.ResolveCause(); cause != CauseEnvironment {
 						t.Fatalf("partial Report Cause: %s", cause)
 					}
@@ -181,6 +184,32 @@ func TestPartialBlockedReportKeepsBadResultAfterCheckStall(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestPartialBlockedReportGetsDockerPreflightError(t *testing.T) {
+	root, folder := causeRoot(t), t.TempDir()
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	env := &Env{Roster: &roster.Roster{Router: config.Router{Backend: "rules"}}}
+	task := &Task{Project: root, Access: brief.AccessEdit, IdleLimit: "1s", WallLimit: "1m"}
+	rec := &Record{Kind: "dispatch", Path: folder}
+	judge(env, task, rec, brief.ParseReport("## Blocked\n- tool is missing\nSTATUS: partial"), []string{"docker compose test", "touch must-not-run"}, &brief.Brief{}, attemptBaseline{})
+	want := "check failed: docker compose test: Docker does not respond"
+	if rec.Outcome.Outcome != OutcomeFailed || rec.Outcome.FailureClass != FailBad || rec.Outcome.ErrorText != want || rec.ResolveCause() != CauseEnvironment {
+		t.Fatalf("outcome: %+v", rec.Outcome)
+	}
+	checks := rec.Verification.Checks
+	if len(checks) != 2 || checks[0].FailureClass != FailBad || checks[0].Reason != "Docker does not respond" || !checks[1].Skipped {
+		t.Fatalf("checks: %+v", checks)
+	}
+	stored, err := LoadRecord(folder)
+	if err != nil || stored.Outcome.ErrorText != want || stored.ResolveCause() != CauseEnvironment {
+		t.Fatalf("saved record: %+v error=%v", stored, err)
+	}
+	assertCauseOnlyGate(t, rec, CauseEnvironment, "rule")
 }
 
 func TestNoChecksReasonAppearsInPrintedStatus(t *testing.T) {

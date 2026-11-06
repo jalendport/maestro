@@ -58,7 +58,15 @@ func assertCauseOnlyGate(t *testing.T, rec *Record, cause, source string) {
 	if err := json.Unmarshal(rec.Verification.Gate, &fields); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"satisfies", "verdict", "risk", "verdict_confidence", "risk_confidence"} {
+	if fields["scored"] != false {
+		t.Errorf("Cause-only Gate is scored: %s", rec.Verification.Gate)
+	}
+	for _, field := range []string{"satisfies", "verdict_confidence", "risk_confidence"} {
+		if fields[field] != float64(0) {
+			t.Errorf("Cause-only Gate has no zero value for %s: %s", field, rec.Verification.Gate)
+		}
+	}
+	for _, field := range []string{"verdict", "risk"} {
 		if _, ok := fields[field]; ok {
 			t.Errorf("Cause-only Gate has %s: %s", field, rec.Verification.Gate)
 		}
@@ -88,8 +96,16 @@ func assertCauseOnlyGate(t *testing.T, rec *Record, cause, source string) {
 	rows := 0
 	if err := ledger.Each(func(raw json.RawMessage) error {
 		rows++
-		if strings.Contains(string(raw), `"satisfies"`) {
-			t.Errorf("unscored satisfies in Ledger: %s", raw)
+		var stored Record
+		if err := json.Unmarshal(raw, &stored); err != nil {
+			return err
+		}
+		var gate Gate
+		if err := json.Unmarshal(stored.Verification.Gate, &gate); err != nil {
+			return err
+		}
+		if gate.Scored {
+			t.Errorf("Cause-only Gate is scored in Ledger: %s", raw)
 		}
 		return nil
 	}); err != nil || rows == 0 {
@@ -198,6 +214,85 @@ func TestGateAsksCauseWithVerification(t *testing.T) {
 	judge(env, &Task{Project: root, Access: brief.AccessEdit}, rec, brief.ParseReport("STATUS: done"), nil, &brief.Brief{}, attemptBaseline{})
 	if len(requests) != 1 || len(requests[0].Questions) != 4 || requests[0].State.Diff == "" || rec.Outcome.FailureClass != FailBad || rec.ResolveCause() != CauseCapability {
 		t.Fatalf("requests=%+v record=%+v", requests, rec)
+	}
+}
+
+func TestZeroGateScoreIsRecordedAndPrinted(t *testing.T) {
+	for _, verdict := range []string{"wrong_logic", ""} {
+		t.Run("verdict="+verdict, func(t *testing.T) {
+			t.Setenv("TYPESAFE_API_KEY", "test-key")
+			root := causeRoot(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{"answers": map[string]any{
+					"satisfies": map[string]float64{"noul": 0},
+					"verdict":   map[string]any{"choice": verdict, "confidence": 0},
+					"risk":      map[string]any{"score": 0, "confidence": 0, "legend": map[string]string{"0": "none"}},
+					"cause":     map[string]string{"choice": CauseCapability},
+				}})
+			}))
+			defer server.Close()
+			if err := os.WriteFile(filepath.Join(root, "work.txt"), []byte("wrong work"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			env := &Env{Roster: &roster.Roster{Router: config.Router{Backend: "jev", BaseURL: server.URL}}}
+			rec := &Record{Kind: "dispatch", Path: t.TempDir(), Route: &router.Route{}, Verification: Verification{Changed: []string{"work.txt"}}}
+			gate := runGate(env, &Task{Project: root}, rec, &brief.Brief{}, nil, attemptBaseline{})
+			rec.Verification.Gate = gate.raw()
+			checkGate := func(raw json.RawMessage) {
+				t.Helper()
+				var fields map[string]any
+				if err := json.Unmarshal(raw, &fields); err != nil {
+					t.Fatal(err)
+				}
+				if fields["scored"] != true {
+					t.Errorf("zero score is not scored: %s", raw)
+				}
+				for _, field := range []string{"satisfies", "verdict_confidence", "risk_confidence"} {
+					if fields[field] != float64(0) {
+						t.Errorf("missing zero for %s: %s", field, raw)
+					}
+				}
+			}
+			if err := rec.Save(); err != nil {
+				t.Fatal(err)
+			}
+			stored, err := LoadRecord(rec.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkGate(stored.Verification.Gate)
+			if err := ledger.Append(rec); err != nil {
+				t.Fatal(err)
+			}
+			rows := 0
+			if err := ledger.Each(func(raw json.RawMessage) error {
+				rows++
+				var row Record
+				if err := json.Unmarshal(raw, &row); err != nil {
+					return err
+				}
+				checkGate(row.Verification.Gate)
+				return nil
+			}); err != nil || rows != 1 {
+				t.Fatalf("Ledger rows=%d error=%v", rows, err)
+			}
+			file, err := os.CreateTemp(t.TempDir(), "print")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer file.Close()
+			old := os.Stdout
+			func() { os.Stdout = file; defer func() { os.Stdout = old }(); Print(stored, false) }()
+			printed, err := os.ReadFile(file.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, text := range []string{string(printed), Status(stored)} {
+				if !strings.Contains(text, "satisfies 0.00  verdict "+verdict+"  risk none") || strings.Contains(text, "gate     cause") {
+					t.Errorf("zero score output: %s", text)
+				}
+			}
+		})
 	}
 }
 
