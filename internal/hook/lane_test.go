@@ -1006,6 +1006,21 @@ func TestDecideLaneReadOnlyShellExpansion(t *testing.T) {
 		{"head -n 1 -- $FILE", "$"},
 		{"cat README.md(e:'touch x':)", "("},
 		{"cat file(e:'id':)", "read-only command carries a write flag or form: shell expansion ("},
+		{"sort {-o,victim,README.md}", "shell expansion {"},
+		{`find . -{print,exec} sh -c id \;`, "shell expansion {"},
+		{"rg --pr{e,e}=sh x", "shell expansion {"},
+		{"git diff --ou{t,t}put=f", "shell expansion {"},
+		{"echo {a,b}", "shell expansion {"},
+		{"echo ] }", "shell expansion }"},
+		{"rg x *", "glob can match a file name that starts with -; write ./ before it"},
+		{"ls *_test.go", "glob can match a file name that starts with -; write ./ before it"},
+		{"ls *.go", "glob can match a file name that starts with -; write ./ before it"},
+		{"cat ?.go", "glob can match a file name that starts with -; write ./ before it"},
+		{"cat ?.txt", "glob can match a file name that starts with -; write ./ before it"},
+		{"ls [ab].txt", "glob can match a file name that starts with -; write ./ before it"},
+		{`ls ""*`, "glob can match a file name that starts with -; write ./ before it"},
+		{`ls ''?`, "glob can match a file name that starts with -; write ./ before it"},
+		{"ls\t*.go", "glob can match a file name that starts with -; write ./ before it"},
 	} {
 		for _, access := range []string{"read", "edit"} {
 			got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": tc.command}}, &Lane{Access: access, Root: "/project"})
@@ -1015,7 +1030,8 @@ func TestDecideLaneReadOnlyShellExpansion(t *testing.T) {
 		}
 	}
 	for _, command := range []string{
-		"grep -r --include=*.go x .", "ls *_test.go", "ls *.go", "cat ?.txt", "ls [ab].txt", "echo {a,b}", "echo ] }",
+		"grep -r --include=*.go x .", "ls ./*_test.go", "cat src/**/*.php", "ls ./[ab].txt", "cat ./?.go",
+		`ls "./"*`, `ls '.'*`, `ls \**`, `echo \{a,b\}`, `echo \}`, `echo '{a,b}'`, `echo "}"`,
 		"find . -name '*.go'", "rg 'x*' -g '*.go' src", "echo '$HOME'", `echo \$HOME`, "git log -- '*.go'",
 		"find . -type f -print", `grep -r "a{2}" .`, "cat file 2>&1", `find . \( -name a -o -name b \)`, "grep 'f(x)' main.go",
 	} {

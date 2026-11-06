@@ -232,13 +232,15 @@ The following limits apply:
 - `npm --version`, `npm ls`, `npm view`, `pnpm --version`, `pnpm ls`, and `yarn --version` are outside the list. Corepack can run a package manager that the project's `packageManager` field names. Yarn can also use `yarnPath`; pnpm can load `.pnpmfile.cjs` or `.pnpmfile.mjs` and select a package manager version from project settings. `cargo --version` and `rustc --version` are outside the list because rustup can run a local toolchain that `rust-toolchain.toml` names.
 - A `--version` form accepts no extra arguments. `pip list` and `pip show` deny `--log` and `--python`; `--python` can run a project file as an interpreter. `docker compose config` denies `-o`, `--output`, and `--lock-image-digests`.
 
+`node --version`, `python3 --version`, `php --version`, and `go version` stay on the list under version managers (asdf, mise, pyenv) because these shims select an installed interpreter by a version string from the project and do not run project files; a `path:` version in `.tool-versions` is the user's own machine configuration, not repository content.
+
 These checks use the command's documented forms: [sed](https://www.gnu.org/software/sed/manual/sed.html), [file](https://man.freebsd.org/cgi/man.cgi?query=file&sektion=1&format=html), [yq](https://mikefarah.gitbook.io/yq/usage/split-into-multiple-files), [Git tag](https://git-scm.com/docs/git-tag), [Go](https://pkg.go.dev/cmd/go), and [pip](https://pip.pypa.io/en/stable/cli/pip/).
 
 The toolchain limits follow the documented behavior of [Composer plugins](https://getcomposer.org/doc/articles/plugins.md), [Corepack's package manager selection](https://github.com/nodejs/corepack#when-authoring-packages), [pnpm hooks](https://pnpm.io/pnpmfile), and [rustup overrides](https://rust-lang.github.io/rustup/overrides.html).
 
 Tests, builds, formatters, and package installs stay outside this list. This includes `go test`, `npm test`, `composer test`, `pytest`, `cargo test`, and `cargo metadata`, which can write `Cargo.lock`. An edit Lane needs a project `checks` or `allow` entry to run these commands. A read Lane cannot run them. The deny reason names every accepted read-only command.
 
-This list does not grant shell loops, command substitution, redirects, or a pipe to a write command. The existing shell and path checks still apply. The hook denies `$`, backquotes, and unquoted `(` in read-only commands, including zsh glob qualifiers that can run code. It permits globs and brace lists (`*`, `?`, `[`, `]`, `{`, `}`), such as `grep -r --include=*.go x .` and `ls *_test.go`.
+This list does not grant shell loops, command substitution, redirects, or a pipe to a write command. The existing shell and path checks still apply. The hook denies `$`, backquotes, and unquoted `(`, `{`, or `}` in read-only commands, including zsh glob qualifiers that can run code and brace lists that can add flags. A glob word that starts with an unquoted `*`, `?`, or `[` is denied: `glob can match a file name that starts with -; write ./ before it`. A glob after a fixed prefix is permitted, such as `grep -r --include=*.go x .`, `ls ./*_test.go`, and `cat src/**/*.php`.
 
 ### [router]
 

@@ -774,13 +774,16 @@ func commandAllowed(command string, lane *Lane) bool {
 
 // shellExpansion names the first word of a read-only command the shell would
 // execute or rewrite before the command runs: a parameter or ANSI-C form (`$`),
-// a backquote, or a parenthesis. Globs and brace lists are allowed.
+// a backquote, a parenthesis, or a brace. A glob needs a fixed prefix so it
+// cannot match a file name that starts with a dash.
 func shellExpansion(command string) string {
 	var quote byte
+	prefix := false
 	for i := 0; i < len(command); i++ {
 		ch := command[i]
 		if ch == '\\' && quote != '\'' {
 			i++
+			prefix = true
 			continue
 		}
 		if quote != 0 {
@@ -788,15 +791,25 @@ func shellExpansion(command string) string {
 				quote = 0
 			} else if quote == '"' && (ch == '$' || ch == '`') {
 				return string(ch)
+			} else {
+				prefix = true
 			}
 			continue
 		}
 		switch ch {
 		case '\'', '"':
 			quote = ch
-		case '$', '`', '(':
+		case '$', '`', '(', '{', '}':
 			// `(` covers zsh glob qualifiers such as `file(e:'cmd':)`.
 			return string(ch)
+		case ' ', '\t':
+			prefix = false
+		case '*', '?', '[':
+			if !prefix {
+				return "glob can match a file name that starts with -; write ./ before it"
+			}
+		default:
+			prefix = true
 		}
 	}
 	return ""
