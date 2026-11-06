@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Added
+- Added a Plan check before Runs with two or more edit Tasks: one quick read Dispatch checks paths, symbols, scope, and order against the tree; findings hold the Run for approval, a failed check lets it continue, and `[run] plan_check = false` or `--no-plan-check` turns it off
+- Added Worktrees for standalone edit Dispatches, with template commits, landing through a moved user branch, uncommitted landing for `commit: false`, and `maestro dispatch --finish <task>` to retry a blocked landing without a new Lane; `maestro clean` removes old Worktrees and keeps branches with commits that did not land
+- Added a landing check on the merged Run branch before a Worktree-mode Run or standalone edit Dispatch lands, with a pause on failure and a retry after a fix Task
 - Added the Worktree switches: `[run] worktrees` in `~/.maestro/config.toml` defaults to `true`, and project `worktrees = false` can turn it off; `maestro doctor` shows the setting, dependency links, and a warning for uncommitted changes
 - Added Worktree mode for a Run: when Worktrees are on, the repository has a commit, the tree has no uncommitted changes, and the Plan has more than one edit Task, each edit Task runs at the same time as the others in its own Worktree on its own Task branch; a read Task of such a Run reads a detached Worktree at the Run branch head, so a review Task sees the merged work; otherwise the Run uses tree mode with `tree busy`, as before, also when HEAD is not on a branch or when a Task's `touch` names a shared dependency folder (`task <n> touches <folder>`). The mode and the tree-mode reason go into `run.json` once, when the Run starts, and `maestro run`, `maestro status`, and the Run report show `worktrees: on` or `worktrees: off (<reason>: Tasks run one at a time)`
 - Added the overlap order for Worktree mode: an edit Task waits with `files overlap with <n>` while an earlier edit Task that is not its dependency and is not done shares a path with it, and the Routes, status, and report show `after <n> (files overlap)`
@@ -25,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `maestro doctor --canary [harness]` to check each Harness with a small read Dispatch and store version-specific launch, hook, and Report results; the hook part does not apply to Codex, and the Canary uses only its Wall limit
 
 ### Changed
+- Changed Runs and standalone Dispatches to use tree mode for container-bound checks (`ddev`, `docker`, `docker-compose`, `lando`, `sail`); Worktrees link `.env` and `.env.local` and the project's `worktree_links`, `maestro init` proposes links per stack, and `maestro doctor` warns about ignored environment files that are not linked
 - Changed Lanes to never commit: every rendered Brief says `Do not commit`, Claude Lanes no longer get the `git add` and `git commit` tools, and the hook no longer approves these commands for a Lane. A Brief's `commit: true` now means that Maestro commits the Task's changed paths after the gate, on the user's branch in tree mode and for a single Dispatch
 - Changed slow tests to use short limits, poll intervals, and wake-up waits that each test sets, and to run independent cases in parallel; `go test ./...` takes about 15 seconds instead of 105, tests check that the production defaults stay the same, and a `wait` test no longer starts the installed Harnesses
 - Changed `maestro init` to detect project stacks, write cache directories and command allow rules, suggest checks in comments, and merge missing values with `--write` while it keeps existing values and comments
@@ -50,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Removed `maestro tell` and `maestro roster solo`, which used Lane tabs and Solo agent tool discovery
 
 ### Fixed
+- Fixed the scope guard to keep test files in scope, flagged as `tests outside touch` for the gate and the end-of-Run Council when they are outside the Brief's own `touch`, while a deleted test file outside `touch` stays a violation; the read-only command check denies a glob in a word that starts with `-` unless it follows `=`
+- Fixed checks that failed by chance under concurrent Lanes: a failed check runs once more and records `flaky: true` when it passes, and the recorded output keeps the failure lines before its tail; four timing tests lost their tight bounds
 - Fixed the read-only command check to deny unquoted brace lists and globs that can match a file name that starts with `-`; globs after a fixed prefix stay permitted, and the deny reason tells the Lane to write `./` before the glob
 - Fixed Run landing on busy checkouts: Worktree mode no longer needs a clean tree or more than one edit Task, a user branch that gained commits is rebased onto, uncommitted changes block a landing only when their paths overlap the Run's, a saved Run keeps its mode on resume, a read Worktree left by a stopped supervisor is reused, and a squash retry continues after a failed marker write
 - Fixed `maestro clean` to remove expired Runs with a blocked Task or `finish_pending` again while Worktree cleanup keeps the branches that did not land; `maestro wait <task>` follows only that Task and returns its result when the Task ends, even while other Tasks of the Run continue

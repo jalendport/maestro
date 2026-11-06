@@ -19,6 +19,8 @@ Each read Task of a Worktree-mode Run starts in a detached Worktree at the Run b
 - One bounded Task → write a Brief file and run `maestro dispatch <brief.md>`. It returns a Task id at once; `maestro wait <id>` prints the result. `--wait` blocks.
 - A review, or one question for several minds → `maestro council "<question>" [--challenge] [--task <id>]`. `maestro wait <slug>` prints the Merge. You synthesize; Maestro never does.
 
+Before a Run with two or more edit Tasks starts, Maestro runs a Plan check against the project tree: one quick read Lane checks paths, symbols, scope, and order; `maestro wait <run>` waits for it, findings hold the Run for a corrected Plan and `maestro approve <run>`, a failed check never blocks, and `--no-plan-check` or `[run] plan_check = false` skips it. Before a Worktree-mode Run or a standalone edit Dispatch lands, Maestro runs the project's `checks` once on the merged Run branch, after any landing rebase. A failed landing check keeps the Run branch and every Task commit: for a Run, add a fix Task with `maestro add <brief>` and then `maestro resume <run> --finish`; for a Dispatch, fix the Run branch and then `maestro dispatch --finish <task>`. A standalone edit Dispatch uses a Worktree and lands the same way; `maestro dispatch --finish <task>` retries a blocked landing. Container-bound checks (`ddev`, `docker`, `lando`, `sail`) put a Run or Dispatch in tree mode.
+
 Ask the user only when a verb exits 2, or when a Task touches a human gate: push, publish, release, deletes outside the workspace.
 
 ## Exit codes
@@ -31,7 +33,7 @@ Ask the user only when a verb exits 2, or when a Task touches a human gate: push
 
 - Write the Goal as definitions, not commands, and the Done as what must be true when the Lane stops.
 - `level:` is your estimate. Jev sets the Tier. Write the level you believe; do not raise it to reach a stronger Lane, and do not name a Lane to reach one. Maestro uses a Frontier Lane when the work calls for it.
-- `touch:` lists every path the Task may change, including the tests, fixtures, and docs the Done names, and `CHANGELOG.md` when the Done asks for an entry. A Lane that must change a file outside `touch` stops blocked, and Maestro sends the Task back to you with Cause `brief`.
+- `touch:` lists the paths the Task may change. Test files are always in scope; list all other required paths, including other fixtures, docs, and `CHANGELOG.md` when the Done asks for an entry. A Lane that must change another file outside `touch` stops blocked, and Maestro sends the Task back to you with Cause `brief`. `maestro wait` names any test file a Lane changed outside its own `touch`; read those diffs for weakened assertions.
 - A token-billed Lane takes edit work only when `lane:` names it, so name one only when no subscription Lane fits.
 
 A blocked Task comes back to you with its Cause: for `brief`, correct the Brief; for `environment`, resolve the blocker; for `none`, judge the Bad result before you resume; for `capability`, a stronger Lane can help.
