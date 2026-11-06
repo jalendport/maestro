@@ -155,9 +155,6 @@ func (b *Brief) WantsCommit() bool { return b.Commit != nil && *b.Commit }
 
 // WallLimitDuration parses the optional wall_limit field.
 func (b *Brief) WallLimitDuration() time.Duration {
-	if b.WallLimit == "" {
-		return 0
-	}
 	d, _ := time.ParseDuration(b.WallLimit)
 	return d
 }

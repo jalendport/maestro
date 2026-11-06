@@ -1,6 +1,7 @@
 package run
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -601,7 +602,7 @@ func (sup *Supervisor) start(t *TaskState) (started bool) {
 			t.Error = err.Error()
 			return false
 		}
-		req := router.Request{Lane: firstNonEmpty3(t.ResumeLane, b.Lane, sup.State.Lane), Level: sup.State.Level, Excluded: t.Excluded}
+		req := router.Request{Lane: firstNonEmpty(t.ResumeLane, firstNonEmpty(b.Lane, sup.State.Lane)), Level: sup.State.Level, Excluded: t.Excluded}
 		req.Floor, req.Ceiling = routeBounds(sup.State, b)
 		if t.Escalations > 0 && t.Route != nil && req.Lane == "" {
 			// Escalation: the new pick must be a higher Tier.
@@ -711,8 +712,6 @@ func nextTier(t roster.Tier) roster.Tier {
 	}
 	return ""
 }
-
-func firstNonEmpty3(a, b, c string) string { return firstNonEmpty(a, firstNonEmpty(b, c)) }
 
 // handle applies one finished Dispatch to the Task and the Run.
 func (sup *Supervisor) handle(r result) {
@@ -1022,7 +1021,7 @@ type Resume struct {
 func (sup *Supervisor) applyResume(path string) {
 	var r Resume
 	b, err := os.ReadFile(path)
-	if err != nil || jsonUnmarshal(b, &r) != nil {
+	if err != nil || json.Unmarshal(b, &r) != nil {
 		return
 	}
 	if r.Finish {
@@ -1105,7 +1104,7 @@ func (sup *Supervisor) end(state string) error {
 		}
 	}
 	if s.Mode == "worktree" && state == StateCancelled && s.RunBranch != "" {
-		kept, err := worktree.Cancel(s.Project, s.Run)
+		kept, err := worktree.Remove(s.Project, s.Run)
 		s.KeptBranches = kept
 		if err != nil {
 			s.PauseReason = err.Error()
@@ -1199,7 +1198,7 @@ func (sup *Supervisor) endOfRunCouncil() *council.Council {
 			var g struct {
 				Risk string `json:"risk"`
 			}
-			if len(rec.Verification.Gate) > 0 && jsonUnmarshal(rec.Verification.Gate, &g) == nil && (g.Risk == "high" || g.Risk == "critical") {
+			if len(rec.Verification.Gate) > 0 && json.Unmarshal(rec.Verification.Gate, &g) == nil && (g.Risk == "high" || g.Risk == "critical") {
 				trigger = true
 			}
 			for _, p := range rec.Verification.Changed {

@@ -450,18 +450,16 @@ func Identity(family, model string) string {
 	case strings.HasPrefix(family, "claude-"):
 		name, email = "Claude", "noreply@anthropic.com"
 		parts := strings.Split(strings.TrimPrefix(model, "claude-"), "-")
-		if len(parts) > 0 {
-			switch parts[0] {
-			case "opus", "sonnet", "haiku", "fable":
-				name += " " + strings.ToUpper(parts[0][:1]) + parts[0][1:]
-				if len(parts) > 1 {
-					version := parts[1:]
-					if len(version[len(version)-1]) == 8 {
-						version = version[:len(version)-1]
-					}
-					if len(version) > 0 {
-						name += " " + strings.Join(version, ".")
-					}
+		switch parts[0] {
+		case "opus", "sonnet", "haiku", "fable":
+			name += " " + strings.ToUpper(parts[0][:1]) + parts[0][1:]
+			if len(parts) > 1 {
+				version := parts[1:]
+				if len(version[len(version)-1]) == 8 {
+					version = version[:len(version)-1]
+				}
+				if len(version) > 0 {
+					name += " " + strings.Join(version, ".")
 				}
 			}
 		}
@@ -874,10 +872,6 @@ func (r Run) LandingWorktree() (dir string, cleanup func(), err error) {
 // Remove returns the branches it keeps when the Run did not land.
 func Remove(root, run string) ([]string, error) {
 	return remove(root, run, false)
-}
-
-func Cancel(root, run string) ([]string, error) {
-	return Remove(root, run)
 }
 
 func remove(root, run string, finished bool) ([]string, error) {

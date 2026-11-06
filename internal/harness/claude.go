@@ -279,7 +279,7 @@ func (p *claudeParser) Line(line []byte) bool {
 				text = ev.Subtype
 			}
 			p.out.ErrorText = text
-			p.out.Signals = append(p.out.Signals, classifyText("claude", text))
+			p.out.Signals = append(p.out.Signals, ClassifyText("claude", text))
 		}
 		p.out.CostUSD = ev.TotalCost
 		p.out.Tokens = Tokens{Input: ev.Usage.Input, CachedInput: ev.Usage.CacheRead, Output: ev.Usage.Output, Reasoning: ev.Usage.OutputDetails.Thinking}

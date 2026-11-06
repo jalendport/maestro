@@ -27,9 +27,6 @@ func isReminderEvent(c *Call, raw map[string]any) bool {
 // keeps a Reminder event out of scope when the Roster cannot load. liveItems
 // reads project state only after the prompt is in scope and outside a Lane.
 func RenderReminder(c *Call, scope, skill string, liveItems func(string) string) []byte {
-	if c.Harness == "grok" {
-		return nil
-	}
 	if !ReminderInScope(c, scope) {
 		if c.Harness == "agy" {
 			return []byte(`{}`)

@@ -141,7 +141,6 @@ func detach(folder string) error {
 	cmd := exec.Command(self, "_supervise", folder)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.Stdin = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err

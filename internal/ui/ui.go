@@ -4,7 +4,6 @@ package ui
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -48,11 +47,6 @@ func Outf(format string, a ...any) {
 		return
 	}
 	fmt.Fprintf(os.Stdout, format+"\n", a...)
-}
-
-// Fprintln writes a plain line to the given writer.
-func Fprintln(w io.Writer, s string) {
-	fmt.Fprintln(w, s)
 }
 
 // FirstLine returns the first line, with an optional display limit (0 is unlimited).

@@ -1,7 +1,6 @@
 package run
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -10,8 +9,6 @@ import (
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/ui"
 )
-
-func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
 
 // Report renders report.md: a header, one line per Task, then the items
 // that need the Orchestrator. Under 40 lines.

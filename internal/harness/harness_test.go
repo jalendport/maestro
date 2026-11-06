@@ -47,10 +47,10 @@ func TestVersionLess(t *testing.T) {
 }
 
 func TestClassify(t *testing.T) {
-	if classifyText("codex", "You've hit your usage limit").Class != "limit" {
+	if ClassifyText("codex", "You've hit your usage limit").Class != "limit" {
 		t.Fatal("limit")
 	}
-	if classifyText("codex", "something odd").Class != "transient" {
+	if ClassifyText("codex", "something odd").Class != "transient" {
 		t.Fatal("unknown must be transient")
 	}
 }

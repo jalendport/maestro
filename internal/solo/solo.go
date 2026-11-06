@@ -103,11 +103,9 @@ func Connect() (*Client, error) {
 
 // Close ends the session.
 func (c *Client) Close() {
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.stdin.Close()
-		_ = c.cmd.Process.Kill()
-		_, _ = c.cmd.Process.Wait()
-	}
+	_ = c.stdin.Close()
+	_ = c.cmd.Process.Kill()
+	_, _ = c.cmd.Process.Wait()
 }
 
 func (c *Client) read(r io.Reader) {

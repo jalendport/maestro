@@ -213,8 +213,8 @@ func (rt *Router) Route(req Request) (route *Route, err error) {
 	rulesFamily, tie := rt.rulesPick(cands, level, category, req.Floor)
 	useRules := rt.Roster.Router.Backend == "rules" || (req.Project != nil && req.Project.Router == "rules")
 	if !useRules {
-		key, err := jev.Key()
-		useRules = err != nil || key == ""
+		_, err := jev.Key()
+		useRules = err != nil
 	}
 	if !useRules {
 		r, jr, err := rt.jevRoute(req, cands, category, defaults)

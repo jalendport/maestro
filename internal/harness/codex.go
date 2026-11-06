@@ -158,7 +158,7 @@ func (p *codexParser) Line(line []byte) bool {
 		}
 		p.out.IsError = true
 		p.out.ErrorText = text
-		p.out.Signals = append(p.out.Signals, classifyText("codex", text))
+		p.out.Signals = append(p.out.Signals, ClassifyText("codex", text))
 		return true
 	}
 	return false

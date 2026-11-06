@@ -31,9 +31,6 @@ func ParseReport(text string) *Report {
 	r := &Report{Raw: text, Order: SectionOrder(text), Status: StatusUnshaped}
 	// The status and position lines sit after the last heading; keep them out of that section's body.
 	r.Sections = SplitSections(positionRe.ReplaceAllString(statusRe.ReplaceAllString(text, ""), ""))
-	for k, v := range r.Sections {
-		r.Sections[k] = strings.TrimSpace(v)
-	}
 	if m := statusRe.FindAllStringSubmatch(text, -1); len(m) > 0 {
 		r.Status = strings.ToLower(m[len(m)-1][1])
 	}

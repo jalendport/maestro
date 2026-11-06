@@ -81,9 +81,6 @@ func FindTask(root, id string) (string, bool) {
 	}
 	runs, _ := RunFolders(root)
 	for _, r := range runs {
-		if !r.IsDir() {
-			continue
-		}
 		if r.Name() == id {
 			folder := filepath.Join(config.RunsDir(root), r.Name())
 			if _, err := os.Stat(filepath.Join(folder, "run.json")); !os.IsNotExist(err) {

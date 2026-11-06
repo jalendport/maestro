@@ -15,10 +15,7 @@ func HookJSON(harness string) (string, error) {
 		return "", fmt.Errorf("unknown harness %q", harness)
 	}
 	root := object()
-	set, err := events(root, harness, true)
-	if err != nil {
-		return "", err
-	}
+	set, _ := events(root, harness, true)
 	set.object = hookSet(spec).object
 	data, err := root.MarshalJSON()
 	if err != nil {

@@ -121,7 +121,7 @@ func (p *agyParser) Outcome() *Outcome {
 	if err := json.Unmarshal([]byte(text), &doc); err != nil {
 		p.out.IsError = true
 		p.out.ErrorText = cutText(text, 500)
-		p.out.Signals = append(p.out.Signals, classifyText("agy", text))
+		p.out.Signals = append(p.out.Signals, ClassifyText("agy", text))
 		return p.out
 	}
 	p.out.SessionID = doc.ConversationID
@@ -141,7 +141,7 @@ func (p *agyParser) Outcome() *Outcome {
 		if p.out.ErrorText == "" {
 			p.out.ErrorText = doc.Status + " " + doc.Error
 		}
-		p.out.Signals = append(p.out.Signals, classifyText("agy", doc.Status+" "+doc.Error))
+		p.out.Signals = append(p.out.Signals, ClassifyText("agy", doc.Status+" "+doc.Error))
 	}
 	return p.out
 }

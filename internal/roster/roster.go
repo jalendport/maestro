@@ -524,9 +524,9 @@ func (r *Roster) bindAccounts() {
 // family the defaults no longer have, an account no family uses, a level that
 // names a fan-out effort.
 func (r *Roster) checkDrift(d, u *config.File) {
-	for id := range u.Families {
+	for id, f := range u.Families {
 		if _, ok := d.Families[id]; !ok {
-			if _, ok := u.Families[id]; ok && u.Families[id].Harness == nil {
+			if f.Harness == nil {
 				r.Warnings = append(r.Warnings, fmt.Sprintf("user file overrides family %q, which the embedded defaults no longer have", id))
 			}
 		}
@@ -591,9 +591,6 @@ func lowestLevel(f *Family) int {
 // to the Tier's default chain.
 func (r *Roster) Chain(t Tier, category string) []string {
 	chains := r.Rules[t]
-	if chains == nil {
-		return nil
-	}
 	if c, ok := chains[category]; ok && category != "" {
 		return c
 	}
@@ -638,10 +635,7 @@ func (r *Roster) Identity(family, model string) string {
 
 // Threshold reads one router threshold for the active backend.
 func (r *Roster) Threshold(key string) float64 {
-	if th, ok := r.Router.Thresholds[r.Router.Backend]; ok {
-		return th[key]
-	}
-	return 0
+	return r.Router.Thresholds[r.Router.Backend][key]
 }
 
 // StripEnv returns the environment names a Harness's Dispatches drop.

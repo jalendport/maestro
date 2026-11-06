@@ -885,7 +885,7 @@ loop:
 				class = FailBad
 			}
 		}
-		if text != "" && classifyErr(t.Route.Harness, text) == "lane" {
+		if text != "" && harness.ClassifyText(t.Route.Harness, text).Class == "lane" {
 			class = FailLane
 		}
 		if exitCode != 0 && text == "" {
@@ -1088,9 +1088,6 @@ func finish(rec *Record) {
 // terminate sends SIGTERM to the whole process group, waits up to 15 s for
 // Wait to return, then SIGKILLs the group. It returns Wait's error.
 func terminate(cmd *exec.Cmd, waitDone <-chan error) error {
-	if cmd.Process == nil {
-		return nil
-	}
 	pgid := -cmd.Process.Pid
 	_ = syscall.Kill(pgid, syscall.SIGTERM)
 	select {
@@ -1106,11 +1103,6 @@ func terminate(cmd *exec.Cmd, waitDone <-chan error) error {
 	case <-time.After(10 * time.Second):
 		return fmt.Errorf("process %d did not exit after SIGKILL", cmd.Process.Pid)
 	}
-}
-
-// classifyErr maps stderr or error text to a class word for the failure path.
-func classifyErr(harnessName, text string) string {
-	return harness.ClassifyText(harnessName, text).Class
 }
 
 func cut(s string, n int) string {

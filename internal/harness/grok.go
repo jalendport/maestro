@@ -156,7 +156,7 @@ func (p *grokParser) Line(line []byte) bool {
 	if err := json.Unmarshal(line, &event); err != nil {
 		p.out.IsError = true
 		p.out.ErrorText = cutText(text, 500)
-		p.out.Signals = append(p.out.Signals, classifyText("grok", text))
+		p.out.Signals = append(p.out.Signals, ClassifyText("grok", text))
 		return true
 	}
 	switch event.Type {
@@ -194,7 +194,7 @@ func (p *grokParser) Line(line []byte) bool {
 	if err := json.Unmarshal(line, &doc); err != nil {
 		p.out.IsError = true
 		p.out.ErrorText = cutText(text, 500)
-		p.out.Signals = append(p.out.Signals, classifyText("grok", text))
+		p.out.Signals = append(p.out.Signals, ClassifyText("grok", text))
 		return true
 	}
 	switch event.Type {
@@ -242,7 +242,7 @@ func (p *grokParser) Line(line []byte) bool {
 			}
 			p.out.IsError = true
 			p.out.ErrorText = errorText
-			p.out.Signals = append(p.out.Signals, classifyText("grok", errorText))
+			p.out.Signals = append(p.out.Signals, ClassifyText("grok", errorText))
 		}
 	}
 	return true

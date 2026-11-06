@@ -676,35 +676,27 @@ func TestFinishRetriesCleanup(t *testing.T) {
 	}
 }
 
-func TestRemoveAndCancelKeepUnlandedBranches(t *testing.T) {
-	for _, cancel := range []bool{false, true} {
-		t.Run(map[bool]string{false: "remove", true: "cancel"}[cancel], func(t *testing.T) {
-			root := repository(t)
-			r := openRun(t, root)
-			w := addTask(t, r, "a")
-			commitTask(t, w, "change.txt", "change\n")
-			mergeTask(t, r, "a")
-			left := addTask(t, r, "left")
-			commitTask(t, left, "left.txt", "left\n")
-			write(t, config.RunsDir(root), r.ID+"/run.json", `{"state":"paused"}`)
-			removeRun := Remove
-			if cancel {
-				removeRun = Cancel
-			}
-			kept, err := removeRun(root, r.ID)
-			want := []string{left.Branch, r.Branch}
-			if err != nil || !reflect.DeepEqual(kept, want) {
-				t.Fatalf("kept: %v, %v; want %v", kept, err, want)
-			}
-			for _, branch := range kept {
-				if _, err := head(root, "refs/heads/"+branch); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if _, err := os.Stat(left.Dir); !os.IsNotExist(err) {
-				t.Fatalf("Worktree remains: %v", err)
-			}
-		})
+func TestRemoveKeepsUnlandedBranches(t *testing.T) {
+	root := repository(t)
+	r := openRun(t, root)
+	w := addTask(t, r, "a")
+	commitTask(t, w, "change.txt", "change\n")
+	mergeTask(t, r, "a")
+	left := addTask(t, r, "left")
+	commitTask(t, left, "left.txt", "left\n")
+	write(t, config.RunsDir(root), r.ID+"/run.json", `{"state":"paused"}`)
+	kept, err := Remove(root, r.ID)
+	want := []string{left.Branch, r.Branch}
+	if err != nil || !reflect.DeepEqual(kept, want) {
+		t.Fatalf("kept: %v, %v; want %v", kept, err, want)
+	}
+	for _, branch := range kept {
+		if _, err := head(root, "refs/heads/"+branch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(left.Dir); !os.IsNotExist(err) {
+		t.Fatalf("Worktree remains: %v", err)
 	}
 }
 
