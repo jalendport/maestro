@@ -92,7 +92,7 @@ func taskRunWaitItem(s *run.State, task *run.TaskState) (*waitItem, error) {
 	if s.State == run.StateLive && !run.SupervisorAlive(s) {
 		return nil, nil
 	}
-	if task.DependencyBlocked || (task.State != run.TaskBlocked && task.State != run.TaskFailed) || run.PendingResume(s.Folder, task.ID) {
+	if !run.NeedsAnswer(s, task) {
 		return nil, nil
 	}
 	item := &waitItem{Kind: "task_blocked", Run: s.Run, Task: task.ID, Reason: taskWaitReason(task), NextCommand: run.ResumeCommand(s, task), JudgedFiles: taskJudgedFiles(task)}

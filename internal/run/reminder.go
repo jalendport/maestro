@@ -54,7 +54,7 @@ func ReminderItems(root string) string {
 						items = append(items, reminderLane(task.ID, task.Title, task.Route, task.StartedAt))
 					}
 				}
-				if s.State == StateLive && !task.DependencyBlocked && (task.State == TaskBlocked || task.State == TaskFailed) && !PendingResume(folder, task.ID) {
+				if s.State == StateLive && NeedsAnswer(s, task) {
 					reason := blockedText(task)
 					if reason == "" {
 						reason = "Task needs an answer from the Orchestrator"

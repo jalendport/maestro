@@ -1,8 +1,6 @@
 package hook
 
 import (
-	"bytes"
-	"encoding/json"
 	"os"
 	"strings"
 
@@ -81,9 +79,5 @@ func renderReminder(c *Call, skill string, liveItems func(string) string) []byte
 	case "agy":
 		out = map[string]any{"injectSteps": []any{map[string]any{"ephemeralMessage": reminder}}}
 	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(out)
-	return bytes.TrimSpace(buf.Bytes())
+	return encodeJSON(out)
 }

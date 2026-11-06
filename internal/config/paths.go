@@ -158,3 +158,11 @@ func CodexHome(home string) string {
 	}
 	return filepath.Join(home, ".codex")
 }
+
+// RelOrAbs returns a relative path within root, or the original path.
+func RelOrAbs(root, p string) string {
+	if r, err := filepath.Rel(root, p); err == nil && !strings.HasPrefix(r, "..") {
+		return r
+	}
+	return p
+}

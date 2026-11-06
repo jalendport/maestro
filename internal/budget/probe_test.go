@@ -47,6 +47,46 @@ printf '%s\n' '{"id":2,"result":{"rateLimits":{"planType":"test","primary":{"use
 	}
 }
 
+func TestCodexReadSkipsMalformedAnswers(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "codex")
+	script := `#!/bin/sh
+read line
+read line
+read line
+printf '%s\n' '{"id":1,"result":{}}' '{"id":2,"result":{"rateLimits":{"planType":"discard","primary":{"usedPercent":"bad"}}}}' '{"id":2,"result":{"rateLimits":{"planType":"kept"}}}'
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	limits, err := ReadCodex(bin)
+	if err != nil || limits.Plan != "kept" || len(limits.Windows) != 0 {
+		t.Fatalf("limits = %+v, error = %v", limits, err)
+	}
+}
+
+func TestCodexCallsKeepErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, reply, want string
+	}{
+		{"server error", `{"id":2,"error":{"message":"no credits"}}`, "codex app-server: no credits"},
+		{"no answer", `{"id":1,"result":{}}`, "codex app-server ended without an answer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin := filepath.Join(t.TempDir(), "codex")
+			script := "#!/bin/sh\nread line\nread line\nread line\nprintf '%s\\n' '" + tc.reply + "'\n"
+			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ReadCodex(bin); err == nil || err.Error() != tc.want {
+				t.Fatalf("read error = %v", err)
+			}
+			if err := ConsumeCodexReset(bin); err == nil || err.Error() != tc.want {
+				t.Fatalf("reset error = %v", err)
+			}
+		})
+	}
+}
+
 func TestCodexResetHonoursDeadline(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "codex")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {

@@ -4,15 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/dispatch"
+	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
 )
@@ -87,22 +86,7 @@ func preparePlanCheck(env *dispatch.Env, s *State) error {
 
 // detachPlanCheck starts the Run supervisor, which first collects the check.
 var detachPlanCheck = func(folder string) error {
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	log, err := os.OpenFile(filepath.Join(folder, "supervisor.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer log.Close()
-	cmd := exec.Command(self, "_run", folder)
-	cmd.Stdout, cmd.Stderr = log, log
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return cmd.Process.Release()
+	return proc.Detach(folder, "_run", true)
 }
 
 func executePlanCheck(env *dispatch.Env, s *State) error {

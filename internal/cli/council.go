@@ -3,12 +3,11 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/council"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/proc"
@@ -72,7 +71,7 @@ func printSeats(env *dispatch.Env, c *council.Council) {
 	for _, s := range c.Seats {
 		seats = append(seats, fmt.Sprintf("seat  %s %s", s.Family, s.Effort))
 	}
-	ui.Outf("council %s  %s  %d seats  %d rounds  → %s", c.Slug, strings.ToUpper(string(c.Tier[:1]))+string(c.Tier[1:]), len(c.Seats), c.RoundsAsked, relPath(env.Root, c.Path))
+	ui.Outf("council %s  %s  %d seats  %d rounds  → %s", c.Slug, c.Tier.Title(), len(c.Seats), c.RoundsAsked, config.RelOrAbs(env.Root, c.Path))
 	ui.Outf("  %s", strings.Join(seats, "   "))
 	if len(c.Relaxed) > 0 {
 		ui.Warnf("relaxed: %s", strings.Join(c.Relaxed, "; "))
@@ -112,24 +111,7 @@ func reviewTaskOpts(env *dispatch.Env, id string, o *council.Opts) error {
 }
 
 func detachCouncil(folder string) error {
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	logFile, err := os.Create(filepath.Join(folder, "supervisor.log"))
-	if err != nil {
-		return err
-	}
-	defer logFile.Close()
-	cmd := exec.Command(self, "_council", folder)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	_ = os.WriteFile(filepath.Join(folder, "supervisor.pid"), []byte(fmt.Sprint(cmd.Process.Pid)), 0o644)
-	return cmd.Process.Release()
+	return proc.Detach(folder, "_council", false)
 }
 
 func (a *app) councilSupervisorCmd() *cobra.Command {
@@ -205,11 +187,4 @@ func (a *app) startCouncil(env *dispatch.Env, c *council.Council, wait bool) err
 		return err
 	}
 	return a.result(map[string]any{"slug": c.Slug, "seats": c.Seats, "state": c.State}, "council %s started.  Collect with: maestro wait %s", c.Slug, c.Slug)
-}
-
-func relPath(root, p string) string {
-	if r, err := filepath.Rel(root, p); err == nil && !strings.HasPrefix(r, "..") {
-		return r
-	}
-	return p
 }

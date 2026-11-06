@@ -523,8 +523,7 @@ func (rt *Router) requested(req Request, level, estimate roster.Level, category 
 	}
 	r := rt.finish(f, useLevel, estimate, category, req.Access, "requested", defaults, nil)
 	if effort != "" {
-		switch effort {
-		case "max", "ultra", "ultracode":
+		if roster.FanOut(effort) {
 			warnings = append(warnings, "fan-out effort "+effort)
 		}
 		r.Effort = effort
@@ -618,18 +617,11 @@ func reason(r *Route, source string) string {
 	if r.BudgetWarning != "" {
 		tail = append(tail, r.BudgetWarning)
 	}
-	line := fmt.Sprintf("%-13s %-9s %-12s %s", r.FamilyID, titleCase(string(r.Tier)), r.Level, source)
+	line := fmt.Sprintf("%-13s %-9s %-12s %s", r.FamilyID, r.Tier.Title(), r.Level, source)
 	if len(tail) > 0 {
 		line += "  (" + strings.Join(tail, "; ") + ")"
 	}
 	return line
-}
-
-func titleCase(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // constrainedLevel applies the same level bounds to the estimate and Jev score.

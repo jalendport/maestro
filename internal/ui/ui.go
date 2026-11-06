@@ -60,6 +60,22 @@ func FirstLine(s string, limit int) string {
 	return s
 }
 
+// CutTitle limits a title by bytes and adds an ellipsis when truncated.
+func CutTitle(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
+}
+
+// CutText limits text to n bytes.
+func CutText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
 // Duration formats elapsed time for Run, Dispatch, and Council output.
 func Duration(d time.Duration) string {
 	if d < 0 {

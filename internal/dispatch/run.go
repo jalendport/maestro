@@ -481,7 +481,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	fail := func(class, text string) *Record {
 		rec.Outcome.FailureClass = class
 		rec.Outcome.Outcome = OutcomeFailed
-		rec.Outcome.ErrorText = cut(text, 500)
+		rec.Outcome.ErrorText = ui.CutText(text, 500)
 		rec.Outcome.Status = ""
 		if class == FailBad {
 			recordChanges(t, rec, snap)
@@ -665,7 +665,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	rec.Pid = cmd.Process.Pid
 	rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "start", Text: fmt.Sprintf("%s pid %d", h.Name(), cmd.Process.Pid)})
 	_ = rec.Save()
-	ui.Eventf("dispatch", "task %s  %s %s %s  %s  wall %s  → %s", t.Task, h.Name(), t.Route.Model, t.Route.Effort, t.Access, t.WallLimit, relOrAbs(t.Project, t.Folder))
+	ui.Eventf("dispatch", "task %s  %s %s %s  %s  wall %s  → %s", t.Task, h.Name(), t.Route.Model, t.Route.Effort, t.Access, t.WallLimit, config.RelOrAbs(t.Project, t.Folder))
 	if stdin != nil {
 		go func() {
 			_, _ = io.WriteString(stdin, launch.Pointer+"\n")
@@ -1105,13 +1105,6 @@ func terminate(cmd *exec.Cmd, waitDone <-chan error) error {
 	}
 }
 
-func cut(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
-}
-
 func tail(path string, n int) string {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -1133,13 +1126,6 @@ func without(paths []string, prefix string) []string {
 		out = append(out, p)
 	}
 	return out
-}
-
-func relOrAbs(root, p string) string {
-	if r, err := filepath.Rel(root, p); err == nil && !strings.HasPrefix(r, "..") {
-		return r
-	}
-	return p
 }
 
 // priced prices tokens with the embedded table when the Harness reports no cost.

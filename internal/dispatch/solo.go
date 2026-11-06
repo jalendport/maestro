@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/solo"
 	"github.com/jalendport/maestro/internal/ui"
 )
@@ -80,7 +81,7 @@ func (l *SoloLink) TodoFor(t *Task, b *brief.Brief) int {
 			ui.Warnf("solo todo %d: %v; creating a todo", b.Todo, err)
 		}
 	}
-	body := fmt.Sprintf("Maestro task `%s` of run `%s`. Brief: `%s`.\n\n## Goal\n%s\n\n## Done\n%s\n", t.Task, t.Run, relOrAbs(t.Project, t.BriefPath), strings.TrimSpace(b.Goal), strings.TrimSpace(b.Done))
+	body := fmt.Sprintf("Maestro task `%s` of run `%s`. Brief: `%s`.\n\n## Goal\n%s\n\n## Done\n%s\n", t.Task, t.Run, config.RelOrAbs(t.Project, t.BriefPath), strings.TrimSpace(b.Goal), strings.TrimSpace(b.Done))
 	id, err := l.Client.CreateTodo(l.ProjectID, t.Title, body, []string{"maestro"})
 	if err != nil {
 		ui.Warnf("solo todo: %v", err)

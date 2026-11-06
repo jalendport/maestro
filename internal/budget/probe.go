@@ -66,91 +66,46 @@ func ReadCodex(bin string) (*CodexLimits, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "app-server")
-	stdin, err := cmd.StdinPipe()
+	type answer struct {
+		Result struct {
+			RateLimits struct {
+				PlanType string  `json:"planType"`
+				Reached  *string `json:"rateLimitReachedType"`
+				Primary  *struct {
+					UsedPercent float64 `json:"usedPercent"`
+					WindowMins  int     `json:"windowDurationMins"`
+					ResetsAt    int64   `json:"resetsAt"`
+				} `json:"primary"`
+				Secondary *struct {
+					UsedPercent float64 `json:"usedPercent"`
+					WindowMins  int     `json:"windowDurationMins"`
+					ResetsAt    int64   `json:"resetsAt"`
+				} `json:"secondary"`
+			} `json:"rateLimits"`
+			ResetCredits struct {
+				Available int `json:"availableCount"`
+			} `json:"rateLimitResetCredits"`
+		} `json:"result"`
+	}
+	msg, err := codexCall[answer](ctx, bin, "account/rateLimits/read")
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
+	cl := &CodexLimits{Plan: msg.Result.RateLimits.PlanType, Credits: msg.Result.ResetCredits.Available}
+	if msg.Result.RateLimits.Reached != nil {
+		cl.Reached = *msg.Result.RateLimits.Reached
 	}
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	defer func() {
-		cancel()
-		_ = stdout.Close()
-		_ = stdin.Close()
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
-	go func() {
-		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"maestro","title":"Maestro","version":"dev"}}}`)
-		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
-		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":{}}`)
-	}()
-	lines := codexLines(ctx, stdout)
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("codex app-server: %w", ctx.Err())
-		case line, ok := <-lines:
-			if !ok {
-				if ctx.Err() != nil {
-					return nil, fmt.Errorf("codex app-server: %w", ctx.Err())
-				}
-				return nil, fmt.Errorf("codex app-server ended without an answer")
-			}
-			var msg struct {
-				ID     int `json:"id"`
-				Result struct {
-					RateLimits struct {
-						PlanType string  `json:"planType"`
-						Reached  *string `json:"rateLimitReachedType"`
-						Primary  *struct {
-							UsedPercent float64 `json:"usedPercent"`
-							WindowMins  int     `json:"windowDurationMins"`
-							ResetsAt    int64   `json:"resetsAt"`
-						} `json:"primary"`
-						Secondary *struct {
-							UsedPercent float64 `json:"usedPercent"`
-							WindowMins  int     `json:"windowDurationMins"`
-							ResetsAt    int64   `json:"resetsAt"`
-						} `json:"secondary"`
-					} `json:"rateLimits"`
-					ResetCredits struct {
-						Available int `json:"availableCount"`
-					} `json:"rateLimitResetCredits"`
-				} `json:"result"`
-				Error *struct {
-					Message string `json:"message"`
-				} `json:"error"`
-			}
-			if json.Unmarshal(line, &msg) != nil || msg.ID != 2 {
-				continue
-			}
-			if msg.Error != nil {
-				return nil, fmt.Errorf("codex app-server: %s", msg.Error.Message)
-			}
-			cl := &CodexLimits{Plan: msg.Result.RateLimits.PlanType, Credits: msg.Result.ResetCredits.Available}
-			if msg.Result.RateLimits.Reached != nil {
-				cl.Reached = *msg.Result.RateLimits.Reached
-			}
-			for _, w := range []*struct {
-				UsedPercent float64 `json:"usedPercent"`
-				WindowMins  int     `json:"windowDurationMins"`
-				ResetsAt    int64   `json:"resetsAt"`
-			}{msg.Result.RateLimits.Primary, msg.Result.RateLimits.Secondary} {
-				if w == nil {
-					continue
-				}
-				cl.Windows = append(cl.Windows, harness.Window{Kind: kindOfMinutes(w.WindowMins), Duration: time.Duration(w.WindowMins) * time.Minute, Used: w.UsedPercent / 100, ResetsAt: time.Unix(w.ResetsAt, 0)})
-			}
-			return cl, nil
+	for _, w := range []*struct {
+		UsedPercent float64 `json:"usedPercent"`
+		WindowMins  int     `json:"windowDurationMins"`
+		ResetsAt    int64   `json:"resetsAt"`
+	}{msg.Result.RateLimits.Primary, msg.Result.RateLimits.Secondary} {
+		if w == nil {
+			continue
 		}
+		cl.Windows = append(cl.Windows, harness.Window{Kind: kindOfMinutes(w.WindowMins), Duration: time.Duration(w.WindowMins) * time.Minute, Used: w.UsedPercent / 100, ResetsAt: time.Unix(w.ResetsAt, 0)})
 	}
+	return cl, nil
 }
 
 // ConsumeCodexReset spends one Codex reset credit through the app-server.
@@ -161,23 +116,28 @@ func ConsumeCodexReset(bin string) error {
 }
 
 func consumeCodexReset(ctx context.Context, bin string) error {
+	_, err := codexCall[struct{}](ctx, bin, "account/rateLimitResetCredit/consume")
+	return err
+}
+
+func codexCall[T any](ctx context.Context, bin, method string) (*T, error) {
 	if bin == "" {
-		return fmt.Errorf("codex is not installed")
+		return nil, fmt.Errorf("codex is not installed")
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "app-server")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
-		return err
+		return nil, err
 	}
 	defer func() {
 		cancel()
@@ -189,20 +149,20 @@ func consumeCodexReset(ctx context.Context, bin string) error {
 	go func() {
 		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"maestro","title":"Maestro","version":"dev"}}}`)
 		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
-		fmt.Fprintln(stdin, `{"jsonrpc":"2.0","id":2,"method":"account/rateLimitResetCredit/consume","params":{}}`)
+		fmt.Fprintf(stdin, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":%q,\"params\":{}}\n", method)
 	}()
 	lines := codexLines(ctx, out)
 	for {
 		var line []byte
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("codex app-server: %w", ctx.Err())
+			return nil, fmt.Errorf("codex app-server: %w", ctx.Err())
 		case next, ok := <-lines:
 			if !ok {
 				if ctx.Err() != nil {
-					return fmt.Errorf("codex app-server: %w", ctx.Err())
+					return nil, fmt.Errorf("codex app-server: %w", ctx.Err())
 				}
-				return fmt.Errorf("codex app-server ended without an answer")
+				return nil, fmt.Errorf("codex app-server ended without an answer")
 			}
 			line = next
 		}
@@ -212,13 +172,14 @@ func consumeCodexReset(ctx context.Context, bin string) error {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if json.Unmarshal(line, &msg) != nil || msg.ID != 2 {
+		var answer T
+		if json.Unmarshal(line, &msg) != nil || json.Unmarshal(line, &answer) != nil || msg.ID != 2 {
 			continue
 		}
 		if msg.Error != nil {
-			return fmt.Errorf("codex app-server: %s", msg.Error.Message)
+			return nil, fmt.Errorf("codex app-server: %s", msg.Error.Message)
 		}
-		return nil
+		return &answer, nil
 	}
 }
 

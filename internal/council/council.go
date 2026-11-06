@@ -111,15 +111,7 @@ const FileManifest = "council.json"
 
 // Save writes council.json atomically.
 func (c *Council) Save() error {
-	b, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := filepath.Join(c.Path, FileManifest+".tmp")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(c.Path, FileManifest))
+	return config.WriteJSONAtomic(c.Path, FileManifest, c)
 }
 
 // Load reads council.json from a Council folder.
@@ -277,7 +269,7 @@ func pickSeats(env *dispatch.Env, c *Council, o Opts) ([]*Seat, []string, error)
 		if effort == "" {
 			effort = f.Levels[c.Level]
 			if !f.Serves(c.Level) {
-				effort = f.Levels[nearest(f, c.Level)]
+				effort = f.Levels[f.NearestLevel(c.Level)]
 			}
 		}
 		model, _ := env.Disc.Resolve(f.Harness, f.Models)
@@ -439,17 +431,4 @@ func pickSeats(env *dispatch.Env, c *Council, o Opts) ([]*Seat, []string, error)
 		relaxed = append(relaxed, "single opinion")
 	}
 	return seats, relaxed, nil
-}
-
-func nearest(f *roster.Family, want roster.Level) roster.Level {
-	var best roster.Level
-	for _, l := range roster.Levels {
-		if !f.Serves(l) {
-			continue
-		}
-		if best == "" || l.Rank() <= want.Rank() {
-			best = l
-		}
-	}
-	return best
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/jev"
 	"github.com/jalendport/maestro/internal/ledger"
@@ -41,7 +42,7 @@ func Start(env *dispatch.Env, folder string) (*Council, error) {
 	c.Pid = os.Getpid()
 	c.State = "running"
 	_ = c.Save()
-	ui.Eventf("council", "%s  %s  %d seats  %d rounds  → %s", c.Slug, titleCase(string(c.Tier)), len(c.Seats), c.RoundsAsked, relOrAbs(env.Root, c.Path))
+	ui.Eventf("council", "%s  %s  %d seats  %d rounds  → %s", c.Slug, c.Tier.Title(), len(c.Seats), c.RoundsAsked, config.RelOrAbs(env.Root, c.Path))
 	for round := 1; round <= c.RoundsAsked; round++ {
 		c.RoundsRun = round
 		_ = c.Save()
@@ -67,12 +68,7 @@ func Start(env *dispatch.Env, folder string) (*Council, error) {
 	if err := ledger.Append(c); err != nil {
 		ui.Warnf("ledger: %v", err)
 	}
-	answered := 0
-	for _, s := range c.Seats {
-		if last(s) != nil && last(s).Status == "ok" {
-			answered++
-		}
-	}
+	answered := answeredSeats(c)
 	ui.Eventf("finished", "council %s  %d of %d seats answered  %d findings, %d filtered", c.Slug, answered, len(c.Seats), len(c.Findings), len(c.Filtered))
 	return c, nil
 }
@@ -267,13 +263,7 @@ func merge(env *dispatch.Env, c *Council) {
 			items = append(items, item{s.Family, r.Round, t})
 		}
 	}
-	answered := 0
-	for _, s := range c.Seats {
-		if r := last(s); r != nil && r.Status == "ok" {
-			answered++
-		}
-	}
-	c.SingleOpinion = answered <= 1
+	c.SingleOpinion = answeredSeats(c) <= 1
 	if len(items) == 0 {
 		return
 	}
@@ -316,16 +306,12 @@ func merge(env *dispatch.Env, c *Council) {
 	}
 }
 
-func titleCase(s string) string {
-	if s == "" {
-		return s
+func answeredSeats(c *Council) int {
+	answered := 0
+	for _, s := range c.Seats {
+		if r := last(s); r != nil && r.Status == "ok" {
+			answered++
+		}
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
-}
-
-func relOrAbs(root, p string) string {
-	if r, err := filepath.Rel(root, p); err == nil && !strings.HasPrefix(r, "..") {
-		return r
-	}
-	return p
+	return answered
 }

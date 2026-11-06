@@ -427,10 +427,7 @@ func (w Worktree) Commit(message string, paths []string) (string, error) {
 	if len(paths) == 0 {
 		return "", nil
 	}
-	literal := make([]string, len(paths))
-	for i, path := range paths {
-		literal[i] = ":(literal)" + path
-	}
+	literal := literalPaths(paths)
 	if _, err := git(w.Root, w.Dir, append([]string{"add", "--"}, literal...)...); err != nil {
 		return "", err
 	}
@@ -535,10 +532,7 @@ func (r Run) Rebase(w Worktree) ([]string, error) {
 // messages it has. It returns the paths of a new stop.
 func (w Worktree) Continue(paths []string) ([]string, error) {
 	if len(paths) > 0 {
-		literal := make([]string, len(paths))
-		for i, path := range paths {
-			literal[i] = ":(literal)" + path
-		}
+		literal := literalPaths(paths)
 		if _, err := git(w.Root, w.Dir, append([]string{"add", "-A", "--"}, literal...)...); err != nil {
 			return nil, err
 		}
@@ -643,11 +637,7 @@ func (r Run) FinishChecked(commit bool, check func() error) error {
 		return fmt.Errorf("Finish read step: %w", err)
 	}
 	if string(stage) == "remove" {
-		_, err := remove(r.Root, r.ID, true)
-		if err != nil {
-			return fmt.Errorf("Finish remove: %w", err)
-		}
-		return nil
+		return r.finishRemove()
 	}
 	if _, err := head(r.Root, "refs/heads/"+r.Branch); err != nil {
 		if _, statErr := os.Stat(r.dir); os.IsNotExist(statErr) {
@@ -667,11 +657,7 @@ func (r Run) FinishChecked(commit bool, check func() error) error {
 		if err := os.WriteFile(stagePath, []byte("remove"), 0o644); err != nil {
 			return fmt.Errorf("Finish record merge: %w", err)
 		}
-		_, err := remove(r.Root, r.ID, true)
-		if err != nil {
-			return fmt.Errorf("Finish remove: %w", err)
-		}
-		return nil
+		return r.finishRemove()
 	}
 	if string(stage) == "reset" {
 		return r.finishReset(stagePath)
@@ -760,11 +746,7 @@ func (r Run) FinishChecked(commit bool, check func() error) error {
 	if err := os.WriteFile(stagePath, []byte("remove"), 0o644); err != nil {
 		return fmt.Errorf("Finish record merge: %w", err)
 	}
-	_, err = remove(r.Root, r.ID, true)
-	if err != nil {
-		return fmt.Errorf("Finish remove: %w", err)
-	}
-	return nil
+	return r.finishRemove()
 }
 
 func (r Run) finishReset(stagePath string) error {
@@ -784,7 +766,11 @@ func (r Run) finishReset(stagePath string) error {
 	if err := os.WriteFile(stagePath, []byte("remove"), 0o644); err != nil {
 		return fmt.Errorf("Finish record reset: %w", err)
 	}
-	_, err = remove(r.Root, r.ID, true)
+	return r.finishRemove()
+}
+
+func (r Run) finishRemove() error {
+	_, err := remove(r.Root, r.ID, true)
 	if err != nil {
 		return fmt.Errorf("Finish remove: %w", err)
 	}

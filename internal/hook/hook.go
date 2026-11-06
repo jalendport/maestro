@@ -3,6 +3,7 @@ package hook
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -138,7 +139,7 @@ func Decide(c *Call, scope string) Decision {
 		if readOnlyAgent(sub, c.CWD) {
 			return Decision{Allow: true}
 		}
-		return Decision{Allow: false, Reason: fmt.Sprintf("Sub-agent %q may write code; Maestro routes that work. Write a Brief file and run `maestro dispatch <brief.md>`. Read-only legwork may stay on a read-only agent type: %s, or a custom agent whose definition file keeps %s out of its tools.", nonEmpty(sub, tool), strings.Join(readOnlyAgents, ", "), strings.Join(writeTools, ", "))}
+		return Decision{Allow: false, Reason: fmt.Sprintf("Sub-agent %q may write code; Maestro routes that work. Write a Brief file and run `maestro dispatch <brief.md>`. Read-only legwork may stay on a read-only agent type: %s, or a custom agent whose definition file keeps %s out of its tools.", cmp.Or(sub, tool), strings.Join(readOnlyAgents, ", "), strings.Join(writeTools, ", "))}
 	}
 	return Decision{Allow: true}
 }
@@ -199,6 +200,10 @@ func Render(harness string, d interface{ verdict() Verdict }) []byte {
 			out = map[string]any{"decision": v.Kind}
 		}
 	}
+	return encodeJSON(out)
+}
+
+func encodeJSON(out any) []byte {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -311,13 +316,6 @@ func toolList(value yaml.Node) []string {
 		}
 	}
 	return out
-}
-
-func nonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 // inProject walks past repository markers to find a project file.

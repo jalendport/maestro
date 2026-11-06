@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -126,7 +127,7 @@ func (b *Brief) Validate() error {
 	if len(missing) > 0 {
 		return fmt.Errorf("brief is missing %s", strings.Join(missing, ", "))
 	}
-	if b.Category != "" && !contains(Categories, b.Category) {
+	if b.Category != "" && !slices.Contains(Categories, b.Category) {
 		return fmt.Errorf("unknown category %q (one of: %s)", b.Category, strings.Join(Categories, ", "))
 	}
 	switch b.Access {
@@ -201,7 +202,7 @@ func SectionOrder(body string) []string {
 }
 
 func firstH1(body string) string {
-	m := regexp.MustCompile(`(?m)^# +(.+?)[ \t]*$`).FindStringSubmatch(body)
+	m := planTitleRe.FindStringSubmatch(body)
 	if m == nil {
 		return ""
 	}
@@ -223,15 +224,6 @@ func listItems(text string) []string {
 		}
 	}
 	return out
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 func decodeFields(src string, fields *Fields) error {

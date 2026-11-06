@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/ui"
 )
@@ -27,7 +28,7 @@ func todoFor(env *dispatch.Env, c *Council) {
 			}
 		}
 	} else if c.Run == "" {
-		body := fmt.Sprintf("Maestro council `%s`. Question: `%s`.\n\n%s\n", c.Slug, relOrAbs(c.Project, filepath.Join(c.Path, "question.md")), c.Question)
+		body := fmt.Sprintf("Maestro council `%s`. Question: `%s`.\n\n%s\n", c.Slug, config.RelOrAbs(c.Project, filepath.Join(c.Path, "question.md")), c.Question)
 		id, err := env.Solo.Client.CreateTodo(env.Solo.ProjectID, todoTitle(c.Question), body, []string{"maestro"})
 		if err != nil {
 			ui.Warnf("solo council todo: %v", err)

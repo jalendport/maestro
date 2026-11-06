@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
@@ -120,7 +118,7 @@ func printPlan(s *run.State) {
 		if t.Waiting != "" {
 			note = t.Waiting
 		}
-		ui.Outf("  %-2d %-34s %-11s %-12s %-14s %-5s %s  %s", t.Number, cutRunTitle(t.Title, 34), t.Category, level, lane, t.Access, note, blocked)
+		ui.Outf("  %-2d %-34s %-11s %-12s %-14s %-5s %s  %s", t.Number, ui.CutTitle(t.Title, 34), t.Category, level, lane, t.Access, note, blocked)
 		if order := run.OrderLine(t); order != "" {
 			ui.Outf("    %s", order)
 		}
@@ -138,13 +136,6 @@ func printPlan(s *run.State) {
 	}
 }
 
-func cutRunTitle(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
-}
-
 // startRun launches the supervisor inline or detached.
 func (a *app) startRun(env *dispatch.Env, s *run.State, wait bool) error {
 	if wait {
@@ -160,23 +151,7 @@ func (a *app) startRun(env *dispatch.Env, s *run.State, wait bool) error {
 }
 
 func detachRun(folder string) error {
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	logFile, err := os.OpenFile(filepath.Join(folder, "supervisor.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer logFile.Close()
-	cmd := exec.Command(self, "_run", folder)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return cmd.Process.Release()
+	return proc.Detach(folder, "_run", true)
 }
 
 func (a *app) runSupervisorCmd() *cobra.Command {

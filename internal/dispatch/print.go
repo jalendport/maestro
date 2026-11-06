@@ -32,7 +32,7 @@ func Print(rec *Record, asJSON bool) int {
 	if rec.Route.Effort != "" {
 		lane += " " + rec.Route.Effort
 	}
-	fmt.Fprintf(os.Stdout, "task %s  %-32s %-9s %-20s attempt %d  %s\n", rec.Task, cutTitle(rec.TaskInfo.Title, 32), status, lane, rec.Attempt, ui.Duration(time.Duration(rec.DurationS*float64(time.Second))))
+	fmt.Fprintf(os.Stdout, "task %s  %-32s %-9s %-20s attempt %d  %s\n", rec.Task, ui.CutTitle(rec.TaskInfo.Title, 32), status, lane, rec.Attempt, ui.Duration(time.Duration(rec.DurationS*float64(time.Second))))
 	if rec.Workdir != "" && rec.Workdir != rec.Project {
 		fmt.Fprintf(os.Stdout, "workdir %s\n", rec.Workdir)
 	}
@@ -135,11 +135,4 @@ func exitCode(rec *Record) int {
 		return proc.CodeOrchestrator
 	}
 	return proc.CodeFailed
-}
-
-func cutTitle(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
 }

@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 // Agy is the Antigravity CLI adapter. Maestro's hook holds the Lane's Access.
@@ -120,7 +122,7 @@ func (p *agyParser) Outcome() *Outcome {
 	}
 	if err := json.Unmarshal([]byte(text), &doc); err != nil {
 		p.out.IsError = true
-		p.out.ErrorText = cutText(text, 500)
+		p.out.ErrorText = ui.CutText(text, 500)
 		p.out.Signals = append(p.out.Signals, ClassifyText("agy", text))
 		return p.out
 	}
@@ -128,7 +130,7 @@ func (p *agyParser) Outcome() *Outcome {
 	p.out.Text = doc.Response
 	p.out.Tokens = Tokens{Input: doc.Usage.Input, CachedInput: doc.Usage.CacheRead, Output: doc.Usage.Output, Reasoning: doc.Usage.Thinking}
 	for _, d := range doc.Denied {
-		p.out.Denials = append(p.out.Denials, Denial{Tool: "agy", Input: cutText(string(d), 300)})
+		p.out.Denials = append(p.out.Denials, Denial{Tool: "agy", Input: ui.CutText(string(d), 300)})
 	}
 	// Denials with an empty response = a failed Dispatch, never a success.
 	if len(doc.Denied) > 0 && strings.TrimSpace(doc.Response) == "" {

@@ -2,6 +2,7 @@ package hook
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -309,7 +310,7 @@ func actionOf(c *Call) laneAction {
 	case "run_terminal_command", "run_terminal_cmd", "Bash":
 		command, _ := c.Input["command"].(string)
 		cwd, _ := c.Input["cwd"].(string)
-		return laneAction{kind: "command", command: command, cwd: nonEmpty(cwd, c.CWD)}
+		return laneAction{kind: "command", command: command, cwd: cmp.Or(cwd, c.CWD)}
 	}
 	return laneAction{}
 }
@@ -335,7 +336,7 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 			return Verdict{Kind: "deny", Reason: "write target is empty"}
 		}
 		if !filepath.IsAbs(target) {
-			target = nonEmpty(action.cwd, lane.Root) + string(filepath.Separator) + target
+			target = cmp.Or(action.cwd, lane.Root) + string(filepath.Separator) + target
 		}
 		if lane.Access == "edit" && insideGitDir(target, lane.Root) {
 			return Verdict{Kind: "deny", Reason: "writes to the project's .git directory are not allowed"}
@@ -359,7 +360,7 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 		if reason := unsafeShell(command); reason != "" {
 			return Verdict{Kind: "deny", Reason: reason}
 		}
-		cwd := nonEmpty(action.cwd, nonEmpty(c.CWD, lane.Root))
+		cwd := cmp.Or(action.cwd, c.CWD, lane.Root)
 		allowedCwd := false
 		for _, dir := range append([]string{lane.Root, lane.RunFolder}, lane.Dirs...) {
 			if inside(cwd, dir) {

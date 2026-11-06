@@ -20,7 +20,6 @@ type Plan struct {
 	Path     string
 }
 
-var taskHeadingRe = regexp.MustCompile(`(?m)^## +(.+?)[ \t]*$`)
 var subHeadingRe = regexp.MustCompile(`(?m)^### +(.+?)[ \t]*$`)
 var planTitleRe = regexp.MustCompile(`(?m)^# +(.+?)[ \t]*$`)
 
@@ -55,7 +54,7 @@ func ParsePlanText(src string) (*Plan, error) {
 		}
 	}
 	p.Title = firstH1(body)
-	locs := taskHeadingRe.FindAllStringSubmatchIndex(body, -1)
+	locs := headingRe.FindAllStringSubmatchIndex(body, -1)
 	if len(locs) == 0 {
 		return nil, fmt.Errorf("plan has no \"## <task>\" sections")
 	}

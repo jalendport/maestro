@@ -6,10 +6,7 @@ import (
 
 	"github.com/jalendport/maestro/internal/council"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
@@ -129,24 +126,7 @@ func (a *app) dispatchCmd() *cobra.Command {
 // detach starts "maestro _supervise <folder>" as its own session so the
 // Dispatch outlives this command. Its stderr goes to supervisor.log.
 func detach(folder string) error {
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	logFile, err := os.Create(filepath.Join(folder, "supervisor.log"))
-	if err != nil {
-		return err
-	}
-	defer logFile.Close()
-	cmd := exec.Command(self, "_supervise", folder)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	_ = os.WriteFile(filepath.Join(folder, "supervisor.pid"), []byte(strconv.Itoa(cmd.Process.Pid)), 0o644)
-	return cmd.Process.Release()
+	return proc.Detach(folder, "_supervise", false)
 }
 
 func (a *app) superviseCmd() *cobra.Command {

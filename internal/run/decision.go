@@ -24,7 +24,7 @@ func PendingResume(folder, task string) bool {
 // ResumeTask excludes dependency blocks and Tasks with a queued answer.
 func ResumeTask(s *State) *TaskState {
 	for _, task := range s.Tasks {
-		if !task.DependencyBlocked && (task.State == TaskBlocked || task.State == TaskFailed) && !PendingResume(s.Folder, task.ID) {
+		if NeedsAnswer(s, task) {
 			return task
 		}
 	}
@@ -35,7 +35,7 @@ func ResumeTask(s *State) *TaskState {
 func PauseReason(s *State) string {
 	reason := s.PauseReason
 	for _, task := range sortedTasks(s) {
-		if (task.State != TaskBlocked && task.State != TaskFailed) || task.DependencyBlocked || PendingResume(s.Folder, task.ID) {
+		if !NeedsAnswer(s, task) {
 			continue
 		}
 		if text := blockedText(task); text != "" && !strings.Contains(reason, text) {
@@ -46,6 +46,11 @@ func PauseReason(s *State) string {
 		}
 	}
 	return reason
+}
+
+// NeedsAnswer reports whether a Task needs an Orchestrator answer.
+func NeedsAnswer(s *State, task *TaskState) bool {
+	return !task.DependencyBlocked && (task.State == TaskBlocked || task.State == TaskFailed) && !PendingResume(s.Folder, task.ID)
 }
 
 // ResumeCommand is shared by wait and the Solo wake-up.

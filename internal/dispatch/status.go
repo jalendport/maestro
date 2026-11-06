@@ -25,18 +25,19 @@ func ProcessAlive(rec *Record) bool {
 		if json.Unmarshal(b, &state) != nil {
 			return false
 		}
-		if pid := supervisorPID(folder); pid > 0 {
+		if pid := SupervisorPID(folder); pid > 0 {
 			return proc.Alive(pid)
 		}
 		return proc.Alive(state.Pid)
 	}
-	if pid := supervisorPID(rec.Path); pid > 0 {
+	if pid := SupervisorPID(rec.Path); pid > 0 {
 		return proc.Alive(pid)
 	}
 	return proc.Alive(rec.Pid)
 }
 
-func supervisorPID(folder string) int {
+// SupervisorPID reads the positive supervisor pid, or returns zero.
+func SupervisorPID(folder string) int {
 	if b, err := os.ReadFile(filepath.Join(folder, "supervisor.pid")); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
 			return pid

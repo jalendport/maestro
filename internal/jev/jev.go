@@ -17,6 +17,7 @@ import (
 
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/redact"
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 // DefaultURL and DefaultModel are the embedded defaults; the roster's router
@@ -138,7 +139,7 @@ type HTTPError struct {
 }
 
 func (e *HTTPError) Error() string {
-	return fmt.Sprintf("jev: HTTP %d: %s", e.Status, cut(e.Body, 200))
+	return fmt.Sprintf("jev: HTTP %d: %s", e.Status, ui.CutText(e.Body, 200))
 }
 
 // Ask sends one request. It retries once on 429 or 529 and gives up at the
@@ -190,11 +191,4 @@ func (c *Client) once(ctx context.Context, body []byte) (*Response, error) {
 		return nil, fmt.Errorf("jev: bad response: %w", err)
 	}
 	return &out, nil
-}
-
-func cut(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
 }

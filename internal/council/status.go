@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,10 +16,8 @@ import (
 // SupervisorAlive checks the pid saved at detach, or the inline supervisor.
 func SupervisorAlive(c *Council) bool {
 	pid := c.Pid
-	if b, err := os.ReadFile(filepath.Join(c.Path, "supervisor.pid")); err == nil {
-		if n, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && n > 0 {
-			pid = n
-		}
+	if n := dispatch.SupervisorPID(c.Path); n > 0 {
+		pid = n
 	}
 	return pid > 0 && syscall.Kill(pid, 0) == nil
 }
@@ -78,5 +75,5 @@ func Status(c *Council) string {
 	if c.State == "finished" {
 		ready = "  merge ready"
 	}
-	return fmt.Sprintf("  council %s  %s  round %d  %s%s\n", c.Slug, titleCase(string(c.Tier)), round, strings.Join(seats, ", "), ready)
+	return fmt.Sprintf("  council %s  %s  round %d  %s%s\n", c.Slug, c.Tier.Title(), round, strings.Join(seats, ", "), ready)
 }

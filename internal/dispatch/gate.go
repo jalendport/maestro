@@ -12,6 +12,7 @@ import (
 
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/jev"
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 const (
@@ -92,17 +93,17 @@ func askGate(env *Env, t *Task, rec *Record, b *brief.Brief, report *brief.Repor
 	var failedChecks strings.Builder
 	for _, check := range rec.Verification.Checks {
 		if !check.OK && !check.Skipped {
-			fmt.Fprintf(&failedChecks, "%s\n%s\n%s\n", cut(check.Command, maxDiffBytes), cut(check.Reason, maxDiffBytes), cut(check.Output, maxDiffBytes))
+			fmt.Fprintf(&failedChecks, "%s\n%s\n%s\n", ui.CutText(check.Command, maxDiffBytes), ui.CutText(check.Reason, maxDiffBytes), ui.CutText(check.Output, maxDiffBytes))
 			if failedChecks.Len() >= maxDiffBytes {
 				break
 			}
 		}
 	}
 	state := map[string]any{
-		"brief":   map[string]any{"title": cut(t.Title, maxDiffBytes), "goal": cut(b.Goal, maxDiffBytes), "done": cut(b.Done, maxDiffBytes)},
-		"blocked": cut(blocked, maxDiffBytes), "status": cut(status, maxDiffBytes),
-		"failed_checks": cut(failedChecks.String(), maxDiffBytes), "error": cut(rec.Outcome.ErrorText, maxDiffBytes),
-		"diff": cut(diff, maxDiffBytes),
+		"brief":   map[string]any{"title": ui.CutText(t.Title, maxDiffBytes), "goal": ui.CutText(b.Goal, maxDiffBytes), "done": ui.CutText(b.Done, maxDiffBytes)},
+		"blocked": ui.CutText(blocked, maxDiffBytes), "status": ui.CutText(status, maxDiffBytes),
+		"failed_checks": ui.CutText(failedChecks.String(), maxDiffBytes), "error": ui.CutText(rec.Outcome.ErrorText, maxDiffBytes),
+		"diff": ui.CutText(diff, maxDiffBytes),
 	}
 	if len(rec.Verification.TestsOutsideTouch) > 0 {
 		testsDiff, err := snap.diff(t.workdir(), rec.Verification.TestsOutsideTouch)
@@ -112,7 +113,7 @@ func askGate(env *Env, t *Task, rec *Record, b *brief.Brief, report *brief.Repor
 		state["tests_outside_touch"] = map[string]any{
 			"note":  "These test files are outside the Task's scope. A weakened or removed assertion that the Brief does not ask for is a Bad result.",
 			"paths": rec.Verification.TestsOutsideTouch,
-			"diff":  cut(testsDiff, maxDiffBytes),
+			"diff":  ui.CutText(testsDiff, maxDiffBytes),
 		}
 	}
 	if env.Project != nil {
@@ -128,7 +129,7 @@ func askGate(env *Env, t *Task, rec *Record, b *brief.Brief, report *brief.Repor
 	}
 	if full {
 		for i, item := range doneItems(b.Done) {
-			questions[fmt.Sprintf("done_%d", i+1)] = jev.Noul(fmt.Sprintf("Does the diff satisfy this Done item? Item %d: %s", i+1, cut(item, maxDiffBytes)))
+			questions[fmt.Sprintf("done_%d", i+1)] = jev.Noul(fmt.Sprintf("Does the diff satisfy this Done item? Item %d: %s", i+1, ui.CutText(item, maxDiffBytes)))
 		}
 		for name, question := range map[string]jev.Question{
 			"satisfies": jev.Noul("Does the diff satisfy every item under Done in the brief?"),

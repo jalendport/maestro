@@ -47,7 +47,7 @@ func Report(s *State) string {
 		fmt.Fprintf(&w, "kept branch %s\n", branch)
 	}
 	for _, t := range sortedTasks(s) {
-		fmt.Fprintf(&w, "  %-2d %-32s %-8s %-18s %d  %s\n", t.Number, cutTitle(t.Title, 32), stateWord(t), laneWord(t), t.Attempt, reportPath(s, t))
+		fmt.Fprintf(&w, "  %-2d %-32s %-8s %-18s %d  %s\n", t.Number, ui.CutTitle(t.Title, 32), stateWord(t), laneWord(t), t.Attempt, reportPath(s, t))
 		if order := OrderLine(t); order != "" {
 			fmt.Fprintf(&w, "    %s\n", order)
 		}
@@ -236,7 +236,7 @@ func Status(s *State) string {
 				taskState = "running (checks running)"
 			}
 		}
-		fmt.Fprintf(&w, "  %-2d %-32s %-9s %-26s %s\n", t.Number, cutTitle(t.Title, 32), taskState, lane, tail)
+		fmt.Fprintf(&w, "  %-2d %-32s %-9s %-26s %s\n", t.Number, ui.CutTitle(t.Title, 32), taskState, lane, tail)
 		if order := OrderLine(t); order != "" {
 			fmt.Fprintf(&w, "    %s\n", order)
 		}
@@ -248,11 +248,4 @@ func Status(s *State) string {
 		}
 	}
 	return w.String()
-}
-
-func cutTitle(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/router"
 	"github.com/jalendport/maestro/internal/verify"
@@ -203,15 +204,7 @@ func (r *Record) Save() error {
 		saved.State = "running"
 		saved.Pid = os.Getpid()
 	}
-	b, err := json.MarshalIndent(&saved, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := filepath.Join(r.Path, FileRecord+".tmp")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(r.Path, FileRecord))
+	return config.WriteJSONAtomic(r.Path, FileRecord, &saved)
 }
 
 // LoadRecord reads dispatch.json from a Run folder.

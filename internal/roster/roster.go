@@ -29,6 +29,15 @@ var Levels = []Level{LevelNone, LevelSome, LevelSignificant, LevelExpert}
 // Tier is a rung on the strength ladder.
 type Tier string
 
+// Title returns the Tier with its first letter capitalized.
+func (t Tier) Title() string {
+	s := string(t)
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 const (
 	TierLight    Tier = "light"
 	TierDaily    Tier = "daily"
@@ -542,8 +551,7 @@ func (r *Roster) checkDrift(d, u *config.File) {
 	}
 	for _, f := range r.Families {
 		for l, e := range f.Levels {
-			switch e {
-			case "max", "ultra", "ultracode":
+			if FanOut(e) {
 				r.Warnings = append(r.Warnings, fmt.Sprintf("family %s level %s names fan-out effort %q; it is never used automatically", f.ID, l, e))
 			}
 		}

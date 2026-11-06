@@ -120,15 +120,7 @@ const FileReport = "report.md"
 
 // Save rewrites run.json atomically.
 func (s *State) Save() error {
-	b, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := filepath.Join(s.Folder, FileState+".tmp")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(s.Folder, FileState))
+	return config.WriteJSONAtomic(s.Folder, FileState, s)
 }
 
 // Load reads run.json from a Run folder.

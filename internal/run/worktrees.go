@@ -284,8 +284,8 @@ func (sup *Supervisor) continueConflict(task *TaskState, rec *dispatch.Record) e
 		return fmt.Errorf("merge conflict in %s", strings.Join(conflicts, ", "))
 	}
 	task.ConflictRebase = false
-	if out, err := exec.Command("git", "-C", task.Workdir, "rev-parse", "HEAD").Output(); err == nil {
-		rec.Verification.CommitRange = strings.TrimSpace(string(out))
+	if head := verify.Head(task.Workdir); head != "" {
+		rec.Verification.CommitRange = head
 	}
 	return nil
 }

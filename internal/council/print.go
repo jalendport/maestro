@@ -22,15 +22,10 @@ func PrintMerge(c *Council, asJSON bool) {
 // Merge renders the Merge as text; the same text goes on a Solo todo comment.
 func Merge(c *Council) string {
 	var w strings.Builder
-	answered := 0
-	for _, s := range c.Seats {
-		if r := last(s); r != nil && r.Status == "ok" {
-			answered++
-		}
-	}
-	header := fmt.Sprintf("council %s  %s  %d of %d seats answered", c.Slug, titleCase(string(c.Tier)), answered, len(c.Seats))
+	answered := answeredSeats(c)
+	header := fmt.Sprintf("council %s  %s  %d of %d seats answered", c.Slug, c.Tier.Title(), answered, len(c.Seats))
 	if c.RoundsRun > 1 {
-		header = fmt.Sprintf("council %s  %s  %d rounds  %d of %d seats answered", c.Slug, titleCase(string(c.Tier)), c.RoundsRun, answered, len(c.Seats))
+		header = fmt.Sprintf("council %s  %s  %d rounds  %d of %d seats answered", c.Slug, c.Tier.Title(), c.RoundsRun, answered, len(c.Seats))
 	}
 	if !c.EndedAt.IsZero() {
 		header += "  " + ui.Duration(c.EndedAt.Sub(c.StartedAt))

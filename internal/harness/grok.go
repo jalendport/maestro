@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 // Grok is the Grok CLI adapter. Its read shape uses a tool allowlist.
@@ -155,7 +157,7 @@ func (p *grokParser) Line(line []byte) bool {
 	}
 	if err := json.Unmarshal(line, &event); err != nil {
 		p.out.IsError = true
-		p.out.ErrorText = cutText(text, 500)
+		p.out.ErrorText = ui.CutText(text, 500)
 		p.out.Signals = append(p.out.Signals, ClassifyText("grok", text))
 		return true
 	}
@@ -193,7 +195,7 @@ func (p *grokParser) Line(line []byte) bool {
 	}
 	if err := json.Unmarshal(line, &doc); err != nil {
 		p.out.IsError = true
-		p.out.ErrorText = cutText(text, 500)
+		p.out.ErrorText = ui.CutText(text, 500)
 		p.out.Signals = append(p.out.Signals, ClassifyText("grok", text))
 		return true
 	}
@@ -210,7 +212,7 @@ func (p *grokParser) Line(line []byte) bool {
 		p.thought.WriteString(doc.Data)
 		thought := strings.ToLower(p.thought.String())
 		if !p.thoughtDenied && (strings.Contains(thought, "denied") || strings.Contains(thought, "permission")) {
-			p.out.Denials = append(p.out.Denials, Denial{Tool: "thought", Input: cutText(p.thought.String(), 300)})
+			p.out.Denials = append(p.out.Denials, Denial{Tool: "thought", Input: ui.CutText(p.thought.String(), 300)})
 			p.thoughtDenied = true
 		}
 	case "end", "error":
@@ -246,11 +248,4 @@ func (p *grokParser) Line(line []byte) bool {
 		}
 	}
 	return true
-}
-
-func cutText(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
 }

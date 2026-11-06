@@ -1,6 +1,7 @@
 package run
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -149,7 +150,7 @@ func routePlan(env *dispatch.Env, s *State, plan *brief.Plan) (bool, error) {
 		if ts.BlockedBy == nil {
 			ts.BlockedBy = []string{}
 		}
-		req := router.Request{Brief: b, Access: ts.Access, Root: env.Root, Lane: firstNonEmpty(b.Lane, s.Lane), Level: s.Level, Project: env.Project}
+		req := router.Request{Brief: b, Access: ts.Access, Root: env.Root, Lane: cmp.Or(b.Lane, s.Lane), Level: s.Level, Project: env.Project}
 		req.Floor, req.Ceiling = routeBounds(s, b)
 		route, err := rt.Route(req)
 		switch e := err.(type) {
@@ -239,13 +240,6 @@ func guardTreeMode(s *State) error {
 		}
 	}
 	return nil
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 // Supervisor drives one live Run.
@@ -602,7 +596,7 @@ func (sup *Supervisor) start(t *TaskState) (started bool) {
 			t.Error = err.Error()
 			return false
 		}
-		req := router.Request{Lane: firstNonEmpty(t.ResumeLane, firstNonEmpty(b.Lane, sup.State.Lane)), Level: sup.State.Level, Excluded: t.Excluded}
+		req := router.Request{Lane: cmp.Or(t.ResumeLane, b.Lane, sup.State.Lane), Level: sup.State.Level, Excluded: t.Excluded}
 		req.Floor, req.Ceiling = routeBounds(sup.State, b)
 		if t.Escalations > 0 && t.Route != nil && req.Lane == "" {
 			// Escalation: the new pick must be a higher Tier.
