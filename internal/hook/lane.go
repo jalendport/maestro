@@ -584,6 +584,9 @@ func unsafeReadFlag(command string) string {
 			expansion = command[:len(command)-len(matched)] + matched[1:]
 		}
 		if form := shellExpansion(expansion); form != "" {
+			if form == "{" || form == "}" {
+				return "shell expansion " + form + "; quote the brace, for example '@{u}'"
+			}
 			return "shell expansion " + form
 		}
 	}

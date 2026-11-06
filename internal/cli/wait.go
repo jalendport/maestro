@@ -78,6 +78,10 @@ func (a *app) waitTaskRun(folder, id string) (bool, error) {
 }
 
 func taskRunWaitItem(s *run.State, task *run.TaskState) (*waitItem, error) {
+	if (task.State == run.TaskWaiting || task.DependencyBlocked) &&
+		(s.State == run.StatePaused || s.State == run.StateHeld) && !run.SupervisorAlive(s) {
+		return runWaitItem(s)
+	}
 	if task.State == run.TaskRunning {
 		item, err := relayItem(filepath.Join(s.Folder, task.ID), task.ID)
 		if item != nil {

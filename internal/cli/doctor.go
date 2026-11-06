@@ -224,12 +224,7 @@ func worktreeDoctorRows(env *dispatch.Env) ([]doctorRow, error) {
 		return rows, nil
 	}
 	if len(dirty) > 0 {
-		warning := "Runs use the tree one Task at a time until you commit or stash"
-		if mode == "on" {
-			warning = "Tasks start from HEAD; uncommitted changes are not in Worktrees"
-		}
-		rows = append(rows, doctorRow{Name: "project", Detail: env.Root,
-			State: "warning: " + warning})
+		rows = append(rows, doctorRow{Name: "project", Detail: "tree has uncommitted changes: Tasks start from HEAD", State: "info"})
 	}
 	preview, err := os.MkdirTemp("", "maestro-links-")
 	if err != nil {

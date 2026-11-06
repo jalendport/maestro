@@ -141,6 +141,42 @@ func TestStatusWithOnlyStandaloneDispatch(t *testing.T) {
 	}
 }
 
+func TestOldGateScoreInWaitAndStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name, gate, line string
+	}{
+		{"old score", `{"satisfies":0.75,"verdict":"pass","risk":"low"}`, "gate     satisfies 0.75  verdict pass  risk low"},
+		{"zero score", `{"scored":true,"satisfies":0,"verdict":"fail","risk":"high"}`, "gate     satisfies 0.00  verdict fail  risk high"},
+		{"cause only", `{"cause":"brief","cause_source":"rule"}`, "gate     cause brief (rule)"},
+		{"explicit false", `{"scored":false,"verdict":"pass","cause":"brief","cause_source":"rule"}`, "gate     cause brief (rule)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
+			root := t.TempDir()
+			t.Chdir(root)
+			folder := filepath.Join(config.RunsDir(root), "r-0001", "abcd")
+			if err := os.MkdirAll(folder, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			rec := &dispatch.Record{Task: "abcd", Project: root, Path: folder, State: "ended", EndedAt: time.Now(),
+				Route: &router.Route{FamilyID: "codex-sol"}, Outcome: dispatch.Outcome{Outcome: dispatch.OutcomeVerified},
+				Verification: dispatch.Verification{Gate: json.RawMessage(tc.gate)}}
+			if err := rec.Save(); err != nil {
+				t.Fatal(err)
+			}
+			for _, command := range []string{"wait", "status"} {
+				out, code := cliOutput(t, command, rec.Task)
+				if code != 0 || !strings.Contains(out, tc.line) {
+					t.Fatalf("%s = %d, %s; want %s", command, code, out, tc.line)
+				}
+				if strings.Contains(tc.line, "cause") && strings.Contains(out, "gate     satisfies") {
+					t.Fatalf("%s shows a Cause as a score: %s", command, out)
+				}
+			}
+		})
+	}
+}
+
 func TestStatusShowsWorkdir(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	root := t.TempDir()

@@ -1012,6 +1012,9 @@ func TestDecideLaneReadOnlyShellExpansion(t *testing.T) {
 		{"git diff --ou{t,t}put=f", "shell expansion {"},
 		{"echo {a,b}", "shell expansion {"},
 		{"echo ] }", "shell expansion }"},
+		{"git log @{u}..", "shell expansion {; quote the brace, for example '@{u}'"},
+		{"git show stash@{0}", "shell expansion {; quote the brace, for example '@{u}'"},
+		{"echo }", "shell expansion }; quote the brace, for example '@{u}'"},
 		{"rg x *", "glob can match a file name that starts with -; write ./ before it"},
 		{"ls *_test.go", "glob can match a file name that starts with -; write ./ before it"},
 		{"ls *.go", "glob can match a file name that starts with -; write ./ before it"},
@@ -1031,6 +1034,7 @@ func TestDecideLaneReadOnlyShellExpansion(t *testing.T) {
 	}
 	for _, command := range []string{
 		"grep -r --include=*.go x .", "ls ./*_test.go", "cat src/**/*.php", "ls ./[ab].txt", "cat ./?.go",
+		"git log '@{u}'..", "git show 'stash@{0}'",
 		`ls "./"*`, `ls '.'*`, `ls \**`, `echo \{a,b\}`, `echo \}`, `echo '{a,b}'`, `echo "}"`,
 		"find . -name '*.go'", "rg 'x*' -g '*.go' src", "echo '$HOME'", `echo \$HOME`, "git log -- '*.go'",
 		"find . -type f -print", `grep -r "a{2}" .`, "cat file 2>&1", `find . \( -name a -o -name b \)`, "grep 'f(x)' main.go",

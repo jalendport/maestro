@@ -101,6 +101,7 @@ func TestWorktreeProjectSettings(t *testing.T) {
 
 func TestDoctorWorktrees(t *testing.T) {
 	root, _ := worktreeConfigFixture(t)
+	writeWorktreeConfig(t, filepath.Join(root, "base.txt"), "dirty\n")
 	if err := os.Mkdir(filepath.Join(root, "vendor"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -128,9 +129,8 @@ func TestDoctorWorktrees(t *testing.T) {
 		if !strings.Contains(output, want) || !strings.Contains(output, "dependency links vendor") {
 			t.Fatalf("doctor lost mode or links: %s", output)
 		}
-		warning := "Runs use the tree one Task at a time until you commit or stash"
-		if strings.Contains(output, warning) != (setting != "on") {
-			t.Fatalf("doctor warning: %s", output)
+		if strings.Contains(output, "Runs use the tree one Task at a time") || strings.Contains(output, "warning: Tasks start from HEAD") || !strings.Contains(output, "tree has uncommitted changes: Tasks start from HEAD info") {
+			t.Fatalf("doctor information: %s", output)
 		}
 	}
 }

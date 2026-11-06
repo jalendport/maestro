@@ -38,6 +38,24 @@ type Gate struct {
 	DoneItems         map[int]float64 `json:"done_items,omitempty"`
 }
 
+// UnmarshalJSON reads Gate records from before the scored field existed.
+func (g *Gate) UnmarshalJSON(data []byte) error {
+	type gateRecord Gate
+	var record struct {
+		gateRecord
+		Scored *bool `json:"scored"`
+	}
+	if err := json.Unmarshal(data, &record); err != nil {
+		return err
+	}
+	*g = Gate(record.gateRecord)
+	g.Scored = g.Verdict != ""
+	if record.Scored != nil {
+		g.Scored = *record.Scored
+	}
+	return nil
+}
+
 // maxDiffBytes keeps the gate request under the Jev state limit (about 15k tokens).
 const maxDiffBytes = 60 * 1024
 

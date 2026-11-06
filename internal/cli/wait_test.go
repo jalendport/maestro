@@ -157,6 +157,41 @@ func TestWaitTaskIgnoresOtherTasksWhenRunPauses(t *testing.T) {
 	}
 }
 
+func TestWaitTaskWithoutSupervisorReturnsRunAnswer(t *testing.T) {
+	for _, state := range []string{run.StatePaused, run.StateHeld} {
+		for _, dependencyBlocked := range []bool{false, true} {
+			for _, asJSON := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/dependency=%t/json=%t", state, dependencyBlocked, asJSON), func(t *testing.T) {
+					rec, s := waitFixture(t)
+					s.State, s.Pid = state, 1<<30
+					s.Tasks[0].State = run.TaskWaiting
+					s.Tasks[0].DependencyBlocked = dependencyBlocked
+					if dependencyBlocked {
+						s.Tasks[0].State = run.TaskBlocked
+					}
+					s.Tasks = append(s.Tasks, &run.TaskState{Number: 2, ID: "def0", State: run.TaskBlocked, Error: "needs an answer"})
+					if err := s.Save(); err != nil {
+						t.Fatal(err)
+					}
+					oldSleep := waitSleep
+					t.Cleanup(func() { waitSleep = oldSleep })
+					waitSleep = func(time.Duration) { t.Fatal("wait polled a Run that needs an answer") }
+					args := []string{"wait", rec.Task}
+					if asJSON {
+						args = append(args, "--json")
+					}
+					output, err := waitCommand(t, args...)
+					kind, task, command := "run_held", "", "maestro approve r-0001"
+					if state == run.StatePaused {
+						kind, task, command = "run_paused", "def0", "maestro resume r-0001 --task 2"
+					}
+					requireWaitItem(t, output, err, asJSON, kind, task, s.Run, command)
+				})
+			}
+		}
+	}
+}
+
 func TestWaitTaskAfterAnswerWaitsThroughItsOwnStates(t *testing.T) {
 	for _, asJSON := range []bool{false, true} {
 		t.Run(fmt.Sprint(asJSON), func(t *testing.T) {

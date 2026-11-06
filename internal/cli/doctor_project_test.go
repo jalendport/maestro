@@ -63,3 +63,36 @@ func TestDoctorProjectWarnings(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorDirtyTreeInformation(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		t.Run(map[bool]string{false: "text", true: "JSON"}[asJSON], func(t *testing.T) {
+			root, _ := worktreeConfigFixture(t)
+			writeWorktreeConfig(t, config.ProjectFile(root), "checks = ['go test ./...']\n")
+			writeWorktreeConfig(t, filepath.Join(root, "base.txt"), "changed\n")
+			command := (&app{json: asJSON}).doctorCmd()
+			output := captureStdout(t, command.Execute)
+			const detail = "tree has uncommitted changes: Tasks start from HEAD"
+			if asJSON {
+				var rows []doctorRow
+				if err := json.Unmarshal([]byte(output), &rows); err != nil {
+					t.Fatal(err)
+				}
+				found := false
+				for _, row := range rows {
+					if row.Name == "project" && row.Detail == detail && row.State == "info" {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("project information row is missing: %s", output)
+				}
+			} else if !strings.Contains(strings.Join(strings.Fields(output), " "), "project "+detail+" info") {
+				t.Fatalf("project information row is missing: %s", output)
+			}
+			if strings.Contains(output, "warning:") || strings.Contains(output, "Runs use the tree one Task at a time") {
+				t.Fatalf("doctor warns about uncommitted changes: %s", output)
+			}
+		})
+	}
+}
