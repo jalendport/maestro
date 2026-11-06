@@ -56,6 +56,7 @@ type Task struct {
 	ClaudeAuto bool          `json:"claude_auto"`
 	InSolo     bool          `json:"in_solo"`
 	MaxAttempt int           `json:"max_attempts"`
+	Nudged     bool          `json:"nudged,omitempty"`
 	// Council marks a Seat Dispatch: the Report ends with POSITION, not STATUS.
 	Council bool `json:"council,omitempty"`
 	Canary  bool `json:"canary,omitempty"`
@@ -71,20 +72,22 @@ type Task struct {
 
 // Record is dispatch.json: the full Dispatch record. The ledger row is a copy.
 type Record struct {
-	judged    bool      // judge has recorded Changed; the deferred recording stands down
-	Kind      string    `json:"kind"`
-	Canary    bool      `json:"canary,omitempty"`
-	Project   string    `json:"project"`
-	Run       string    `json:"run"`
-	Task      string    `json:"task"`
-	Attempt   int       `json:"attempt"`
-	State     string    `json:"state"` // running | ended
-	Pid       int       `json:"pid,omitempty"`
-	StartedAt time.Time `json:"started_at"`
-	EndedAt   time.Time `json:"ended_at,omitempty"`
-	DurationS float64   `json:"duration_s"`
-	Path      string    `json:"path"`
-	SessionID string    `json:"session_id,omitempty"`
+	judged       bool      // judge has recorded Changed; the deferred recording stands down
+	nudgePending bool      // keep wait on the live Task until Execute starts the nudge
+	Kind         string    `json:"kind"`
+	Canary       bool      `json:"canary,omitempty"`
+	Project      string    `json:"project"`
+	Run          string    `json:"run"`
+	Task         string    `json:"task"`
+	Attempt      int       `json:"attempt"`
+	Nudged       bool      `json:"nudged,omitempty"`
+	State        string    `json:"state"` // running | ended
+	Pid          int       `json:"pid,omitempty"`
+	StartedAt    time.Time `json:"started_at"`
+	EndedAt      time.Time `json:"ended_at,omitempty"`
+	DurationS    float64   `json:"duration_s"`
+	Path         string    `json:"path"`
+	SessionID    string    `json:"session_id,omitempty"`
 
 	TaskInfo     TaskInfo      `json:"task_info"`
 	Route        *router.Route `json:"route"`
@@ -136,6 +139,7 @@ type Outcome struct {
 	Status            string  `json:"status"` // done | partial | blocked | unshaped
 	Outcome           string  `json:"outcome"`
 	FailureClass      string  `json:"failure_class,omitempty"`
+	Decision          string  `json:"decision,omitempty"`
 	Timer             string  `json:"timer,omitempty"`
 	ErrorText         string  `json:"error_text,omitempty"`
 	ExitCode          int     `json:"exit_code"`

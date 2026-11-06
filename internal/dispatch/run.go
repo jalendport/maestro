@@ -40,7 +40,13 @@ type Env struct {
 	Root    string
 	Budget  *budget.File
 	Solo    *SoloLink // nil outside Solo
+	// RetryDelay overrides the retry wait when positive. Zero uses the failure default.
+	RetryDelay time.Duration
 }
+
+var dispatchPollInterval = time.Second
+var dispatchNow = time.Now
+var dispatchTicks <-chan time.Time
 
 // NewRouter builds the Router over this Env.
 func (env *Env) NewRouter() *router.Router {
@@ -272,6 +278,7 @@ func prepareRouted(env *Env, b *brief.Brief, route *router.Route, runID, taskID,
 	// A new Route for the same Task keeps the existing Solo todo.
 	if previous, err := LoadTask(folder); err == nil {
 		t.Todo = previous.Todo
+		t.Nudged = previous.Nudged
 	}
 	if err := t.Save(); err != nil {
 		return nil, err
@@ -326,6 +333,10 @@ attempts:
 	for attempt := first; attempt <= t.MaxAttempt; attempt++ {
 		rec = runOnce(env, t, b, attempt, retry)
 		wait, again := retryWait(rec.Outcome)
+		if env.RetryDelay > 0 {
+			wait = env.RetryDelay
+		}
+		findings := nudgeFindings(env, t, rec, b)
 		// The Run supervisor records its final attempt after the escalation decision.
 		if !t.LedgerByRun {
 			if err := ledger.Append(rec); err != nil {
@@ -335,11 +346,28 @@ attempts:
 		if !t.Council {
 			env.Solo.ReportComment(t, rec)
 		}
+		if len(findings) > 0 {
+			t.Nudged = true
+			t.MaxAttempt++
+			if err := t.Save(); err != nil {
+				_ = rec.Save()
+				return rec, err
+			}
+			wait, again = 0, true
+			ui.Eventf("nudge", "task %s  %d missing Done item(s); retrying on %s", t.Task, len(findings), t.Route.FamilyID)
+		}
 		if !again || attempt == t.MaxAttempt {
 			break
 		}
-		ui.Eventf("retry", "task %s  %s: %s; retrying on %s in %s", t.Task, rec.Outcome.FailureClass, ui.FirstLine(rec.Outcome.ErrorText, 0), t.Route.FamilyID, wait)
-		retry = &brief.Retry{Attempt: attempt + 1, Reason: rec.Outcome.FailureClass}
+		if len(findings) > 0 {
+			retry = &brief.Retry{Attempt: attempt + 1, Reason: "gate nudge: missing Done items", Findings: findings}
+		} else {
+			ui.Eventf("retry", "task %s  %s: %s; retrying on %s in %s", t.Task, rec.Outcome.FailureClass, ui.FirstLine(rec.Outcome.ErrorText, 0), t.Route.FamilyID, wait)
+			if retry != nil {
+				findings = retry.Findings
+			}
+			retry = &brief.Retry{Attempt: attempt + 1, Reason: rec.Outcome.FailureClass, Findings: findings}
+		}
 		select {
 		case <-time.After(wait):
 		case <-t.Cancel:
@@ -351,6 +379,16 @@ attempts:
 			}
 		}
 		archiveAttempt(t.Folder, attempt)
+		if rec.nudgePending {
+			archived := *rec
+			archived.Path = filepath.Join(t.Folder, FileAttempts, strconv.Itoa(attempt))
+			if err := archived.Save(); err != nil {
+				ui.Warnf("dispatch record: %v", err)
+			}
+		}
+	}
+	if rec.nudgePending {
+		_ = rec.Save()
 	}
 	env.Solo.dispatchEnded(t, rec)
 	return rec, nil
@@ -411,31 +449,44 @@ func archiveAttempt(folder string, n int) {
 func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry) *Record {
 	rec := &Record{
 		Canary: t.Canary,
+		Nudged: t.Nudged,
 		Kind:   "dispatch", Project: t.Project, Run: t.Run, Task: t.Task, Attempt: attempt, State: "running",
-		Pid: os.Getpid(), StartedAt: time.Now(), Path: t.Folder, Route: t.Route,
+		Pid: os.Getpid(), StartedAt: dispatchNow(), Path: t.Folder, Route: t.Route,
 		TaskInfo:     TaskInfo{Title: t.Title, Category: t.Category, LevelEstimate: string(t.Route.LevelEstimate), Access: t.Access, Commit: t.Commit, WallLimit: t.WallLimit},
 		Permission:   Permission{Enforcement: t.Route.Enforcement, Denials: []harness.Denial{}, Blocked: []string{}, Relays: []json.RawMessage{}},
 		Verification: Verification{Changed: []string{}, TouchViolations: []string{}, Checks: []verify.CheckResult{}},
 	}
+	var snap attemptBaseline
 	fail := func(class, text string) *Record {
 		rec.Outcome.FailureClass = class
 		rec.Outcome.Outcome = OutcomeFailed
 		rec.Outcome.ErrorText = cut(text, 500)
 		rec.Outcome.Status = ""
+		if class == FailBad {
+			recordChanges(t, rec, snap)
+			report, _ := rec.Report()
+			if report != nil {
+				rec.Permission.Blocked = report.Blocked
+			}
+			ensureCause(env, t, rec, b, report, snap)
+		}
+		if t.Nudged && attempt < t.MaxAttempt {
+			_, rec.nudgePending = retryWait(rec.Outcome)
+		}
 		finish(rec)
 		ui.Eventf("failed", "task %s  %s: %s", t.Task, class, ui.FirstLine(text, 0))
 		return rec
 	}
 
 	// Earlier Tasks and attempts can change the tree before this Lane starts.
-	var snap attemptBaseline
 	defer func() {
 		// judge records Changed before the checks run; an exit that skips judge
 		// records it here, so every attempt carries its own work forward.
 		if !rec.judged && !snap.Taken.IsZero() {
-			runRel, _ := filepath.Rel(t.Project, config.RunsDir(t.Project))
-			rec.Verification.Changed = without(snap.Changed(t.Project), runRel)
-			_ = rec.Save()
+			recordChanges(t, rec, snap)
+			if !rec.nudgePending {
+				_ = rec.Save()
+			}
 		}
 	}()
 	if err := env.Roster.ValidateAccounts(); err != nil {
@@ -599,7 +650,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	parser := h.NewParser()
 	outFile, _ := os.Create(filepath.Join(t.Folder, FileOutput))
 	var mu sync.Mutex
-	lastOutput := time.Now()
+	lastOutput := dispatchNow()
 	toolInProgress := false
 	pumpDone := make(chan struct{})
 	var streamEvents []Event
@@ -607,7 +658,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		defer close(pumpDone)
 		streamEvents = pumpStream(stdout, outFile, parser, func() {
 			mu.Lock()
-			lastOutput = time.Now()
+			lastOutput = dispatchNow()
 			toolInProgress = parser.ToolInProgress()
 			mu.Unlock()
 		})
@@ -620,7 +671,11 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	go func() { <-pumpDone; waitDone <- cmd.Wait() }()
 	var timer string
 	var waitErr error
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(dispatchPollInterval)
+	ticks := ticker.C
+	if dispatchTicks != nil {
+		ticks = dispatchTicks
+	}
 	lastTick := time.Now()
 	cancelled := false
 	relays := &relayTracker{}
@@ -636,7 +691,7 @@ loop:
 			ui.Eventf("cancel", "task %s  stopping %s", t.Task, h.Name())
 			waitErr = terminate(cmd, waitDone)
 			break loop
-		case now := <-ticker.C:
+		case now := <-ticks:
 			if err, finished := laneFinished(waitDone, ticker.Stop); finished {
 				waitErr = err
 				relays.poll(env, t, rec, h.Name(), time.Now())
@@ -649,7 +704,7 @@ loop:
 				mu.Lock()
 				lastOutput = now
 				mu.Unlock()
-				rec.StartedAt = rec.StartedAt.Add(jump - time.Second)
+				rec.StartedAt = rec.StartedAt.Add(jump - dispatchPollInterval)
 				rec.Events = append(rec.Events, Event{At: now, Kind: "wake", Text: fmt.Sprintf("clock jumped %s", jump.Round(time.Second))})
 			}
 			lastTick = now
@@ -838,14 +893,25 @@ loop:
 	return judge(env, t, rec, report, allChecks, b, snap)
 }
 
+func recordChanges(t *Task, rec *Record, snap attemptBaseline) {
+	runRel, _ := filepath.Rel(t.Project, config.RunsDir(t.Project))
+	rec.Verification.Changed = without(snap.Changed(t.Project), runRel)
+	rec.judged = true
+	if t.Access == brief.AccessEdit {
+		rec.Verification.TouchViolations = verify.ScopeViolations(rec.Verification.Changed, t.Touch, runRel)
+	}
+}
+
 // judge applies the Report status, the scope guard, the checks, and the gate.
 func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []string, b *brief.Brief, snap attemptBaseline) *Record {
 	rec.Outcome.Status = report.Status
 	rec.Permission.Blocked = report.Blocked
+	recordChanges(t, rec, snap)
 	switch report.Status {
 	case brief.StatusBlocked:
 		rec.Outcome.Outcome = OutcomeBlocked
 		rec.Outcome.FailureClass = FailBad
+		ensureCause(env, t, rec, b, report, snap)
 		finish(rec)
 		ui.Eventf("blocked", "task %s  %d blocked item(s)", t.Task, len(report.Blocked))
 		return rec
@@ -855,14 +921,10 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 	}
 
 	// Verification: changed files, scope guard, commit range, checks.
-	runRel, _ := filepath.Rel(t.Project, config.RunsDir(t.Project))
-	rec.Verification.Changed = without(snap.Changed(t.Project), runRel)
-	rec.judged = true
 	// A read Lane's Enforcement keeps it from writing; tree changes seen during a
 	// read Dispatch belong to the edit Dispatch beside it, so they are recorded
 	// but never counted as violations.
 	if t.Access == brief.AccessEdit {
-		rec.Verification.TouchViolations = verify.ScopeViolations(rec.Verification.Changed, t.Touch, runRel)
 		if t.Commit {
 			rec.Verification.CommitRange = verify.CommitRange(t.Project, rec.Verification.StartCommit)
 		}
@@ -870,11 +932,19 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 			ui.Eventf("verify", "task %s  running %d check(s)", t.Task, len(allChecks))
 			rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "check", Text: fmt.Sprintf("running %d check(s)", len(allChecks))})
 			_ = rec.Save()
-			rec.Verification.Checks = verify.RunChecks(t.Project, allChecks, 10*time.Minute)
+			idle, _ := time.ParseDuration(t.IdleLimit)
+			budget, _ := time.ParseDuration(t.WallLimit)
+			rec.Verification.Checks = verify.RunChecks(t.Project, allChecks, idle, budget)
 			for _, check := range rec.Verification.Checks {
 				result := "ok"
 				if !check.OK {
 					result = "failed"
+				}
+				if check.Skipped {
+					result = "skipped"
+				}
+				if check.Reason != "" {
+					result += ": " + check.Reason + " (" + check.FailureClass + ")"
 				}
 				rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "check", Text: check.Command + ": " + result})
 			}
@@ -895,13 +965,19 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 		if !c.OK {
 			failedChecks++
 		}
+		if c.Reason != "" && !c.Skipped {
+			rec.Outcome.Outcome = OutcomeFailed
+			rec.Outcome.FailureClass = c.FailureClass
+			rec.Outcome.ErrorText = fmt.Sprintf("check failed: %s: %s", c.Command, c.Reason)
+		}
+	}
+	if len(rec.Verification.TouchViolations) > 0 {
+		rec.Outcome.Outcome = OutcomeFailed
+		rec.Outcome.FailureClass = FailBad
+		rec.Outcome.ErrorText = "scope: " + strings.Join(rec.Verification.TouchViolations, ", ")
 	}
 	if rec.Outcome.Outcome == "" {
 		switch {
-		case len(rec.Verification.TouchViolations) > 0:
-			rec.Outcome.Outcome = OutcomeFailed
-			rec.Outcome.FailureClass = FailBad
-			rec.Outcome.ErrorText = "scope: " + strings.Join(rec.Verification.TouchViolations, ", ")
 		case failedChecks > 0:
 			rec.Outcome.Outcome = OutcomeFailed
 			rec.Outcome.FailureClass = FailBad
@@ -920,7 +996,7 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 			rec.Outcome.Outcome = OutcomeAnswered
 		default:
 			// Deterministic checks passed: the Jev gate judges the diff against the Brief.
-			gate := runGate(env, t, rec, b.Goal, b.Done, snap)
+			gate := runGate(env, t, rec, b, report, snap)
 			rec.Verification.Gate = gate.raw()
 			switch {
 			case gate.Skipped != "":
@@ -955,6 +1031,8 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 			}
 		}
 	}
+	ensureCause(env, t, rec, b, report, snap)
+	rec.nudgePending = len(nudgeFindings(env, t, rec, b)) > 0
 	finish(rec)
 	ui.Eventf(rec.Outcome.Outcome, "task %s  status %s  %s", t.Task, rec.Outcome.Status, rec.StartedAt.Format("15:04"))
 	return rec
@@ -966,7 +1044,9 @@ func finish(rec *Record) {
 	rec.State = "ended"
 	rec.Pid = 0
 	rec.Events = append(rec.Events, Event{At: rec.EndedAt, Kind: "verdict", Text: strings.TrimSpace(rec.Outcome.Outcome + " " + rec.Outcome.ErrorText)})
-	_ = rec.Save()
+	if !rec.nudgePending {
+		_ = rec.Save()
+	}
 }
 
 // terminate sends SIGTERM to the whole process group, waits up to 15 s for

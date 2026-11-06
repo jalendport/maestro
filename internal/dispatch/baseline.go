@@ -3,6 +3,7 @@ package dispatch
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +16,9 @@ import (
 
 type attemptBaseline struct {
 	verify.Snapshot
-	Contents map[string][]byte `json:"contents"`
+	Contents     map[string][]byte `json:"contents"`
+	Attempt      *verify.Snapshot  `json:"attempt,omitempty"`
+	PriorChanged []string          `json:"prior_changed,omitempty"`
 }
 
 func takeBaseline(root, folder string) (attemptBaseline, error) {
@@ -23,7 +26,8 @@ func takeBaseline(root, folder string) (attemptBaseline, error) {
 	if err != nil {
 		return attemptBaseline{}, err
 	}
-	s := attemptBaseline{Snapshot: snapshot, Contents: map[string][]byte{}}
+	s := attemptBaseline{Snapshot: snapshot, Contents: map[string][]byte{}, Attempt: &snapshot}
+	s.Dirty = maps.Clone(snapshot.Dirty)
 	for p := range s.Dirty {
 		b, err := os.ReadFile(filepath.Join(root, p))
 		if err != nil && !os.IsNotExist(err) {
@@ -36,6 +40,23 @@ func takeBaseline(root, folder string) (attemptBaseline, error) {
 		return s, err
 	}
 	return s, os.WriteFile(filepath.Join(folder, FileBaseline), b, 0o644)
+}
+
+func (s attemptBaseline) Changed(root string) []string {
+	current := s.Snapshot
+	if s.Attempt != nil {
+		current = *s.Attempt
+	}
+	seen := map[string]bool{}
+	for _, p := range append(current.Changed(root), s.PriorChanged...) {
+		seen[p] = true
+	}
+	changed := make([]string, 0, len(seen))
+	for p := range seen {
+		changed = append(changed, p)
+	}
+	sort.Strings(changed)
+	return changed
 }
 
 func (s attemptBaseline) diff(root string, changed []string) (string, error) {
@@ -110,11 +131,15 @@ func (s *attemptBaseline) inherit(folder string, attempt int) error {
 	// The earliest attempt's commit is the Task's start, and an empty value
 	// there means the repository had no commit yet: it must still win.
 	commit, inherited := "", false
+	changed := map[string]bool{}
 	for n := attempt - 1; n >= 1; n-- {
 		dir := filepath.Join(folder, FileAttempts, strconv.Itoa(n))
 		rec, err := LoadRecord(dir)
 		if err != nil {
 			continue
+		}
+		for _, p := range rec.Verification.Changed {
+			changed[p] = true
 		}
 		b, err := os.ReadFile(filepath.Join(dir, FileBaseline))
 		if err != nil {
@@ -141,6 +166,11 @@ func (s *attemptBaseline) inherit(folder string, attempt int) error {
 	if inherited {
 		s.Commit = commit
 	}
+	s.PriorChanged = make([]string, 0, len(changed))
+	for p := range changed {
+		s.PriorChanged = append(s.PriorChanged, p)
+	}
+	sort.Strings(s.PriorChanged)
 	b, err := json.Marshal(s)
 	if err != nil {
 		return err

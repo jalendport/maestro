@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
@@ -21,6 +22,18 @@ import (
 	"github.com/jalendport/maestro/internal/solo"
 	"github.com/jalendport/maestro/internal/ui"
 )
+
+// supervisorPollInterval is how often the Run supervisor reads its control
+// markers while Tasks run.
+var supervisorPollInterval = 2 * time.Second
+
+// SetPollIntervalForTest sets the supervisor poll interval and returns a
+// function that restores it. Only tests call it.
+func SetPollIntervalForTest(interval time.Duration) (restore func()) {
+	old := supervisorPollInterval
+	supervisorPollInterval = interval
+	return func() { supervisorPollInterval = old }
+}
 
 // CreateOpts are the run verb's flags.
 type CreateOpts struct {
@@ -253,7 +266,7 @@ func (sup *Supervisor) loop() error {
 	_ = s.Save()
 	ui.Eventf("run", "%s  %s  %d tasks  live", s.Run, s.Title, len(s.Tasks))
 
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(supervisorPollInterval)
 	defer ticker.Stop()
 	for {
 		sup.consumeControl()
@@ -519,6 +532,9 @@ func (sup *Supervisor) start(t *TaskState) bool {
 		return false
 	}
 	delete(sup.pending, t)
+	if t.Escalations > 0 && t.Cause != "" {
+		pending.route.ReasonLine += "; re-route: cause " + t.Cause
+	}
 	task, err := dispatch.PrepareRouted(sup.Env, pending.brief, pending.route, sup.State.Run, t.ID, "")
 	if err != nil {
 		sup.escalate(t, nil, err.Error())
@@ -527,7 +543,11 @@ func (sup *Supervisor) start(t *TaskState) bool {
 	}
 	task.FirstAttempt = t.Attempt + 1
 	task.LedgerByRun = true
-	task.MaxAttempt = min(t.Attempt+2, sup.Env.Roster.Failure.MaxDispatches)
+	allowance := 0
+	if task.Nudged {
+		allowance = 1
+	}
+	task.MaxAttempt = min(t.Attempt+2, t.AnswerAttempt+sup.Env.Roster.Failure.MaxDispatches+allowance)
 	cancel := make(chan struct{})
 	task.Cancel = cancel
 	sup.running[t.ID] = cancel
@@ -586,24 +606,39 @@ func (sup *Supervisor) handle(r result) {
 	rec := r.rec
 	repeated := repeatedError(t, rec)
 	t.Attempt = rec.Attempt
+	t.JudgedFiles = append([]string{}, rec.Verification.Changed...)
+	t.Nudged = t.Nudged || rec.Nudged
 	t.Outcome = rec.Outcome.Outcome
 	t.Status = rec.Outcome.Status
 	t.Error = rec.Outcome.ErrorText
+	t.Cause = ""
+	if rec.Outcome.FailureClass == dispatch.FailBad {
+		t.Cause = rec.ResolveCause()
+	}
 	switch rec.Outcome.Outcome {
 	case dispatch.OutcomeVerified, dispatch.OutcomeAnswered, dispatch.OutcomeUnverified:
 		t.State = TaskDone
 		sup.escalationsInARow = 0
 	case dispatch.OutcomeBlocked:
 		t.State = TaskBlocked
+		t.Error = rec.BlockedReason()
+		rec.Outcome.Decision = "blocked"
 		sup.noteEscalation(t, "blocked")
 	case dispatch.OutcomeCancelled:
 		t.State = TaskCancelled
 	default:
 		if repeated != "" {
 			t.State = TaskBlocked
+			rec.Outcome.Decision = "blocked"
 			t.Waiting = ""
 			t.Error = "same error twice: " + repeated
 			sup.pause(t.Error)
+		} else if rec.Outcome.FailureClass == dispatch.FailBad && (t.Cause == dispatch.CauseBrief || t.Cause == dispatch.CauseEnvironment) {
+			t.State = TaskBlocked
+			t.Waiting = ""
+			t.Error = rec.BlockedReason()
+			rec.Outcome.Decision = "blocked"
+			sup.noteEscalation(t, t.Error)
 		} else {
 			sup.escalate(t, rec, rec.Outcome.ErrorText)
 		}
@@ -612,7 +647,7 @@ func (sup *Supervisor) handle(r result) {
 }
 
 func repeatedError(t *TaskState, rec *dispatch.Record) string {
-	if !failedOutcome(rec.Outcome.Outcome) || rec.Attempt < 2 {
+	if !failedOutcome(rec.Outcome.Outcome) || rec.Attempt <= t.AnswerAttempt+1 {
 		return ""
 	}
 	previous := ""
@@ -662,16 +697,25 @@ func (sup *Supervisor) escalate(t *TaskState, rec *dispatch.Record, errText stri
 	t.Escalations++
 	if rec != nil {
 		t.Attempt = rec.Attempt
+		rec.Outcome.Decision = "failed"
 	}
-	if t.Attempt >= sup.Env.Roster.Failure.MaxDispatches || (t.Route != nil && t.Route.Tier == roster.TierFrontier) || rec == nil {
+	maxDispatches := t.AnswerAttempt + sup.Env.Roster.Failure.MaxDispatches
+	if t.Nudged {
+		maxDispatches++
+	}
+	if t.Attempt >= maxDispatches || (t.Route != nil && t.Route.Tier == roster.TierFrontier) || rec == nil {
 		t.State = TaskFailed
 		t.Error = errText
 		sup.noteEscalation(t, errText)
 		return
 	}
 	t.State = TaskWaiting
+	rec.Outcome.Decision = "re-route"
 	rec.Outcome.Outcome = dispatch.OutcomeEscalated
 	t.Outcome = dispatch.OutcomeEscalated
+	if t.Cause != "" {
+		errText = "cause " + t.Cause + ": " + errText
+	}
 	t.Waiting = "re-route after " + ui.FirstLine(errText, 80)
 	ui.Eventf("escalate", "task %s  %s; re-routing above %s", t.ID, ui.FirstLine(errText, 80), t.Route.Tier)
 }
@@ -847,6 +891,10 @@ func (sup *Supervisor) applyResume(path string) {
 		t.Waiting = "resumed on " + r.Lane
 		t.Excluded = nil
 	}
+	if !r.Skip && (r.Brief != "" || r.Lane != "") {
+		t.AnswerAttempt = t.Attempt
+		t.Escalations = 0
+	}
 	t.DependencyBlocked = false
 	sup.updateDependencies()
 	sup.escalationsInARow = 0
@@ -897,7 +945,7 @@ func (sup *Supervisor) end(state string) error {
 		summary += "; council " + review.Slug + " (maestro wait " + review.Slug + ")"
 	}
 	ui.Eventf(state, "%s  → %s", summary, filepath.Join(s.Folder, FileReport))
-	notify(summary)
+	notify(filepath.Base(s.Project) + ": " + summary)
 	if err := s.Save(); err != nil {
 		return err
 	}
@@ -909,6 +957,9 @@ func (sup *Supervisor) end(state string) error {
 		kind, command := "run end", "maestro wait "+s.Run
 		if state == StatePaused {
 			kind, command = "run pause", ResumeCommand(s, ResumeTask(s))
+			if reason := PauseReason(s); reason != "" {
+				title += "; " + reason
+			}
 		}
 		sup.Env.Solo.WakeIf(kind, s.Run, title, "", "", command, func() bool {
 			current, err := Load(s.Folder)
@@ -1003,8 +1054,13 @@ func ledgerRow(s *State) map[string]any {
 	}
 }
 
-// notify posts a macOS notification; silent when osascript is absent.
-func notify(text string) {
+var notify = defaultNotify
+
+// defaultNotify posts a macOS notification outside tests; silent when osascript is absent.
+func defaultNotify(text string) {
+	if testing.Testing() {
+		return
+	}
 	if _, err := exec.LookPath("osascript"); err != nil {
 		return
 	}

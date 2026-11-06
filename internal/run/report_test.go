@@ -1,9 +1,13 @@
 package run
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jalendport/maestro/internal/dispatch"
 )
 
 func TestStatusTaskElapsed(t *testing.T) {
@@ -27,5 +31,22 @@ func TestStatusTaskElapsed(t *testing.T) {
 				t.Fatalf("missing %q in status: %s", tt.want, got)
 			}
 		})
+	}
+}
+
+func TestReportNamesTheFilesJudgedForAResumedTask(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	folder := t.TempDir()
+	taskFolder := filepath.Join(folder, "abcd")
+	if err := os.MkdirAll(taskFolder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := &dispatch.Record{Path: taskFolder, Attempt: 3, Verification: dispatch.Verification{Changed: []string{"own.go", "shared.go"}}}
+	if err := rec.Save(); err != nil {
+		t.Fatal(err)
+	}
+	s := &State{Folder: folder, Project: t.TempDir(), State: StatePaused, Tasks: []*TaskState{{Number: 1, ID: "abcd", State: TaskBlocked, Attempt: 3, Folder: taskFolder}}}
+	if report := Report(s); !strings.Contains(report, "judged files: own.go, shared.go\n") {
+		t.Fatalf("Run report lacks judged files: %s", report)
 	}
 }

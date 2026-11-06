@@ -134,6 +134,7 @@ func TestRunOnceRecordsChangesAcrossFailedAttempts(t *testing.T) {
 }
 
 func TestRunOnceRecordsChangesOnBlockedCancelStallAndJudgedPaths(t *testing.T) {
+	fastDispatchTimers(t)
 	for _, mode := range []string{"blocked", "cancel", "stall", "judged"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("MAESTRO_HOME", t.TempDir())
@@ -142,13 +143,16 @@ func TestRunOnceRecordsChangesOnBlockedCancelStallAndJudgedPaths(t *testing.T) {
 				t.Fatalf("git init: %v %s", err, out)
 			}
 			bin := filepath.Join(t.TempDir(), "lane")
-			script := "#!/bin/sh\ncat >/dev/null\nprintf 'work\\n' > \"$TEST_CHANGED\"\n"
+			script := "#!/bin/sh\nread pointer\nprintf 'work\\n' > \"$TEST_CHANGED\"\n"
 			wantOutcome := OutcomeUnverified
 			switch mode {
 			case "blocked":
 				script += "printf 'STATUS: blocked\\n' > \"$TEST_REPORT\"\n"
 				wantOutcome = OutcomeBlocked
 			case "cancel", "stall":
+				if mode == "stall" {
+					script += "printf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"id\":\"a\",\"type\":\"command_execution\"}}'\n"
+				}
 				script += "exec sleep 30\n"
 				wantOutcome = OutcomeCancelled
 				if mode == "stall" {
@@ -168,8 +172,20 @@ func TestRunOnceRecordsChangesOnBlockedCancelStallAndJudgedPaths(t *testing.T) {
 			env := &Env{Root: root, Roster: r, Reg: harness.New(map[string]string{"codex": bin})}
 			task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessEdit,
 				Touch: []string{"made.txt"}, Route: &router.Route{Harness: "codex"}, WallLimit: "1m", IdleLimit: "1m"}
+			var clockDone chan error
 			if mode == "stall" {
 				task.IdleLimit = "1ms"
+				clock := newToolClock(t)
+				clockDone = make(chan error, 1)
+				cancel := make(chan struct{})
+				task.Cancel = cancel
+				go func() {
+					err := clock.drive("idle-after-output", "")
+					if err != nil {
+						close(cancel)
+					}
+					clockDone <- err
+				}()
 			}
 			if mode == "cancel" {
 				cancel := make(chan struct{})
@@ -193,6 +209,11 @@ func TestRunOnceRecordsChangesOnBlockedCancelStallAndJudgedPaths(t *testing.T) {
 				}()
 			}
 			rec := runOnce(env, task, &brief.Brief{}, 1, nil)
+			if clockDone != nil {
+				if err := <-clockDone; err != nil {
+					t.Fatal(err)
+				}
+			}
 			if rec.Outcome.Outcome != wantOutcome {
 				t.Fatalf("outcome: %+v, want %s", rec.Outcome, wantOutcome)
 			}
@@ -210,15 +231,17 @@ func TestRunOnceRecordsChangesOnBlockedCancelStallAndJudgedPaths(t *testing.T) {
 }
 
 func TestRunOncePausesLimitsAndRecordsRelay(t *testing.T) {
+	fastDispatchTimers(t)
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	root, folder := t.TempDir(), t.TempDir()
 	bin := filepath.Join(t.TempDir(), "lane")
-	script := "#!/bin/sh\ncat >/dev/null\nsleep 5\nprintf '## Answer\\nanswer\\nSTATUS: done\\n' > \"$MAESTRO_TASK_FOLDER/result.md\"\n"
+	t.Setenv("TEST_RELAY_RELEASE", filepath.Join(folder, "release"))
+	script := "#!/bin/sh\nread pointer\nwhile [ ! -f \"$TEST_RELAY_RELEASE\" ]; do sleep 0.002; done\nprintf '## Answer\\nanswer\\nSTATUS: done\\n' > \"$MAESTRO_TASK_FOLDER/result.md\"\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	env := &Env{Root: root, Roster: &roster.Roster{}, Project: &config.Project{Allow: []string{"Bash(go run *)"}}, Reg: harness.New(map[string]string{"claude": bin})}
-	task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessRead, Route: &router.Route{Harness: "claude"}, WallLimit: "3s", IdleLimit: "3s"}
+	task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessRead, Route: &router.Route{Harness: "claude"}, WallLimit: "100ms", IdleLimit: "100ms"}
 	control := controlFolder(t, folder)
 	done := make(chan error, 1)
 	go func() {
@@ -238,12 +261,17 @@ func TestRunOncePausesLimitsAndRecordsRelay(t *testing.T) {
 			done <- err
 			return
 		}
-		time.Sleep(4 * time.Second)
+		// Keep the Relay open past both injected limits.
+		time.Sleep(160 * time.Millisecond)
 		if err := writeRelayJSON(control, "relay-answer-"+request.ID+".json", relayAnswer{request, "deny", time.Now().UTC()}); err != nil {
 			done <- err
 			return
 		}
-		done <- os.Remove(filepath.Join(control, "relay.json"))
+		if err := os.Remove(filepath.Join(control, "relay.json")); err != nil {
+			done <- err
+			return
+		}
+		done <- os.WriteFile(filepath.Join(folder, "release"), nil, 0o600)
 	}()
 	rec := runOnce(env, task, &brief.Brief{}, 1, nil)
 	if err := <-done; err != nil {
@@ -279,7 +307,7 @@ func TestOneShotRelayHarness(t *testing.T) {
 	if verdict := hook.DecideLane(call, lane); verdict.Kind != "relay" {
 		t.Fatalf("expected Relay: %+v", verdict)
 	}
-	relayDeadline, relayPollInterval = 4*time.Second, 10*time.Millisecond
+	relayDeadline, relayPollInterval = 350*time.Millisecond, time.Millisecond
 	input, err := json.Marshal(call.Input)
 	if err != nil {
 		t.Fatal(err)
@@ -299,21 +327,28 @@ func TestOneShotRelayHarness(t *testing.T) {
 }
 
 func TestRunOnceEditRelayAnswerAndDeadline(t *testing.T) {
-	for _, harnessName := range []string{"claude", "agy"} {
-		for _, answer := range []string{"allow", "timeout"} {
+	fastDispatchTimers(t)
+	// The cases run in parallel: each case has its own project, control folder,
+	// and Task id, and the environment and the Solo helper below are the same
+	// for every case.
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("MAESTRO_TEST_RELAY_HELPER", "1")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MAESTRO_TEST_RELAY_EXE", self)
+	client, callsPath := deferredSoloClient(t)
+	for i, harnessName := range []string{"claude", "agy"} {
+		for j, answer := range []string{"allow", "timeout"} {
+			id := fmt.Sprintf("b%03x", 2*i+j)
 			t.Run(harnessName+"/"+answer, func(t *testing.T) {
-				t.Setenv("MAESTRO_HOME", t.TempDir())
-				t.Setenv("MAESTRO_TEST_RELAY_HELPER", "1")
-				self, err := os.Executable()
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Setenv("MAESTRO_TEST_RELAY_EXE", self)
+				t.Parallel()
 				root := t.TempDir()
 				if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
 					t.Fatalf("git init: %v: %s", err, out)
 				}
-				folder := filepath.Join(config.RunsDir(root), "r-test", "abcd")
+				folder := filepath.Join(config.RunsDir(root), "r-test", id)
 				if err := os.MkdirAll(folder, 0o755); err != nil {
 					t.Fatal(err)
 				}
@@ -322,13 +357,12 @@ func TestRunOnceEditRelayAnswerAndDeadline(t *testing.T) {
 				if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				client, callsPath := deferredSoloClient(t)
 				r := &roster.Roster{Harness: map[string]config.Harness{harnessName: {}}}
 				r.Router.Backend = "rules"
 				env := &Env{Root: root, Roster: r, Reg: harness.New(map[string]string{harnessName: bin}),
 					Solo: &SoloLink{Client: client, ProjectID: 1, Orchestrator: 42}}
-				task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: brief.AccessEdit,
-					Route: &router.Route{Harness: harnessName}, WallLimit: "2s", IdleLimit: "2s"}
+				task := &Task{Project: root, Folder: folder, Run: "r-test", Task: id, Access: brief.AccessEdit,
+					Route: &router.Route{Harness: harnessName}, WallLimit: "200ms", IdleLimit: "200ms"}
 				control := controlFolder(t, folder)
 				reply := make(chan error, 1)
 				go func() {
@@ -336,7 +370,7 @@ func TestRunOnceEditRelayAnswerAndDeadline(t *testing.T) {
 					if err == nil && answer == "allow" {
 						// Stay silent longer than both limits, then use the same
 						// answer file as `maestro answer`.
-						time.Sleep(3 * time.Second)
+						time.Sleep(250 * time.Millisecond)
 						err = WriteRelayAnswer(control, "allow", request.ID)
 					}
 					reply <- err
@@ -364,10 +398,10 @@ func TestRunOnceEditRelayAnswerAndDeadline(t *testing.T) {
 				if err := json.Unmarshal(rec.Permission.Relays[0], &saved); err != nil {
 					t.Fatal(err)
 				}
-				want, seconds := "allow", 3.0
+				want, seconds := "allow", 0.25
 				if answer == "timeout" {
 					// RelayWait starts its deadline before it publishes AskedAt.
-					want, seconds = "denied: no answer", 3.9
+					want, seconds = "denied: no answer", 0.34
 				}
 				if saved.Answer != want || saved.Seconds < seconds {
 					t.Fatalf("Relay answer: %+v, want %q after at least %.0fs", saved, want, seconds)
@@ -376,9 +410,15 @@ func TestRunOnceEditRelayAnswerAndDeadline(t *testing.T) {
 				if err != nil || !strings.Contains(string(report), "\n"+want+"\n") {
 					t.Fatalf("Harness did not receive the answer: %s, %v", report, err)
 				}
-				calls, err := os.ReadFile(callsPath)
-				if err != nil || strings.Count(string(calls), `"name":"timer_set"`) != 1 || strings.Contains(string(calls), `"name":"spawn_agent"`) || !strings.Contains(string(calls), "Maestro relay:") {
-					t.Fatalf("Solo Relay wake-up: %s, %v", calls, err)
+				all, err := os.ReadFile(callsPath)
+				var calls string
+				for _, line := range strings.SplitAfter(string(all), "\n") {
+					if strings.Contains(line, `id=\"`+id+`\"`) {
+						calls += line
+					}
+				}
+				if err != nil || strings.Count(calls, `"name":"timer_set"`) != 1 || strings.Contains(string(all), `"name":"spawn_agent"`) || !strings.Contains(calls, "Maestro relay:") {
+					t.Fatalf("Solo Relay wake-up: %s, %v", all, err)
 				}
 			})
 		}

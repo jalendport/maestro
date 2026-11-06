@@ -3,6 +3,7 @@ package dispatch
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,51 @@ import (
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/router"
 )
+
+func TestProcessAliveStandalone(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		lane       int
+		supervisor string
+		alive      bool
+	}{
+		{"live Lane", os.Getpid(), "", true},
+		{"dead Lane", 1 << 30, "", false},
+		{"live supervisor after Lane", 1 << 30, strconv.Itoa(os.Getpid()), true},
+		{"dead supervisor before Lane", os.Getpid(), "1073741824", false},
+		{"invalid supervisor falls back", os.Getpid(), "invalid", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			folder := t.TempDir()
+			if tt.supervisor != "" {
+				if err := os.WriteFile(filepath.Join(folder, "supervisor.pid"), []byte(tt.supervisor), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rec := &Record{Path: folder, Pid: tt.lane}
+			if got := ProcessAlive(rec); got != tt.alive {
+				t.Fatalf("ProcessAlive = %v; want %v", got, tt.alive)
+			}
+		})
+	}
+}
+
+func TestChecksRunning(t *testing.T) {
+	for _, tt := range []struct {
+		state string
+		event string
+		want  bool
+	}{
+		{"running", "start", false},
+		{"running", "check", true},
+		{"ended", "check", false},
+	} {
+		rec := &Record{State: tt.state, Events: []Event{{Kind: tt.event}}}
+		if got := ChecksRunning(rec); got != tt.want {
+			t.Fatalf("ChecksRunning(%s, %s) = %v", tt.state, tt.event, got)
+		}
+	}
+}
 
 func TestStatusWithoutStartTime(t *testing.T) {
 	for _, state := range []string{"running", "ended"} {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // PendingResume includes answers queued before the supervisor updates run.json.
@@ -28,6 +29,23 @@ func ResumeTask(s *State) *TaskState {
 		}
 	}
 	return nil
+}
+
+// PauseReason includes each Blocked item that needs the Orchestrator.
+func PauseReason(s *State) string {
+	reason := s.PauseReason
+	for _, task := range sortedTasks(s) {
+		if task.State != TaskBlocked || task.DependencyBlocked || PendingResume(s.Folder, task.ID) {
+			continue
+		}
+		if text := blockedText(task); text != "" && !strings.Contains(reason, text) {
+			if reason != "" {
+				reason += "; "
+			}
+			reason += text
+		}
+	}
+	return reason
 }
 
 // ResumeCommand is shared by wait and the Solo wake-up.

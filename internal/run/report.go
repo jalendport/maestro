@@ -41,6 +41,25 @@ func Report(s *State) string {
 	w.WriteString("\n")
 	for _, t := range sortedTasks(s) {
 		fmt.Fprintf(&w, "  %-2d %-32s %-8s %-18s %d  %s\n", t.Number, cutTitle(t.Title, 32), stateWord(t), laneWord(t), t.Attempt, reportPath(s, t))
+		if t.Attempt > 1 {
+			folder := t.Folder
+			if folder == "" {
+				folder = filepath.Join(s.Folder, t.ID)
+			}
+			judged := t.JudgedFiles
+			if judged == nil {
+				if rec, err := dispatch.LoadRecord(folder); err == nil {
+					judged = append([]string{}, rec.Verification.Changed...)
+				}
+			}
+			if judged != nil {
+				files := strings.Join(judged, ", ")
+				if files == "" {
+					files = "none"
+				}
+				fmt.Fprintf(&w, "    judged files: %s\n", files)
+			}
+		}
 	}
 	var needs []string
 	for _, t := range sortedTasks(s) {
@@ -114,8 +133,8 @@ func reportPath(s *State, t *TaskState) string {
 }
 
 func blockedText(t *TaskState) string {
-	if rec, err := dispatch.LoadRecord(t.Folder); err == nil && len(rec.Permission.Blocked) > 0 {
-		return strings.Join(rec.Permission.Blocked, "; ")
+	if rec, err := dispatch.LoadRecord(t.Folder); err == nil && rec.BlockedReason() != "" {
+		return rec.BlockedReason()
 	}
 	return ui.FirstLine(t.Error, 80)
 }
@@ -171,6 +190,8 @@ func Status(s *State) string {
 			rec, err := dispatch.LoadRecord(filepath.Join(s.Folder, t.ID))
 			if stale || (err == nil && rec.State == "running" && !dispatch.ProcessAlive(rec)) {
 				taskState = "stale (process gone)"
+			} else if err == nil && dispatch.ChecksRunning(rec) {
+				taskState = "running (checks running)"
 			}
 		}
 		fmt.Fprintf(&w, "  %-2d %-32s %-9s %-26s %s\n", t.Number, cutTitle(t.Title, 32), taskState, lane, tail)

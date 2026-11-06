@@ -20,6 +20,21 @@ type SoloLink struct {
 	Orchestrator int
 }
 
+var soloWakeDelay = time.Second
+var soloWakeWait = time.Sleep
+
+// SetSoloWakeForTest sets the Solo wake-up delay and the function that waits
+// for it, and returns a function that restores both. Only tests call it; a nil
+// wait keeps the current wait.
+func SetSoloWakeForTest(delay time.Duration, wait func(time.Duration)) (restore func()) {
+	oldDelay, oldWait := soloWakeDelay, soloWakeWait
+	soloWakeDelay = delay
+	if wait != nil {
+		soloWakeWait = wait
+	}
+	return func() { soloWakeDelay, soloWakeWait = oldDelay, oldWait }
+}
+
 // ConnectSolo opens the link when this process runs inside Solo. A detached
 // supervisor keeps SOLO_* in its environment, so the link survives detach.
 func ConnectSolo() *SoloLink {
@@ -100,7 +115,7 @@ func (l *SoloLink) ReportComment(t *Task, rec *Record) {
 		ui.Warnf("solo comment: %v", err)
 		return
 	}
-	if rec.Outcome.Outcome == OutcomeVerified || rec.Outcome.Outcome == OutcomeAnswered || rec.Outcome.Outcome == OutcomeUnverified {
+	if !rec.nudgePending && (rec.Outcome.Outcome == OutcomeVerified || rec.Outcome.Outcome == OutcomeAnswered || rec.Outcome.Outcome == OutcomeUnverified) {
 		_ = l.Client.CompleteTodo(l.ProjectID, t.Todo)
 	}
 }
@@ -137,7 +152,7 @@ func (l *SoloLink) WakeIf(kind, id, title, harnessName, relayID, verb string, pe
 	if pending != nil && !pending() {
 		return
 	}
-	time.Sleep(time.Second)
+	soloWakeWait(soloWakeDelay)
 	if pending != nil && !pending() {
 		return
 	}

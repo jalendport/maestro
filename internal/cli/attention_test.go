@@ -205,6 +205,8 @@ func TestAttentionResumeWhileStartIsSlow(t *testing.T) {
 	bf.Record("codex", []harness.Window{{Kind: "weekly", Used: .1, ResetsAt: time.Now().Add(time.Hour)}}, budget.SourceManual)
 	env := &dispatch.Env{Root: rec.Project, Roster: r, Budget: bf, Reg: harness.New(map[string]string{"codex": bin}),
 		Disc: &discovery.Cache{RefreshedAt: time.Now(), Harness: map[string]discovery.Record{"codex": {Path: bin, Version: "0.162.0", Models: []harness.Model{{ID: "gpt-6.1-sol"}}}}}}
+	// The supervisor takes the resume marker on its next poll.
+	t.Cleanup(run.SetPollIntervalForTest(5 * time.Millisecond))
 	done := make(chan error, 1)
 	go func() { done <- run.Start(env, s.Folder) }()
 	t.Cleanup(func() {
@@ -311,6 +313,17 @@ func TestAttentionCLIResumeDuringPauseDelay(t *testing.T) {
 	off := false
 	r.Failure.KeepAwake = &off
 	env := &dispatch.Env{Root: rec.Project, Roster: r, Solo: &dispatch.SoloLink{Client: client, Orchestrator: 42}}
+	// The pause wake-up waits until the CLI answer is saved, so the answer always
+	// comes during the delay; other wake-ups return at once.
+	t.Cleanup(dispatch.SetSoloWakeForTest(time.Millisecond, func(time.Duration) {
+		until := time.Now().Add(10 * time.Second)
+		for time.Now().Before(until) && !run.PendingResume(s.Folder, "") {
+			if current, err := run.Load(s.Folder); err != nil || current.State != run.StatePaused {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}))
 	done := make(chan error, 1)
 	go func() { done <- run.Start(env, s.Folder) }()
 	deadline := time.Now().Add(5 * time.Second)

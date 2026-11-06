@@ -149,6 +149,7 @@ func TestRelayDeniesSoloToolsWithoutFiles(t *testing.T) {
 }
 
 func TestRelayWaitAnswersAndCleanup(t *testing.T) {
+	fastDispatchTimers(t)
 	for _, answer := range []string{"allow", "deny"} {
 		t.Run(answer, func(t *testing.T) {
 			folder := t.TempDir()
@@ -398,6 +399,7 @@ func TestRelayWaitRecoversDeadOwner(t *testing.T) {
 }
 
 func TestRelayWaitKeepsSuccessorFiles(t *testing.T) {
+	fastDispatchTimers(t)
 	folder := t.TempDir()
 	done := make(chan error, 1)
 	go func() {

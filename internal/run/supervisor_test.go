@@ -21,6 +21,7 @@ func TestSameErrorTwiceBlocksTaskAndPausesRun(t *testing.T) {
 			name = "same lane retry"
 		}
 		t.Run(name, func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
 			folder := t.TempDir()
 			task := &TaskState{Number: 1, ID: "abcd", Folder: folder, State: TaskRunning,
 				Route: &router.Route{FamilyID: "first", Tier: roster.TierDaily}}

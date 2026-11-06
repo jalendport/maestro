@@ -77,14 +77,22 @@ func TestOneShotLaneHelper(t *testing.T) {
 }
 
 func TestOneShotLaunchAndBriefWithSolo(t *testing.T) {
+	// The cases run in parallel: each case has its own project and Lane script,
+	// and the environment and the Solo helper below are the same for every case.
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
+	client, callsPath := deferredSoloClient(t)
+	soloCommand := os.Getenv("MAESTRO_SOLO_MCP")
+	t.Setenv("MAESTRO_SOLO_MCP", "/unused-solo-command")
+	t.Setenv("MAESTRO_TEST_LANE_HELPER", "1")
+	// The Solo identity belongs to the Orchestrator, not its child.
+	t.Setenv("SOLO_PROCESS_ID", "42")
+	t.Setenv("SOLO_PROJECT_ID", "1")
+	t.Setenv("SOLO_TEST_IDENTITY", "parent")
 	for _, name := range []string{"claude", "codex", "grok", "agy"} {
 		for _, access := range []string{brief.AccessRead, brief.AccessEdit} {
 			t.Run(name+"/"+access, func(t *testing.T) {
-				t.Setenv("MAESTRO_HOME", t.TempDir())
-				t.Setenv("CODEX_HOME", t.TempDir())
-				client, callsPath := deferredSoloClient(t)
-				soloCommand := os.Getenv("MAESTRO_SOLO_MCP")
-				t.Setenv("MAESTRO_SOLO_MCP", "/unused-solo-command")
+				t.Parallel()
 				root := t.TempDir()
 				if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
 					t.Fatalf("git init: %v: %s", err, out)
@@ -93,14 +101,12 @@ func TestOneShotLaunchAndBriefWithSolo(t *testing.T) {
 				if err := os.MkdirAll(folder, 0o755); err != nil {
 					t.Fatal(err)
 				}
+				capturePath := filepath.Join(folder, "launch.json")
 				bin := filepath.Join(t.TempDir(), "lane")
-				if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec \"$MAESTRO_TEST_BINARY\" -test.run=TestOneShotLaneHelper -- \"$@\"\n"), 0o755); err != nil {
+				script := fmt.Sprintf("#!/bin/sh\nexport MAESTRO_TEST_HARNESS='%s' MAESTRO_TEST_CAPTURE='%s'\nexec \"$MAESTRO_TEST_BINARY\" -test.run=TestOneShotLaneHelper -- \"$@\"\n", name, capturePath)
+				if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				capturePath := filepath.Join(folder, "launch.json")
-				t.Setenv("MAESTRO_TEST_LANE_HELPER", "1")
-				t.Setenv("MAESTRO_TEST_HARNESS", name)
-				t.Setenv("MAESTRO_TEST_CAPTURE", capturePath)
 				r := &roster.Roster{Harness: map[string]config.Harness{name: {}}}
 				r.Router.Backend = "rules"
 				env := &Env{Root: root, Roster: r, Reg: harness.New(map[string]string{name: bin})}
@@ -113,10 +119,6 @@ func TestOneShotLaunchAndBriefWithSolo(t *testing.T) {
 				var outside laneLaunch
 				var outsideBrief []byte
 				for _, inSolo := range []bool{false, true} {
-					// The Solo identity belongs to the Orchestrator, not its child.
-					t.Setenv("SOLO_PROCESS_ID", fmt.Sprint(map[bool]int{false: 0, true: 42}[inSolo]))
-					t.Setenv("SOLO_PROJECT_ID", "1")
-					t.Setenv("SOLO_TEST_IDENTITY", "parent")
 					task.InSolo = inSolo
 					if inSolo {
 						env.Solo = &SoloLink{Client: client, ProjectID: 1}

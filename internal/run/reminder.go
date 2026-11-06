@@ -32,7 +32,7 @@ func ReminderItems(root string) string {
 				continue
 			}
 			if (s.State == StatePaused || s.PauseReason != "") && !PendingResume(folder, "") {
-				reason := s.PauseReason
+				reason := PauseReason(s)
 				if reason == "" {
 					reason = "Run needs an answer from the Orchestrator"
 				}
@@ -48,7 +48,7 @@ func ReminderItems(root string) string {
 					if rec, err := dispatch.LoadRecord(task.Folder); err == nil {
 						if rec.State == "running" && dispatch.ProcessAlive(rec) {
 							items = append(items, reminderRelay(task.Folder, task.ID)...)
-							items = append(items, reminderLane(task.ID, task.Title, rec.Route, rec.StartedAt))
+							items = append(items, reminderDispatch(task.ID, task.Title, rec))
 						}
 					} else if SupervisorAlive(s) {
 						items = append(items, reminderLane(task.ID, task.Title, task.Route, task.StartedAt))
@@ -79,7 +79,7 @@ func ReminderItems(root string) string {
 				continue
 			}
 			items = append(items, reminderRelay(path, rec.Task)...)
-			items = append(items, reminderLane(rec.Task, rec.TaskInfo.Title, rec.Route, rec.StartedAt))
+			items = append(items, reminderDispatch(rec.Task, rec.TaskInfo.Title, rec))
 		}
 	}
 	// Council Seats are Lanes too. Only the current Round can still run.
@@ -98,7 +98,7 @@ func ReminderItems(root string) string {
 			path := filepath.Join(folder, seat.Family)
 			if rec, err := dispatch.LoadRecord(path); err == nil && rec.State == "running" && dispatch.ProcessAlive(rec) {
 				items = append(items, reminderRelay(path, rec.Task)...)
-				items = append(items, reminderLane(rec.Task, rec.TaskInfo.Title, rec.Route, rec.StartedAt))
+				items = append(items, reminderDispatch(rec.Task, rec.TaskInfo.Title, rec))
 			}
 		}
 	}
@@ -115,6 +115,14 @@ func reminderRelay(folder, task string) []string {
 		return nil
 	}
 	return []string{fmt.Sprintf("relay  task %s  %s %s  maestro answer %s allow|deny --relay %s", task, request.ToolName, dispatch.RelayInput(request.ToolInput), task, request.ID)}
+}
+
+func reminderDispatch(task, title string, rec *dispatch.Record) string {
+	line := reminderLane(task, title, rec.Route, rec.StartedAt)
+	if dispatch.ChecksRunning(rec) {
+		line += "  checks running"
+	}
+	return line
 }
 
 func reminderLane(task, title string, route *router.Route, started time.Time) string {

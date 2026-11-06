@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/verify"
@@ -42,7 +43,7 @@ func TestGateRedactsBriefAndDiff(t *testing.T) {
 	}
 	env := &Env{Roster: &roster.Roster{Router: config.Router{Backend: "jev", BaseURL: server.URL}}, Project: &config.Project{Redact: []string{"MARKED"}}}
 	rec := &Record{Verification: Verification{Changed: []string{"changed.txt"}}}
-	gate := runGate(env, &Task{Project: root, Title: "MARKED"}, rec, "MARKED", "MARKED", snap)
+	gate := runGate(env, &Task{Project: root, Title: "MARKED"}, rec, &brief.Brief{Goal: "MARKED", Done: "MARKED"}, nil, snap)
 	if gate.Skipped != "" {
 		t.Fatal(gate.Skipped)
 	}
@@ -69,7 +70,7 @@ func TestGateWithoutKeyIsSkipped(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	t.Setenv("TYPESAFE_API_KEY", "")
 	env := &Env{Roster: &roster.Roster{Router: config.Router{Backend: "jev"}}}
-	gate := runGate(env, &Task{}, &Record{}, "goal", "done", attemptBaseline{})
+	gate := runGate(env, &Task{}, &Record{}, &brief.Brief{Goal: "goal", Done: "done"}, nil, attemptBaseline{})
 	if gate.Skipped == "" || gate.Satisfies != 0 || gate.Verdict != "" {
 		t.Fatalf("missing key must skip verification: %+v", gate)
 	}

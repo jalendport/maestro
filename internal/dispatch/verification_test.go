@@ -11,10 +11,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/harness"
+	"github.com/jalendport/maestro/internal/ledger"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
 	"github.com/jalendport/maestro/internal/ui"
@@ -60,6 +62,7 @@ func TestCommittedAttemptReachesScopeGuardAndGateDiff(t *testing.T) {
 func TestCheckFailureNamesCommandAndFirstOutputLine(t *testing.T) {
 	for _, command := range []string{"printf 'compile failed\nmore detail\n'; false", "printf 'test failed\nmore detail\n'; false"} {
 		t.Run(command, func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
 			root, folder := t.TempDir(), t.TempDir()
 			env := &Env{Roster: &roster.Roster{}}
 			rec := &Record{Path: folder}
@@ -68,6 +71,63 @@ func TestCheckFailureNamesCommandAndFirstOutputLine(t *testing.T) {
 			want := "check failed: " + command + ": " + ui.FirstLine(rec.Verification.Checks[0].Output, 0)
 			if rec.Outcome.ErrorText != want || rec.Outcome.Outcome != OutcomeFailed {
 				t.Fatalf("outcome: %+v, want %q", rec.Outcome, want)
+			}
+		})
+	}
+}
+
+func TestCheckStopReasonAndClassReachLedger(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, idle, wall, reason, class string
+	}{
+		{"idle", "printf started; sleep 30", "100ms", "1m", "no output for 100ms", FailStall},
+		{"wall", "while true; do printf x; sleep 0.05; done", "1s", "150ms", "wall limit", FailStall},
+		{"docker", "docker compose test", "1s", "1m", "Docker does not respond", FailBad},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MAESTRO_HOME", t.TempDir())
+			root, folder := t.TempDir(), t.TempDir()
+			if tc.name == "docker" {
+				bin := t.TempDir()
+				if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			}
+			env := &Env{Roster: &roster.Roster{}}
+			// The Lane has used more than the checks' entire Wall limit.
+			rec := &Record{Kind: "dispatch", Path: folder, StartedAt: time.Now().Add(-time.Hour)}
+			task := &Task{Project: root, Access: brief.AccessEdit, IdleLimit: tc.idle, WallLimit: tc.wall}
+			commands := []string{"false", tc.command, "touch must-not-run"}
+			judge(env, task, rec, brief.ParseReport("STATUS: done\n"), commands, &brief.Brief{}, attemptBaseline{})
+			want := "check failed: " + tc.command + ": " + tc.reason
+			if rec.Outcome.Outcome != OutcomeFailed || rec.Outcome.FailureClass != tc.class || rec.Outcome.ErrorText != want {
+				t.Fatalf("outcome: %+v", rec.Outcome)
+			}
+			checks := rec.Verification.Checks
+			if len(checks) != 3 || checks[0].Skipped || checks[0].Reason != "" || checks[1].Skipped || !checks[2].Skipped || checks[2].Reason != tc.reason {
+				t.Fatalf("checks: %+v", checks)
+			}
+			if err := ledger.Append(rec); err != nil {
+				t.Fatal(err)
+			}
+			rows := 0
+			if err := ledger.Each(func(raw json.RawMessage) error {
+				rows++
+				var stored Record
+				if err := json.Unmarshal(raw, &stored); err != nil {
+					return err
+				}
+				if stored.Outcome.FailureClass != tc.class || stored.Outcome.ErrorText != want || !reflect.DeepEqual(stored.Verification.Checks, checks) {
+					t.Fatalf("Ledger row: %+v", stored)
+				}
+				return nil
+			}); err != nil || rows != 1 {
+				t.Fatalf("Ledger rows=%d: %v", rows, err)
+			}
+			stored, err := LoadRecord(folder)
+			if err != nil || stored.Outcome.FailureClass != tc.class || stored.Outcome.ErrorText != want {
+				t.Fatalf("saved record: %+v, %v", stored, err)
 			}
 		})
 	}

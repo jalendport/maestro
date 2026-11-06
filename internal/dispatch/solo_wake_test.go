@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -59,7 +60,14 @@ func wakeBodies(t *testing.T, path string) []string {
 }
 
 func TestSoloDispatchEndWake(t *testing.T) {
-	for _, tc := range []struct {
+	fastDispatchTimers(t)
+	// The cases run in parallel: each case has its own project and Task id, and
+	// the environment and the Solo helper below are the same for every case.
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("TYPESAFE_API_KEY", "test-key")
+	client, calls := deferredSoloClient(t)
+	for i, tc := range []struct {
 		name, status, outcome string
 		edit, wake            bool
 	}{
@@ -72,10 +80,9 @@ func TestSoloDispatchEndWake(t *testing.T) {
 		{"answered", "done", OutcomeAnswered, false, false},
 		{"unverified", "done", OutcomeUnverified, true, false},
 	} {
+		id := fmt.Sprintf("a%03x", i)
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("MAESTRO_HOME", t.TempDir())
-			t.Setenv("CODEX_HOME", t.TempDir())
-			client, calls := deferredSoloClient(t)
+			t.Parallel()
 			root := t.TempDir()
 			if out, err := exec.Command("git", "-C", root, "init").CombinedOutput(); err != nil {
 				t.Fatalf("git init: %v: %s", err, out)
@@ -85,17 +92,15 @@ func TestSoloDispatchEndWake(t *testing.T) {
 			if tc.outcome == OutcomeTimedOut {
 				script += "exec sleep 10\n"
 			} else {
-				script += "printf 'work\\n' > work.txt\nprintf '## Answer\\nTask complete\\nSTATUS: %s\\n' \"$MAESTRO_TEST_STATUS\" > \"$MAESTRO_TASK_FOLDER/result.md\"\n"
+				script += "printf 'work\\n' > work.txt\nprintf '## Answer\\nTask complete\\nSTATUS: %s\\n' '" + tc.status + "' > \"$MAESTRO_TASK_FOLDER/result.md\"\n"
 			}
 			if err := os.WriteFile(lane, []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv("MAESTRO_TEST_STATUS", tc.status)
 			r := &roster.Roster{Router: config.Router{Backend: "rules"}}
 			off := false
 			r.Failure.KeepAwake = &off
 			if tc.outcome == OutcomeVerified {
-				t.Setenv("TYPESAFE_API_KEY", "test-key")
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					_, _ = io.WriteString(w, `{"answers":{"satisfies":{"noul":1},"verdict":{"choice":"pass"},"risk":{"score":1,"legend":{"1":"low"}}}}`)
 				}))
@@ -110,11 +115,11 @@ func TestSoloDispatchEndWake(t *testing.T) {
 			if err := brief.Write(b, b.Path); err != nil {
 				t.Fatal(err)
 			}
-			folder := filepath.Join(config.RunsDir(root), "r-test", "abcd")
+			folder := filepath.Join(config.RunsDir(root), "r-test", id)
 			if err := os.MkdirAll(folder, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Title: b.Title, BriefPath: b.Path, Access: access,
+			task := &Task{Project: root, Folder: folder, Run: "r-test", Task: id, Title: b.Title, BriefPath: b.Path, Access: access,
 				Route: &router.Route{Family: &roster.Family{}, Harness: "codex", FamilyID: "codex-sol"}, MaxAttempt: 1, WallLimit: "1m", IdleLimit: "1m"}
 			if tc.outcome == OutcomeTimedOut {
 				task.WallLimit = "1ms"
@@ -127,7 +132,12 @@ func TestSoloDispatchEndWake(t *testing.T) {
 			if err != nil || rec.Outcome.Outcome != tc.outcome || rec.Outcome.Status != tc.status {
 				t.Fatalf("record=%+v error=%v", rec, err)
 			}
-			bodies := wakeBodies(t, calls)
+			var bodies []string
+			for _, body := range wakeBodies(t, calls) {
+				if strings.Contains(body, id) {
+					bodies = append(bodies, body)
+				}
+			}
 			want := 0
 			if tc.wake {
 				want = 1
@@ -135,7 +145,7 @@ func TestSoloDispatchEndWake(t *testing.T) {
 			if len(bodies) != want {
 				t.Fatalf("wake-ups=%q, want %d", bodies, want)
 			}
-			if want == 1 && bodies[0] != `Maestro dispatch end: id="abcd" title="Test wake-up" harness="codex". Run: maestro wait abcd` {
+			if want == 1 && bodies[0] != `Maestro dispatch end: id="`+id+`" title="Test wake-up" harness="codex". Run: maestro wait `+id {
 				t.Fatalf("wake-up=%q", bodies[0])
 			}
 		})
@@ -153,7 +163,7 @@ func TestSoloDispatchRetryWakesOnlyAfterFinalAttempt(t *testing.T) {
 	off := false
 	r := &roster.Roster{}
 	r.Failure.KeepAwake = &off
-	env := &Env{Root: root, Roster: r, Reg: harness.New(nil), Solo: &SoloLink{Client: client, ProjectID: 1, Orchestrator: 42}}
+	env := &Env{Root: root, Roster: r, Reg: harness.New(nil), Solo: &SoloLink{Client: client, ProjectID: 1, Orchestrator: 42}, RetryDelay: time.Millisecond}
 	task := &Task{Project: root, Folder: folder, Task: "abcd", Title: b.Title, BriefPath: b.Path, Access: brief.AccessRead,
 		Route: &router.Route{Family: &roster.Family{}, Harness: "absent"}, MaxAttempt: 2}
 	rec, err := Execute(env, task)
@@ -174,12 +184,16 @@ func TestSoloDispatchResolvedDuringDelayDoesNotWake(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	go func() {
-		time.Sleep(100 * time.Millisecond)
+	oldWait := soloWakeWait
+	t.Cleanup(func() { soloWakeWait = oldWait })
+	soloWakeWait = func(delay time.Duration) {
+		if delay != soloWakeDelay {
+			t.Errorf("wake-up delay = %s, want %s", delay, soloWakeDelay)
+		}
 		current := *rec
 		current.Outcome = Outcome{Outcome: OutcomeAnswered, Status: brief.StatusDone}
 		done <- current.Save()
-	}()
+	}
 	link := &SoloLink{Client: client, ProjectID: 1, Orchestrator: 42}
 	link.dispatchEnded(&Task{Task: "abcd", Folder: folder, Route: &router.Route{}}, rec)
 	if err := <-done; err != nil {
@@ -206,10 +220,14 @@ func TestSoloRelayAnsweredDuringDelayDoesNotWake(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	go func() {
-		time.Sleep(100 * time.Millisecond)
+	oldWait := soloWakeWait
+	t.Cleanup(func() { soloWakeWait = oldWait })
+	soloWakeWait = func(delay time.Duration) {
+		if delay != soloWakeDelay {
+			t.Errorf("wake-up delay = %s, want %s", delay, soloWakeDelay)
+		}
 		done <- WriteRelayAnswer(control, "allow", request.ID)
-	}()
+	}
 	tracker := &relayTracker{}
 	env := &Env{Solo: &SoloLink{Client: client, ProjectID: 1, Orchestrator: 42}}
 	task, rec := &Task{Task: "abcd", Folder: folder}, &Record{Path: folder}

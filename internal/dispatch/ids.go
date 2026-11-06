@@ -16,6 +16,8 @@ import (
 
 var runIDRe = regexp.MustCompile(`^r-(\d{4,})$`)
 
+var taskIDBytes = rand.Read
+
 // NextRunID allocates the next r-NNNN in the project's runs folder.
 // It reserves the folder before returning.
 func NextRunID(root string) (string, error) {
@@ -52,7 +54,7 @@ func NextRunID(root string) (string, error) {
 func NewTaskID(runDir string) string {
 	for {
 		b := make([]byte, 2)
-		_, _ = rand.Read(b)
+		_, _ = taskIDBytes(b)
 		id := hex.EncodeToString(b)
 		if _, err := os.Stat(filepath.Join(runDir, id)); os.IsNotExist(err) {
 			return id

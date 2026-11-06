@@ -19,21 +19,30 @@ import (
 )
 
 func TestSoloRunKeepsTaskTodoReportAndEndWake(t *testing.T) {
-	testSoloRunWake(t, "done", false)
+	testSoloRunWake(t, "done", false, "")
 }
 
 func TestSoloFailedRunTaskSendsOnlyRunPauseWake(t *testing.T) {
-	testSoloRunWake(t, "partial", false)
+	testSoloRunWake(t, "partial", false, "")
 }
 
 func TestSoloRunAnsweredDuringDelaySendsOnlyEndWake(t *testing.T) {
-	testSoloRunWake(t, "partial", true)
+	testSoloRunWake(t, "partial", true, "")
 }
 
-func testSoloRunWake(t *testing.T, status string, answered bool) {
+func TestSoloEnvironmentBlockNamesCauseAndBlockedItem(t *testing.T) {
+	testSoloRunWake(t, "partial", false, "module is missing")
+}
+
+func testSoloRunWake(t *testing.T, status string, answered bool, blocked string) {
 	t.Helper()
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	t.Setenv("MAESTRO_TEST_STATUS", status)
+	reportBlocked := blocked
+	if reportBlocked == "" {
+		reportBlocked = "none"
+	}
+	t.Setenv("MAESTRO_TEST_BLOCKED", reportBlocked)
 	t.Setenv("SOLO_PROCESS_ID", "42")
 	t.Setenv("MAESTRO_TEST_SOLO_HELPER", "1")
 	callsPath := filepath.Join(t.TempDir(), "calls")
@@ -54,7 +63,7 @@ func testSoloRunWake(t *testing.T, status string, answered bool) {
 	}
 	defer client.Close()
 	bin := filepath.Join(t.TempDir(), "codex")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat >/dev/null\nprintf '## Answer\\nTask complete\\nSTATUS: %s\\n' \"$MAESTRO_TEST_STATUS\" > \"$MAESTRO_TASK_FOLDER/result.md\"\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat >/dev/null\nprintf '## Answer\\nTask complete\\n## Blocked\\n- %s\\nSTATUS: %s\\n' \"$MAESTRO_TEST_BLOCKED\" \"$MAESTRO_TEST_STATUS\" > \"$MAESTRO_TASK_FOLDER/result.md\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	d, _, err := config.ParseFile(roster.Defaults)
@@ -81,6 +90,21 @@ func testSoloRunWake(t *testing.T, status string, answered bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A short wake-up delay; with an answer, the wake-up waits while the Run is
+	// paused until the answer is saved, so the answer always comes in the delay.
+	var wait func(time.Duration)
+	if answered {
+		wait = func(time.Duration) {
+			until := time.Now().Add(10 * time.Second)
+			for time.Now().Before(until) && !run.PendingResume(s.Folder, "") {
+				if current, err := run.Load(s.Folder); err != nil || current.State != run.StatePaused {
+					return
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+	}
+	t.Cleanup(dispatch.SetSoloWakeForTest(time.Millisecond, wait))
 	var reply chan error
 	if answered {
 		reply = make(chan error, 1)
@@ -113,6 +137,9 @@ func testSoloRunWake(t *testing.T, status string, answered bool) {
 	if status == "partial" {
 		wantRun, wantTask, wantKind, wantComplete = run.StatePaused, run.TaskFailed, "run pause", 0
 		wantCommand = "maestro resume " + s.Run + " --task 1 (--lane <family[:effort]> | --brief <file> | --skip)"
+		if blocked != "" {
+			wantTask = run.TaskBlocked
+		}
 	}
 	if answered {
 		wantRun, wantTask, wantKind = run.StateFinished, run.TaskSkipped, "run end"
@@ -153,6 +180,9 @@ func testSoloRunWake(t *testing.T, status string, answered bool) {
 		}
 		if call.Params.Name == "timer_set" && (call.Params.Arguments.Process != 42 || !strings.Contains(call.Params.Arguments.Body, "Maestro "+wantKind+":") || !strings.HasSuffix(call.Params.Arguments.Body, ". Run: "+wantCommand)) {
 			t.Fatalf("Run wake-up: %s", line)
+		}
+		if call.Params.Name == "timer_set" && blocked != "" && (!strings.Contains(call.Params.Arguments.Body, "cause environment") || !strings.Contains(call.Params.Arguments.Body, blocked)) {
+			t.Fatalf("Cause or Blocked item missing from wake-up: %s", line)
 		}
 	}
 }

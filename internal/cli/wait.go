@@ -4,21 +4,41 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/proc"
+	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/run"
 )
 
+var (
+	waitPollInterval = 2 * time.Second
+	waitProcessGrace = 5 * time.Second
+	waitSleep        = time.Sleep
+)
+
+// waitAwake loads only the sleep switch; it does not refresh discovery or Budget.
+func waitAwake() func() {
+	r, err := roster.Load()
+	if err == nil {
+		if stop := proc.KeepAwake(r.KeepAwake()); stop != nil {
+			return stop
+		}
+	}
+	return func() {}
+}
+
 // waitItem is the single JSON object returned when wait needs an answer.
 type waitItem struct {
-	Kind        string `json:"kind"`
-	Run         string `json:"run,omitempty"`
-	Task        string `json:"task,omitempty"`
-	RelayID     string `json:"relay_id,omitempty"`
-	Reason      string `json:"reason"`
-	NextCommand string `json:"next_command"`
-	ReportPath  string `json:"report_path,omitempty"`
+	Kind        string   `json:"kind"`
+	Run         string   `json:"run,omitempty"`
+	Task        string   `json:"task,omitempty"`
+	RelayID     string   `json:"relay_id,omitempty"`
+	Reason      string   `json:"reason"`
+	NextCommand string   `json:"next_command"`
+	ReportPath  string   `json:"report_path,omitempty"`
+	JudgedFiles []string `json:"judged_files,omitempty"`
 }
 
 func relayItem(folder, task string) (*waitItem, error) {
@@ -48,6 +68,13 @@ func (a *app) printWaitItem(item *waitItem) error {
 	if item.ReportPath != "" {
 		report = "\nreport: " + item.ReportPath
 	}
+	if item.JudgedFiles != nil {
+		files := strings.Join(item.JudgedFiles, ", ")
+		if files == "" {
+			files = "none"
+		}
+		report += "\njudged files: " + files
+	}
 	if err := a.result(item, "%s  %s\nnext: %s%s", label, item.Reason, item.NextCommand, report); err != nil {
 		return err
 	}
@@ -74,7 +101,7 @@ func runWaitItem(s *run.State) (*waitItem, error) {
 		}
 	}
 	if (s.State == run.StatePaused || s.PauseReason != "") && !run.PendingResume(s.Folder, "") {
-		item := &waitItem{Kind: "run_paused", Run: s.Run, Reason: s.PauseReason, NextCommand: run.ResumeCommand(s, stuck), ReportPath: filepath.Join(s.Folder, run.FileReport)}
+		item := &waitItem{Kind: "run_paused", Run: s.Run, Reason: run.PauseReason(s), NextCommand: run.ResumeCommand(s, stuck), ReportPath: filepath.Join(s.Folder, run.FileReport), JudgedFiles: taskJudgedFiles(stuck)}
 		if stuck != nil {
 			item.Task = stuck.ID
 			if item.Reason == "" {
@@ -91,14 +118,26 @@ func runWaitItem(s *run.State) (*waitItem, error) {
 		if stuck.State == run.TaskFailed {
 			kind = "task_failed"
 		}
-		return &waitItem{Kind: kind, Run: s.Run, Task: stuck.ID, Reason: taskWaitReason(stuck), NextCommand: run.ResumeCommand(s, stuck)}, nil
+		return &waitItem{Kind: kind, Run: s.Run, Task: stuck.ID, Reason: taskWaitReason(stuck), NextCommand: run.ResumeCommand(s, stuck), JudgedFiles: taskJudgedFiles(stuck)}, nil
 	}
 	return nil, nil
 }
 
+func taskJudgedFiles(task *run.TaskState) []string {
+	if task != nil && task.Attempt > 1 {
+		if task.JudgedFiles != nil {
+			return task.JudgedFiles
+		}
+		if rec, err := dispatch.LoadRecord(task.Folder); err == nil {
+			return append([]string{}, rec.Verification.Changed...)
+		}
+	}
+	return nil
+}
+
 func taskWaitReason(task *run.TaskState) string {
-	if rec, err := dispatch.LoadRecord(task.Folder); err == nil && len(rec.Permission.Blocked) > 0 {
-		return strings.Join(rec.Permission.Blocked, "; ")
+	if rec, err := dispatch.LoadRecord(task.Folder); err == nil && rec.BlockedReason() != "" {
+		return rec.BlockedReason()
 	}
 	if task.Error != "" {
 		return task.Error

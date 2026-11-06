@@ -28,12 +28,22 @@ func RelayInput(input json.RawMessage) string {
 var relayDeadline = 10 * time.Minute
 var relayPollInterval = time.Second
 
+// SetRelayPollForTest sets the Relay poll interval and returns a function
+// that restores it. Only tests call it.
+func SetRelayPollForTest(interval time.Duration) (restore func()) {
+	old := relayPollInterval
+	relayPollInterval = interval
+	return func() { relayPollInterval = old }
+}
+
 type RelayRequest struct {
 	ID        string          `json:"id"`
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
 	ToolUseID string          `json:"tool_use_id"`
 	AskedAt   time.Time       `json:"asked_at"`
+	// PollInterval overrides the local wait interval when positive.
+	PollInterval time.Duration `json:"-"`
 }
 
 type relayLock struct {
@@ -194,7 +204,11 @@ func RelayWait(folder string, request RelayRequest) (string, error) {
 	request.ID = fmt.Sprintf("%x", id)
 	timer := time.NewTimer(relayDeadline)
 	defer timer.Stop()
-	ticker := time.NewTicker(relayPollInterval)
+	interval := relayPollInterval
+	if request.PollInterval > 0 {
+		interval = request.PollInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	lockPath := filepath.Join(folder, "relay.lock")
 	owner := relayLock{PID: os.Getpid(), At: time.Now().UTC(), ID: request.ID}

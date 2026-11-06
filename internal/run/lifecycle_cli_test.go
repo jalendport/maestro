@@ -138,12 +138,17 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 		plan += fmt.Sprintf("\n## Task %d\n- category: implement\n### Goal\nCreate the fixture file.\n### Done\nThe file exists.\n", i)
 	}
 	write(filepath.Join(project, "plan.md"), plan, 0o644)
-	invokeAt := func(want int, root string, args ...string) string {
+	// The CLI runs as a separate built process, so a test value cannot change its
+	// 2-second wait poll; each wait in this test keeps that real time, and the
+	// approval cases below run in parallel instead.
+	// invokeWith adds env to the environment of the CLI process.
+	invokeWith := func(t *testing.T, want int, root string, env []string, args ...string) string {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, maestro, args...)
 		cmd.Dir = root
+		cmd.Env = append(os.Environ(), env...)
 		out, err := cmd.CombinedOutput()
 		if cmd.ProcessState == nil || cmd.ProcessState.ExitCode() != want {
 			t.Fatalf("maestro %v: %v\n%s", args, err, out)
@@ -152,7 +157,7 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 	}
 	invoke := func(want int, args ...string) string {
 		t.Helper()
-		return invokeAt(want, project, args...)
+		return invokeWith(t, want, project, nil, args...)
 	}
 	invoke(2, "run", "plan.md", "--council", "--level", "significant", "--floor", "heavy", "--ceiling", "heavy")
 	runFolder := filepath.Join(config.RunsDir(project), "r-0001")
@@ -229,7 +234,7 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 		t.Fatalf("Run report = %s, error = %v", report, err)
 	}
 	notification, err := os.ReadFile(filepath.Join(markers, "notification"))
-	if err != nil || !strings.Contains(string(notification), reviewSlug) {
+	if err != nil || !strings.Contains(string(notification), reviewSlug) || !strings.Contains(string(notification), `display notification "project: Run r-0001 finished: 3 done, 0 blocked, 0 failed;`) || !strings.Contains(string(notification), `with title "Maestro"`) {
 		t.Fatalf("Run notification = %s, error = %v", notification, err)
 	}
 	rows, err := os.ReadFile(config.LedgerFile())
@@ -271,11 +276,32 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 		{name: "level gap", tasks: 1, response: `"lane":{"choice":"codex-sol","confidence":0.95},"spec_is_concrete":{"noul":1},"judgment_level":{"score":3}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			if err := os.MkdirAll(filepath.Join(root, ".agents"), 0o755); err != nil {
-				t.Fatal(err)
+			// The cases run in parallel. Each case has its own project and its own
+			// Maestro home, which goes to the CLI process in its environment.
+			t.Parallel()
+			root, home := t.TempDir(), t.TempDir()
+			env := []string{"MAESTRO_HOME=" + home, "TYPESAFE_API_KEY="}
+			writeCase := func(path, content string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
-			write(config.ProjectFile(root), "", 0o644)
+			for _, path := range []string{config.DiscoveryFile(), config.BudgetFile()} {
+				rel, err := filepath.Rel(config.Home(), path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				b, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeCase(filepath.Join(home, rel), string(b))
+			}
+			writeCase(config.ProjectFile(root), "")
 			user := settings + tc.config
 			if tc.response != "" {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -283,14 +309,18 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 				}))
 				defer server.Close()
 				user = strings.Replace(user, "backend = \"rules\"", "backend = \"jev\"\nbase_url = "+fmt.Sprintf("%q", server.URL), 1)
-				t.Setenv("TYPESAFE_API_KEY", "fixture-key")
+				env = append(env, "TYPESAFE_API_KEY=fixture-key")
 			}
-			write(config.UserFile(), user, 0o644)
+			writeCase(filepath.Join(home, filepath.Base(config.UserFile())), user)
 			src := "---\naccess: edit\nlevel: some\ntouch: ['*.txt']\n---\n# Approval rules\n"
 			for i := 1; i <= tc.tasks; i++ {
 				src += fmt.Sprintf("\n## Task %d\n### Goal\nCreate the fixture file.\n### Done\nThe file exists.\n", i)
 			}
-			write(filepath.Join(root, "plan.md"), src, 0o644)
+			writeCase(filepath.Join(root, "plan.md"), src)
+			invokeAt := func(want int, root string, args ...string) string {
+				t.Helper()
+				return invokeWith(t, want, root, env, args...)
+			}
 			args := append([]string{"run", "plan.md"}, tc.flags...)
 			out := invokeAt(2, root, args...)
 			wantHeld := "run r-0001 held.  Fold any findings into the Plan file, then: maestro approve r-0001"

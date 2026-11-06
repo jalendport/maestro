@@ -1,7 +1,6 @@
 package dispatch
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -110,17 +109,28 @@ func TestNewTaskIDAvoidsExistingFolders(t *testing.T) {
 		t.Fatal(err)
 	}
 	const freeID = "abcd"
-	for i := 0; i < 1<<16; i++ {
-		id := fmt.Sprintf("%04x", i)
-		if id == freeID {
-			continue
-		}
+	for _, id := range []string{"0000", "ffff"} {
 		if err := os.Mkdir(filepath.Join(runDir, id), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
+	oldBytes := taskIDBytes
+	t.Cleanup(func() { taskIDBytes = oldBytes })
+	ids := [][2]byte{{0, 0}, {255, 255}, {0xab, 0xcd}}
+	calls := 0
+	taskIDBytes = func(b []byte) (int, error) {
+		if calls == len(ids) {
+			t.Fatal("Task ID did not use the free ID")
+		}
+		n := copy(b, ids[calls][:])
+		calls++
+		return n, nil
+	}
 	if got := NewTaskID(runDir); got != freeID {
 		t.Fatalf("NewTaskID() = %q, want the only unused folder %q", got, freeID)
+	}
+	if calls != len(ids) {
+		t.Fatalf("Task ID used %d candidates, want %d", calls, len(ids))
 	}
 }
 

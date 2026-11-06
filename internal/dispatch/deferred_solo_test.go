@@ -77,6 +77,9 @@ func TestSoloHelper(t *testing.T) {
 
 func deferredSoloClient(t *testing.T) (*solo.Client, string) {
 	t.Helper()
+	oldWake := soloWakeDelay
+	soloWakeDelay = 30 * time.Millisecond
+	t.Cleanup(func() { soloWakeDelay = oldWake })
 	t.Setenv("MAESTRO_TEST_SOLO_HELPER", "1")
 	calls := filepath.Join(t.TempDir(), "calls.jsonl")
 	t.Setenv("MAESTRO_TEST_CALLS", calls)

@@ -10,6 +10,7 @@ import (
 )
 
 func TestInheritCarriesEarlierAttemptsIntoTheBaseline(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not on PATH")
 	}
@@ -129,6 +130,7 @@ func TestAttemptDiffDoesNotRunConfiguredHelpers(t *testing.T) {
 }
 
 func TestInheritKeepsTheEmptyCommitOfAnUncommittedStart(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not on PATH")
 	}

@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,10 +18,14 @@ import (
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/router"
 	"github.com/jalendport/maestro/internal/run"
+	"github.com/jalendport/maestro/internal/verify"
 )
 
 func waitFixture(t *testing.T) (*dispatch.Record, *run.State) {
 	t.Helper()
+	oldPoll, oldGrace := waitPollInterval, waitProcessGrace
+	waitPollInterval, waitProcessGrace = 2*time.Millisecond, 30*time.Millisecond
+	t.Cleanup(func() { waitPollInterval, waitProcessGrace = oldPoll, oldGrace })
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	t.Setenv("SOLO_PROCESS_ID", "")
 	t.Setenv("PATH", "")
@@ -40,6 +46,34 @@ func waitFixture(t *testing.T) (*dispatch.Record, *run.State) {
 	}
 	s := &run.State{Run: rec.Run, Project: root, Folder: filepath.Dir(folder), State: run.StateLive, Pid: os.Getpid(), StartedAt: time.Now(), Tasks: []*run.TaskState{{Number: 1, ID: rec.Task, Folder: folder, State: run.TaskRunning}}}
 	return rec, s
+}
+
+func TestWaitRunTaskDuringChecks(t *testing.T) {
+	rec, s := waitFixture(t)
+	rec.Pid = 1 << 30
+	rec.Events = []dispatch.Event{{Kind: "check", Text: "running 1 check(s)"}}
+	if err := rec.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	// Keep the checks live past waitTask's grace period for a dead process.
+	done := make(chan error, 1)
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		ended := *rec
+		ended.State = "ended"
+		ended.Outcome = dispatch.Outcome{Status: "done", Outcome: dispatch.OutcomeVerified}
+		done <- ended.Save()
+	}()
+	output, err := waitCommand(t, "wait", rec.Task)
+	if saveErr := <-done; saveErr != nil {
+		t.Fatal(saveErr)
+	}
+	if err != nil || !strings.Contains(output, "done") {
+		t.Fatalf("wait stopped during checks: %v; %s", err, output)
+	}
 }
 
 func waitCommand(t *testing.T, args ...string) (string, error) {
@@ -95,12 +129,17 @@ func TestWaitRelayReturnsBeforeDispatchEndsAndContinuesAfterAnswer(t *testing.T)
 				}
 				control := controlFolder(t, rec.Path)
 				opened := make(chan time.Time, 1)
+				answered, finish := make(chan struct{}), make(chan struct{})
+				var finishOnce sync.Once
+				t.Cleanup(func() { finishOnce.Do(func() { close(finish) }) })
 				done := make(chan error, 1)
 				go func() {
-					time.Sleep(100 * time.Millisecond)
+					time.Sleep(5 * time.Millisecond)
 					opened <- time.Now()
-					_, err := dispatch.RelayWait(control, dispatch.RelayRequest{ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"make deploy"}`)})
+					_, err := dispatch.RelayWait(control, dispatch.RelayRequest{ToolName: "Bash", ToolInput: json.RawMessage(`{"command":"make deploy"}`), PollInterval: 2 * time.Millisecond})
 					if err == nil {
+						close(answered)
+						<-finish
 						rec.State = "ended"
 						rec.Outcome = dispatch.Outcome{Status: "done", Outcome: dispatch.OutcomeAnswered}
 						err = rec.Save()
@@ -112,7 +151,10 @@ func TestWaitRelayReturnsBeforeDispatchEndsAndContinuesAfterAnswer(t *testing.T)
 					done <- err
 				}()
 				// End the fixture even if wait incorrectly waits past the Relay.
-				fallback := time.AfterFunc(4*time.Second, func() { <-answerOpenRelay(control, "deny") })
+				fallback := time.AfterFunc(4*time.Second, func() {
+					finishOnce.Do(func() { close(finish) })
+					<-answerOpenRelay(control, "deny")
+				})
 				t.Cleanup(func() {
 					fallback.Stop()
 					var request dispatch.RelayRequest
@@ -147,6 +189,18 @@ func TestWaitRelayReturnsBeforeDispatchEndsAndContinuesAfterAnswer(t *testing.T)
 				if _, err := waitCommand(t, "answer", "abcd", "allow", "--relay", request.ID); err != nil {
 					t.Fatal(err)
 				}
+				select {
+				case <-answered:
+				case <-time.After(time.Second):
+					t.Fatal("Relay did not consume the answer")
+				}
+				// Keep the Dispatch live until the second wait starts to poll.
+				oldSleep := waitSleep
+				t.Cleanup(func() { waitSleep = oldSleep })
+				waitSleep = func(interval time.Duration) {
+					finishOnce.Do(func() { close(finish) })
+					oldSleep(interval)
+				}
 				output, err = waitCommand(t, args...)
 				if err != nil {
 					t.Fatalf("second wait: %v; %s", err, output)
@@ -176,7 +230,7 @@ func TestWaitRunPauseAndResume(t *testing.T) {
 			}
 			paused := make(chan error, 1)
 			go func() {
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(5 * time.Millisecond)
 				s.State, s.PauseReason, s.Pid = run.StatePaused, "same error twice", 0
 				s.Tasks[0].State, s.Tasks[0].Error = run.TaskBlocked, "check failed"
 				paused <- s.Save()
@@ -225,7 +279,7 @@ func TestWaitDoesNotReturnForAnsweredRelay(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 		rec.State = "ended"
 		rec.Outcome = dispatch.Outcome{Status: "done", Outcome: dispatch.OutcomeAnswered}
 		done <- rec.Save()
@@ -271,6 +325,37 @@ func TestWaitRunBlockedTaskAndPendingResume(t *testing.T) {
 	}
 }
 
+func TestWaitBlockedCauseAndFirstBlockedLine(t *testing.T) {
+	for _, state := range []string{run.StateLive, run.StatePaused} {
+		t.Run(state, func(t *testing.T) {
+			rec, s := waitFixture(t)
+			rec.State = "ended"
+			rec.Outcome = dispatch.Outcome{Outcome: dispatch.OutcomeFailed, FailureClass: dispatch.FailBad, Decision: "blocked"}
+			rec.Permission.Blocked = []string{"required.go is outside touch", "second item"}
+			rec.Verification.Gate = json.RawMessage(`{"cause":"brief","cause_source":"jev"}`)
+			if err := rec.Save(); err != nil {
+				t.Fatal(err)
+			}
+			s.State, s.Tasks[0].State = state, run.TaskBlocked
+			if state == run.StatePaused {
+				s.PauseReason = "needs an answer"
+			}
+			if err := s.Save(); err != nil {
+				t.Fatal(err)
+			}
+			output, err := waitCommand(t, "wait", s.Run, "--json")
+			kind := "task_blocked"
+			if state == run.StatePaused {
+				kind = "run_paused"
+			}
+			item := requireWaitItem(t, output, err, true, kind, rec.Task, s.Run, "maestro resume r-0001 --task 1")
+			if !strings.Contains(item.Reason, "cause brief") || !strings.Contains(item.Reason, rec.Permission.Blocked[0]) {
+				t.Fatalf("blocked item: %+v", item)
+			}
+		})
+	}
+}
+
 func TestWaitKeepsFinalDispatchOutcome(t *testing.T) {
 	for _, outcome := range []string{dispatch.OutcomeAnswered, dispatch.OutcomeFailed, dispatch.OutcomeBlocked} {
 		t.Run(outcome, func(t *testing.T) {
@@ -286,5 +371,97 @@ func TestWaitKeepsFinalDispatchOutcome(t *testing.T) {
 				t.Fatalf("final wait: code=%d, want=%d, output=%q", code, want, output)
 			}
 		})
+	}
+}
+
+func TestWaitShowsCheckStopReasonAndClass(t *testing.T) {
+	for _, tc := range []struct{ reason, class string }{
+		{"no output for 10m0s", dispatch.FailStall},
+		{"wall limit", dispatch.FailStall},
+		{"Docker does not respond", dispatch.FailBad},
+	} {
+		for _, asJSON := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/json=%v", tc.reason, asJSON), func(t *testing.T) {
+				rec, _ := waitFixture(t)
+				rec.State = "ended"
+				rec.Outcome = dispatch.Outcome{Status: "done", Outcome: dispatch.OutcomeFailed, FailureClass: tc.class, ErrorText: "check failed: docker compose test: " + tc.reason}
+				rec.Verification.Checks = []verify.CheckResult{
+					{Command: "docker compose test", Reason: tc.reason, FailureClass: tc.class},
+					{Command: "go test ./...", Skipped: true, Reason: tc.reason, FailureClass: tc.class},
+				}
+				if err := rec.Save(); err != nil {
+					t.Fatal(err)
+				}
+				args := []string{"wait", rec.Task}
+				if asJSON {
+					args = append(args, "--json")
+				}
+				output, err := waitCommand(t, args...)
+				if code, _ := proc.Code(err); code != proc.CodeFailed || !strings.Contains(output, tc.reason) || !strings.Contains(output, tc.class) {
+					t.Fatalf("wait output: %q, %v", output, err)
+				}
+				if asJSON {
+					var stored dispatch.Record
+					if err := json.Unmarshal([]byte(output), &stored); err != nil || stored.Outcome.FailureClass != tc.class || !stored.Verification.Checks[1].Skipped {
+						t.Fatalf("wait JSON: %q, %v", output, err)
+					}
+				} else if !strings.Contains(output, "skipped: "+tc.reason) || !strings.Contains(output, "failed: "+tc.reason) {
+					t.Fatalf("wait did not show skipped checks: %q", output)
+				}
+			})
+		}
+	}
+}
+
+func TestWaitNamesTheFilesJudgedForAResumedTask(t *testing.T) {
+	for _, state := range []string{run.StateLive, run.StatePaused, run.StateFinished} {
+		for _, asJSON := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/json=%t", state, asJSON), func(t *testing.T) {
+				rec, s := waitFixture(t)
+				want := []string{"own.go", "shared.go"}
+				rec.State, rec.Attempt = "ended", 3
+				rec.Verification.Changed = want
+				if err := rec.Save(); err != nil {
+					t.Fatal(err)
+				}
+				s.State = state
+				s.Tasks[0].State, s.Tasks[0].Attempt = run.TaskFailed, 3
+				s.Tasks[0].JudgedFiles = want
+				if state == run.StateFinished {
+					s.Tasks[0].State = run.TaskDone
+				}
+				if err := s.Save(); err != nil {
+					t.Fatal(err)
+				}
+				args := []string{"wait", s.Run}
+				if asJSON {
+					args = append(args, "--json")
+				}
+				output, err := waitCommand(t, args...)
+				if state == run.StateFinished {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if asJSON {
+						var got run.State
+						if err := json.Unmarshal([]byte(output), &got); err != nil || !reflect.DeepEqual(got.Tasks[0].JudgedFiles, want) {
+							t.Fatalf("Run judged files: %s, %v", output, err)
+						}
+					}
+				} else {
+					kind := "task_failed"
+					if state == run.StatePaused {
+						kind = "run_paused"
+					}
+					item := requireWaitItem(t, output, err, asJSON, kind, rec.Task, s.Run, "maestro resume r-0001 --task 1")
+					if asJSON && !reflect.DeepEqual(item.JudgedFiles, want) {
+						t.Fatalf("wait judged files: %v, want %v", item.JudgedFiles, want)
+					}
+				}
+				if !asJSON && !strings.Contains(output, "judged files: own.go, shared.go") {
+					t.Fatalf("wait lacks judged files: %s", output)
+				}
+			})
+		}
 	}
 }

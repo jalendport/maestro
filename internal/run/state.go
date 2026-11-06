@@ -56,9 +56,13 @@ type TaskState struct {
 	Route             *router.Route `json:"route,omitempty"`
 	Provisional       bool          `json:"provisional"`
 	Attempt           int           `json:"attempt"`
+	AnswerAttempt     int           `json:"answer_attempt,omitempty"`
+	JudgedFiles       []string      `json:"judged_files,omitempty"`
+	Nudged            bool          `json:"nudged,omitempty"`
 	Outcome           string        `json:"outcome,omitempty"`
 	Status            string        `json:"status,omitempty"`
 	Error             string        `json:"error,omitempty"`
+	Cause             string        `json:"cause,omitempty"`
 	StartedAt         time.Time     `json:"started_at,omitempty"`
 	EndedAt           time.Time     `json:"ended_at,omitempty"`
 	LastOutput        time.Time     `json:"last_output,omitempty"`

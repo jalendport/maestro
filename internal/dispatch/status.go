@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,14 +15,47 @@ import (
 	"github.com/jalendport/maestro/internal/ui"
 )
 
-// ProcessAlive checks the standalone supervisor, or the process in the record.
+// ProcessAlive checks the Run supervisor, the standalone supervisor, or the Lane.
 func ProcessAlive(rec *Record) bool {
-	if b, err := os.ReadFile(filepath.Join(rec.Path, "supervisor.pid")); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
+	folder := filepath.Dir(rec.Path)
+	if b, err := os.ReadFile(filepath.Join(folder, "run.json")); err == nil {
+		var state struct {
+			Pid int `json:"pid"`
+		}
+		if json.Unmarshal(b, &state) != nil {
+			return false
+		}
+		if pid := supervisorPID(folder); pid > 0 {
 			return proc.Alive(pid)
 		}
+		return proc.Alive(state.Pid)
+	}
+	if pid := supervisorPID(rec.Path); pid > 0 {
+		return proc.Alive(pid)
 	}
 	return proc.Alive(rec.Pid)
+}
+
+func supervisorPID(folder string) int {
+	if b, err := os.ReadFile(filepath.Join(folder, "supervisor.pid")); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
+			return pid
+		}
+	}
+	return 0
+}
+
+// ChecksRunning reports whether the live Dispatch has reached its checks.
+func ChecksRunning(rec *Record) bool {
+	if rec.State != "running" {
+		return false
+	}
+	for _, event := range rec.Events {
+		if event.Kind == "check" {
+			return true
+		}
+	}
+	return false
 }
 
 // List lists standalone Dispatches that are running or ended in the last hour.
@@ -71,6 +105,8 @@ func Status(rec *Record) string {
 	if state == "running" {
 		if !ProcessAlive(rec) {
 			state = "stale (process gone)"
+		} else if ChecksRunning(rec) {
+			state = "running (checks running)"
 		}
 		if !rec.StartedAt.IsZero() {
 			elapsed = time.Since(rec.StartedAt).Seconds()

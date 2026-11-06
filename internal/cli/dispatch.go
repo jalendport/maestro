@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -176,6 +175,12 @@ func (a *app) waitCmd() *cobra.Command {
 }
 
 func (a *app) waitTask(folder, id string) error {
+	var stop func()
+	defer func() {
+		if stop != nil {
+			stop()
+		}
+	}()
 	started := time.Now()
 	for {
 		rec, err := dispatch.LoadRecord(folder)
@@ -188,10 +193,13 @@ func (a *app) waitTask(folder, id string) error {
 			return a.printWaitItem(item)
 		}
 		// A dead supervisor never ends the record: say so instead of waiting forever.
-		if time.Since(started) > 5*time.Second && !supervisorAlive(folder, rec) {
+		if stop == nil && rec != nil && dispatch.ProcessAlive(rec) {
+			stop = waitAwake()
+		}
+		if time.Since(started) > waitProcessGrace && rec != nil && !dispatch.ProcessAlive(rec) {
 			return &proc.ExitError{Code: proc.CodeFailed, Message: fmt.Sprintf("task %s: its supervisor is gone before the dispatch ended; see %s", id, filepath.Join(folder, "supervisor.log"))}
 		}
-		time.Sleep(2 * time.Second)
+		waitSleep(waitPollInterval)
 	}
 }
 
@@ -208,18 +216,4 @@ func asAsk(err error, target **router.AskOrchestrator) bool {
 		return true
 	}
 	return false
-}
-
-// supervisorAlive checks the pid detach recorded, or the running record's pid.
-func supervisorAlive(folder string, rec *dispatch.Record) bool {
-	if b, err := os.ReadFile(filepath.Join(folder, "supervisor.pid")); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
-			return syscall.Kill(pid, 0) == nil
-		}
-	}
-	if rec != nil && rec.Pid > 0 {
-		return syscall.Kill(rec.Pid, 0) == nil
-	}
-	// No pid known (an inline --wait run writes none): keep waiting.
-	return true
 }

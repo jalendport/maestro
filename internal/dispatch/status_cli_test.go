@@ -2,6 +2,7 @@ package dispatch_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,11 +13,75 @@ import (
 	"github.com/jalendport/maestro/internal/cli"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/council"
+	"github.com/jalendport/maestro/internal/discovery"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
 	"github.com/jalendport/maestro/internal/run"
 )
+
+func TestRunTaskStatusAndReminderDuringChecks(t *testing.T) {
+	for _, withPIDFile := range []bool{false, true} {
+		for _, alive := range []bool{false, true} {
+			t.Run(fmt.Sprintf("pid-file=%v/alive=%v", withPIDFile, alive), func(t *testing.T) {
+				t.Setenv("MAESTRO_HOME", t.TempDir())
+				root := t.TempDir()
+				t.Chdir(root)
+				folder := filepath.Join(config.RunsDir(root), "r-0001", "abcd")
+				if err := os.MkdirAll(folder, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				pid := 1 << 30
+				if alive {
+					pid = os.Getpid()
+				}
+				s := &run.State{Run: "r-0001", Project: root, Folder: filepath.Dir(folder), State: run.StateLive,
+					Pid: pid, StartedAt: time.Now().Add(-130 * time.Second),
+					Tasks: []*run.TaskState{{Number: 1, ID: "abcd", Title: "Check the Task", State: run.TaskRunning}}}
+				if err := s.Save(); err != nil {
+					t.Fatal(err)
+				}
+				if withPIDFile {
+					if err := os.WriteFile(filepath.Join(s.Folder, "supervisor.pid"), []byte(fmt.Sprint(pid)), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				rec := &dispatch.Record{Task: "abcd", Run: s.Run, Project: root, Path: folder, State: "running",
+					Pid: 1 << 30, StartedAt: s.StartedAt, Events: []dispatch.Event{{Kind: "check", Text: "running 1 check(s)"}}}
+				if err := rec.Save(); err != nil {
+					t.Fatal(err)
+				}
+				if got := dispatch.ProcessAlive(rec); got != alive {
+					t.Fatalf("ProcessAlive = %v; want %v", got, alive)
+				}
+				out, code := statusOutput(t, s.Run)
+				if code != 0 {
+					t.Fatalf("status code %d: %s", code, out)
+				}
+				reminder := run.ReminderItems(root)
+				if alive {
+					for _, text := range []string{out, dispatch.Status(rec), reminder} {
+						if !strings.Contains(text, "running") || !strings.Contains(text, "checks running") || strings.Contains(text, "stale") {
+							t.Fatalf("checks phase missing: %s", text)
+						}
+					}
+					if !strings.Contains(reminder, "running  task abcd") || !strings.Contains(reminder, "2m10s") {
+						t.Fatalf("running Task missing: %s", reminder)
+					}
+				} else {
+					for _, text := range []string{out, dispatch.Status(rec)} {
+						if !strings.Contains(text, "stale (process gone)") || strings.Contains(text, "checks running") {
+							t.Fatalf("stale Task missing: %s", text)
+						}
+					}
+					if reminder != "" {
+						t.Fatalf("dead Run in Reminder: %s", reminder)
+					}
+				}
+			})
+		}
+	}
+}
 
 func statusOutput(t *testing.T, args ...string) (string, int) {
 	t.Helper()
@@ -79,8 +144,13 @@ func TestStatusWithOnlyStandaloneDispatch(t *testing.T) {
 func TestWaitDispatchHasNoTabText(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	t.Setenv("SOLO_PROCESS_ID", "")
+	// A fresh discovery cache and an empty PATH keep wait from a refresh that starts real harnesses.
+	t.Setenv("PATH", "")
 	root := t.TempDir()
 	t.Chdir(root)
+	if err := (&discovery.Cache{RefreshedAt: time.Now()}).Save(); err != nil {
+		t.Fatal(err)
+	}
 	folder := filepath.Join(config.RunsDir(root), "r-0001", "abcd")
 	if err := os.MkdirAll(folder, 0o755); err != nil {
 		t.Fatal(err)
