@@ -21,6 +21,7 @@ import (
 	"github.com/jalendport/maestro/internal/router"
 	"github.com/jalendport/maestro/internal/solo"
 	"github.com/jalendport/maestro/internal/ui"
+	"github.com/jalendport/maestro/internal/worktree"
 )
 
 // supervisorPollInterval is how often the Run supervisor reads its control
@@ -76,6 +77,8 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 	if len(s.Approval) == 0 {
 		s.State = StateLive
 	}
+	s.Commit = plan.Defaults.Commit != nil && *plan.Defaults.Commit
+	chooseMode(env, s)
 	if err := s.Save(); err != nil {
 		return nil, err
 	}
@@ -119,6 +122,7 @@ func routePlan(env *dispatch.Env, s *State, plan *brief.Plan) (bool, error) {
 			return false, err
 		}
 		ts := &TaskState{Number: i + 1, ID: id, Title: b.Title, BriefPath: bp, Access: b.EffectiveAccess(), Category: b.Category, BlockedBy: b.BlockedBy, State: TaskWaiting, Provisional: true, Folder: taskDir}
+		ts.Files, ts.Touch = b.Files, b.Touch
 		if ts.BlockedBy == nil {
 			ts.BlockedBy = []string{}
 		}
@@ -173,6 +177,8 @@ func Approve(env *dispatch.Env, s *State) error {
 		return err
 	}
 	next.State, next.Approval = StateLive, nil
+	next.Commit = plan.Defaults.Commit != nil && *plan.Defaults.Commit
+	chooseMode(env, &next)
 	if err := next.Save(); err != nil {
 		return err
 	}
@@ -246,6 +252,9 @@ func Start(env *dispatch.Env, folder string) error {
 
 func (sup *Supervisor) loop() error {
 	s := sup.State
+	if s.Mode == "" {
+		chooseMode(sup.Env, s)
+	}
 	s.State = StateLive
 	s.Pid = os.Getpid()
 	s.PauseReason = ""
@@ -263,6 +272,14 @@ func (sup *Supervisor) loop() error {
 		}
 	}()
 	sup.consumeControl()
+	if s.Mode == "worktree" && !sup.cancelled {
+		r, err := worktree.Open(s.Project, s.Run)
+		if err != nil {
+			sup.pause(err.Error())
+		} else {
+			s.RunBranch = r.Branch
+		}
+	}
 	_ = s.Save()
 	ui.Eventf("run", "%s  %s  %d tasks  live", s.Run, s.Title, len(s.Tasks))
 
@@ -287,7 +304,7 @@ func (sup *Supervisor) loop() error {
 				if err := sup.end(state); err != nil {
 					return err
 				}
-				resumed, err := sup.finishOwnership(state)
+				resumed, err := sup.finishOwnership(s.State)
 				if err != nil {
 					return err
 				}
@@ -312,7 +329,7 @@ func (sup *Supervisor) schedule() {
 	caps := sup.Env.Roster.Concurrency
 	editRunning := false
 	for id := range sup.running {
-		if t, ok := s.Task(id); ok && t.Access == brief.AccessEdit {
+		if t, ok := s.Task(id); ok && t.Access == brief.AccessEdit && (s.Mode != "worktree" || len(t.InTree) > 0) {
 			editRunning = true
 		}
 	}
@@ -330,6 +347,20 @@ func (sup *Supervisor) schedule() {
 				t.Waiting = why
 				continue
 			}
+			if s.Mode == "worktree" && access == brief.AccessEdit {
+				if why := sup.overlapReason(t); why != "" {
+					t.Waiting = why
+					continue
+				}
+				if t.Workdir == "" {
+					links, err := worktree.Link(s.Project, "", t.Touch)
+					if err != nil {
+						sup.blockMerge(t, err)
+						continue
+					}
+					t.InTree = links.Refused
+				}
+			}
 			if len(sup.running) >= caps.MaxParallel {
 				t.Waiting = "run cap"
 				continue
@@ -338,11 +369,11 @@ func (sup *Supervisor) schedule() {
 				t.Waiting = "machine cap"
 				continue
 			}
-			if access == brief.AccessEdit && editRunning {
+			if access == brief.AccessEdit && editRunning && (s.Mode != "worktree" || len(t.InTree) > 0) {
 				t.Waiting = "tree busy"
 				continue
 			}
-			if sup.start(t) && access == brief.AccessEdit {
+			if sup.start(t) && access == brief.AccessEdit && (s.Mode != "worktree" || len(t.InTree) > 0) {
 				editRunning = true
 			}
 		}
@@ -396,6 +427,14 @@ func (sup *Supervisor) updateDependencies() {
 			continue
 		}
 		why, terminal := sup.dependencyReason(t, map[*TaskState]bool{})
+		if !terminal {
+			for _, n := range t.After {
+				if prior, ok := sup.State.Task(fmt.Sprint(n)); ok && (prior.State == TaskBlocked || prior.State == TaskFailed || prior.State == TaskSkipped || prior.State == TaskCancelled) {
+					why, terminal = fmt.Sprintf("files overlap with %d (%s)", n, prior.State), true
+					break
+				}
+			}
+		}
 		if terminal {
 			t.State, t.Error, t.Waiting = TaskBlocked, why, ""
 			t.DependencyBlocked = true
@@ -409,7 +448,7 @@ func (sup *Supervisor) updateDependencies() {
 // anyStartable reports whether every dependency of a waiting Task is done.
 func (sup *Supervisor) anyStartable() bool {
 	for _, t := range sup.State.Tasks {
-		if t.State == TaskWaiting && sup.blockedReason(t) == "" {
+		if t.State == TaskWaiting && sup.blockedReason(t) == "" && sup.overlapReason(t) == "" {
 			return true
 		}
 	}
@@ -532,6 +571,25 @@ func (sup *Supervisor) start(t *TaskState) bool {
 		return false
 	}
 	delete(sup.pending, t)
+	if err := sup.taskWorkdir(t, pending.brief); err != nil {
+		sup.blockMerge(t, err)
+		_ = sup.State.Save()
+		return false
+	}
+	if t.ConflictAttempt && len(t.Conflicts) > 0 && t.Workdir != "" {
+		needed, err := sup.prepareConflict(t)
+		if err == nil && !needed {
+			// The Run branch changed and the rebase is clean: merge with no Lane.
+			err = sup.mergeTask(t)
+		}
+		if err != nil {
+			sup.blockMerge(t, err)
+		}
+		if err != nil || !needed {
+			_ = sup.State.Save()
+			return false
+		}
+	}
 	if t.Escalations > 0 && t.Cause != "" {
 		pending.route.ReasonLine += "; re-route: cause " + t.Cause
 	}
@@ -543,11 +601,22 @@ func (sup *Supervisor) start(t *TaskState) bool {
 	}
 	task.FirstAttempt = t.Attempt + 1
 	task.LedgerByRun = true
+	task.Workdir = t.Workdir
+	if len(t.Conflicts) > 0 {
+		task.Conflict = &brief.Conflict{Branch: sup.State.RunBranch, Paths: t.Conflicts}
+	}
 	allowance := 0
 	if task.Nudged {
 		allowance = 1
 	}
 	task.MaxAttempt = min(t.Attempt+2, t.AnswerAttempt+sup.Env.Roster.Failure.MaxDispatches+allowance)
+	if task.Conflict != nil {
+		task.MaxAttempt = task.FirstAttempt
+	}
+	if err := task.Save(); err != nil {
+		sup.blockMerge(t, err)
+		return false
+	}
 	cancel := make(chan struct{})
 	task.Cancel = cancel
 	sup.running[t.ID] = cancel
@@ -599,6 +668,11 @@ func (sup *Supervisor) handle(r result) {
 		return
 	}
 	if r.err != nil {
+		if len(t.Conflicts) > 0 {
+			sup.blockMerge(t, r.err)
+			_ = sup.State.Save()
+			return
+		}
 		sup.escalate(t, nil, r.err.Error())
 		_ = sup.State.Save()
 		return
@@ -618,8 +692,15 @@ func (sup *Supervisor) handle(r result) {
 	switch rec.Outcome.Outcome {
 	case dispatch.OutcomeVerified, dispatch.OutcomeAnswered, dispatch.OutcomeUnverified:
 		t.State = TaskDone
+		if err := sup.commitTask(t, rec); err != nil {
+			sup.blockMerge(t, err)
+		}
 		sup.escalationsInARow = 0
 	case dispatch.OutcomeBlocked:
+		if len(t.Conflicts) > 0 {
+			sup.blockMerge(t, fmt.Errorf("conflict attempt blocked"))
+			break
+		}
 		t.State = TaskBlocked
 		t.Error = rec.BlockedReason()
 		rec.Outcome.Decision = "blocked"
@@ -627,7 +708,9 @@ func (sup *Supervisor) handle(r result) {
 	case dispatch.OutcomeCancelled:
 		t.State = TaskCancelled
 	default:
-		if repeated != "" {
+		if len(t.Conflicts) > 0 {
+			sup.blockMerge(t, fmt.Errorf("conflict attempt failed"))
+		} else if repeated != "" {
 			t.State = TaskBlocked
 			rec.Outcome.Decision = "blocked"
 			t.Waiting = ""
@@ -839,21 +922,30 @@ func (sup *Supervisor) addTask(path string) {
 		ts.BlockedBy = []string{}
 	}
 	sup.State.Tasks = append(sup.State.Tasks, ts)
+	ts.Files, ts.Touch = b.Files, b.Touch
+	setOrder(sup.State)
 	ui.Eventf("add", "task %d  %s", ts.Number, ts.Title)
 }
 
 // Resume is the answer file maestro resume writes.
 type Resume struct {
-	Task  string `json:"task"`
-	Lane  string `json:"lane,omitempty"`
-	Brief string `json:"brief,omitempty"`
-	Skip  bool   `json:"skip,omitempty"`
+	Task   string `json:"task"`
+	Lane   string `json:"lane,omitempty"`
+	Brief  string `json:"brief,omitempty"`
+	Skip   bool   `json:"skip,omitempty"`
+	Merge  bool   `json:"merge,omitempty"`
+	Finish bool   `json:"finish,omitempty"`
 }
 
 func (sup *Supervisor) applyResume(path string) {
 	var r Resume
 	b, err := os.ReadFile(path)
 	if err != nil || jsonUnmarshal(b, &r) != nil {
+		return
+	}
+	if r.Finish {
+		sup.paused = false
+		sup.State.PauseReason = ""
 		return
 	}
 	t, ok := sup.State.Task(r.Task)
@@ -866,6 +958,10 @@ func (sup *Supervisor) applyResume(path string) {
 	}
 	delete(sup.pending, t)
 	switch {
+	case r.Merge:
+		if err := sup.mergeTask(t); err != nil {
+			sup.blockMerge(t, err)
+		}
 	case r.Skip:
 		t.State = TaskSkipped
 		t.Waiting = ""
@@ -879,6 +975,8 @@ func (sup *Supervisor) applyResume(path string) {
 		// Refresh the fields that the scheduler uses before it can claim a slot.
 		t.Access = corrected.EffectiveAccess()
 		t.Category = corrected.Category
+		t.Files, t.Touch = corrected.Files, corrected.Touch
+		setOrder(sup.State)
 		t.Cancel = false
 		t.BriefPath = r.Brief
 		t.State = TaskWaiting
@@ -910,6 +1008,25 @@ func (sup *Supervisor) applyResume(path string) {
 // end writes the final state, the report, the ledger row, and tells the user.
 func (sup *Supervisor) end(state string) error {
 	s := sup.State
+	if s.Mode == "worktree" && state == StateFinished {
+		r, err := worktree.Open(s.Project, s.Run)
+		if err == nil {
+			err = r.Finish(s.Commit)
+		}
+		if err != nil {
+			s.FinishPending = true
+			s.PauseReason = err.Error()
+			sup.paused = true
+			state = StatePaused
+		} else {
+			s.FinishPending = false
+		}
+	}
+	if s.Mode == "worktree" && state == StateCancelled && s.RunBranch != "" {
+		if err := worktree.Cancel(s.Project, s.Run); err != nil {
+			s.PauseReason = err.Error()
+		}
+	}
 	s.State = state
 	s.EndedAt = time.Now()
 	s.Pid = 0

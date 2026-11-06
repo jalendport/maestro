@@ -38,25 +38,27 @@ const (
 // Task is the input half of a Dispatch, saved as task.json so a detached
 // supervisor can pick it up.
 type Task struct {
-	Project    string        `json:"project"`
-	Run        string        `json:"run"`
-	Task       string        `json:"task"`
-	BriefPath  string        `json:"brief_path"`
-	Title      string        `json:"title"`
-	Category   string        `json:"category"`
-	Access     string        `json:"access"`
-	Commit     bool          `json:"commit"`
-	Touch      []string      `json:"touch,omitempty"`
-	Dirs       []string      `json:"dirs,omitempty"`
-	Checks     []string      `json:"checks,omitempty"`
-	WallLimit  string        `json:"wall_limit"`
-	IdleLimit  string        `json:"idle_limit"`
-	Route      *router.Route `json:"route"`
-	Folder     string        `json:"folder"`
-	ClaudeAuto bool          `json:"claude_auto"`
-	InSolo     bool          `json:"in_solo"`
-	MaxAttempt int           `json:"max_attempts"`
-	Nudged     bool          `json:"nudged,omitempty"`
+	Project    string          `json:"project"`
+	Workdir    string          `json:"workdir,omitempty"`
+	Conflict   *brief.Conflict `json:"conflict,omitempty"`
+	Run        string          `json:"run"`
+	Task       string          `json:"task"`
+	BriefPath  string          `json:"brief_path"`
+	Title      string          `json:"title"`
+	Category   string          `json:"category"`
+	Access     string          `json:"access"`
+	Commit     bool            `json:"commit"`
+	Touch      []string        `json:"touch,omitempty"`
+	Dirs       []string        `json:"dirs,omitempty"`
+	Checks     []string        `json:"checks,omitempty"`
+	WallLimit  string          `json:"wall_limit"`
+	IdleLimit  string          `json:"idle_limit"`
+	Route      *router.Route   `json:"route"`
+	Folder     string          `json:"folder"`
+	ClaudeAuto bool            `json:"claude_auto"`
+	InSolo     bool            `json:"in_solo"`
+	MaxAttempt int             `json:"max_attempts"`
+	Nudged     bool            `json:"nudged,omitempty"`
 	// Council marks a Seat Dispatch: the Report ends with POSITION, not STATUS.
 	Council bool `json:"council,omitempty"`
 	Canary  bool `json:"canary,omitempty"`
@@ -77,6 +79,7 @@ type Record struct {
 	Kind         string    `json:"kind"`
 	Canary       bool      `json:"canary,omitempty"`
 	Project      string    `json:"project"`
+	Workdir      string    `json:"workdir,omitempty"`
 	Run          string    `json:"run"`
 	Task         string    `json:"task"`
 	Attempt      int       `json:"attempt"`
@@ -96,6 +99,14 @@ type Record struct {
 	Outcome      Outcome       `json:"outcome"`
 	Verification Verification  `json:"verification"`
 	Events       []Event       `json:"events,omitempty"`
+}
+
+// workdir uses Project for a Dispatch without a Worktree.
+func (t *Task) workdir() string {
+	if t.Workdir != "" {
+		return t.Workdir
+	}
+	return t.Project
 }
 
 // TaskInfo is the Task group of the ledger row.

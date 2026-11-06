@@ -245,6 +245,16 @@ run_pause_after_same_error = 2
 
 [run]
 council_tasks = 10
+worktrees = true
+
+[commit]
+# message = "{title}\n\nCo-Authored-By: {lane}"
+
+[commit.identities]
+# codex = "Codex <noreply@openai.com>"
+# claude = "Claude <noreply@anthropic.com>"
+# grok = "Grok <noreply@x.ai>"
+# agy = "Gemini <noreply@google.com>"
 
 [concurrency]
 max_parallel = 4

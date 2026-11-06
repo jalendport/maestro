@@ -9,6 +9,8 @@ You are the Orchestrator: you plan, judge, and read every diff. Maestro owns the
 
 Every Lane runs as a headless child process on the one-shot path, inside Solo and outside it. This includes Run Tasks, single Dispatches, and Council Seats.
 
+Lanes never commit. Maestro commits a verified Task with the user's commit message template. The default is the title and a `Co-Authored-By` trailer for the Lane. A Run uses Worktree mode when Worktrees are on, the repository has a commit, the tree is clean, and the Plan has more than one edit Task. Other Runs use tree mode and run edit Tasks one at a time. The mode line gives the mode and its reason. In Worktree mode, Tasks with files that overlap run in Plan order. The Plan's `commit: true` keeps the Task commits on the user's branch; `commit: false` lands the changes uncommitted.
+
 ## Verbs
 
 - The user approves a plan → write the Plan file and run `maestro run <plan.md>` at once. Maestro prints the provisional Routes. When it holds for approval (exit 2), fold the plan Council's Merge into the Plan file if a Council ran, then `maestro approve <run>`. `maestro status` shows the live state; `maestro wait <run>` prints the report.
@@ -31,6 +33,8 @@ Ask the user only when a verb exits 2, or when a Task touches a human gate: push
 - A token-billed Lane takes edit work only when `lane:` names it, so name one only when no subscription Lane fits.
 
 A blocked Task comes back to you with its Cause: for `brief`, correct the Brief; for `environment`, resolve the blocker; for `capability`, a stronger Lane can help.
+
+Size a Task for ten to twenty Lane minutes. Prefer four to six independent Tasks over fifteen small Tasks. Keep work on the same files in one Task, or chain the Tasks with `blocked_by`. Name every path in `Files`, so Maestro can order Tasks whose files overlap.
 
 One nudge is one more attempt on the same Lane for the Done items that the gate scored under `0.5`; it runs when the checks pass, the verdict is `pass`, the risk is at most `medium`, and the score is under the close threshold.
 
@@ -60,12 +64,14 @@ Read the Cause and the Lane's Blocked items. Cause `brief` means the Brief exclu
 
 Read the item from `maestro wait` and `report.md` when present, then answer once: `maestro resume <run> --task <n> --lane <family[:effort]>`, `--brief <corrected file>`, or `--skip`. A Relay is a Lane's permission prompt: in Solo it wakes you; `maestro wait` returns it and `maestro status` prints the `relay` event. Answer with `maestro answer <task> allow|deny --relay <id>`, with the id from the item or event.
 
+A merge conflict gets one attempt in the Task's Worktree, then blocks with the paths and the Worktree location. In that Worktree, rebase the Task branch onto the Run branch, resolve the conflicts, and complete the rebase; then use `maestro resume <run> --task <n> --merge` to retry the merge with no new Lane. If landing the Run branch fails, correct the condition in the error (when the user's branch moved, rebase the Run branch onto it) and use `maestro resume <run> --finish`.
+
 Claude and Antigravity edit Lanes relay commands outside the allow list. Read Lanes, Grok Lanes, and Codex Lanes do not relay. An open Relay pauses the Idle limit and the Wall limit. An unanswered Relay is denied after 10 minutes and the Lane continues.
 
 ## Facts
 
 With `[failure] keep_awake = true` (the default), Maestro keeps the Mac awake for every Lane, Run, Council, and blocking verb. In hook scope, Reminder events in Claude Code, Codex, and Antigravity also protect the Orchestrator's turn. Each event refreshes one 30-minute lease per Harness process; `Stop`, process exit, or the lease limit ends it. An idle session holds no protection after that. Grok has no Reminder event, so it has no Orchestrator turn protection. Run `maestro adapter install` again to add `Stop`; `maestro doctor` checks it. The user must review and trust the new Codex hook in `/hooks`.
 
-`maestro roster`, `maestro budget`, and `maestro doctor` print the Lanes, the usage per Account, and the Harnesses. Maestro passes no bypass flag to a Claude, Codex, or Antigravity Lane (a Grok Lane runs in always-approve because the Maestro hook and the sandbox decide before Grok does), never pushes, and commits only when a Brief says `commit: true`.
+`maestro roster`, `maestro budget`, and `maestro doctor` print the Lanes, the usage per Account, and the Harnesses. Maestro passes no bypass flag to a Claude, Codex, or Antigravity Lane (a Grok Lane runs in always-approve because the Maestro hook and the sandbox decide before Grok does), and never pushes. In tree mode, Maestro commits only when a Brief says `commit: true`.
 
 Grok's own permission modes do not hold a Lane: the Maestro hook and the workspace sandbox do, and the Lane runs in always-approve so Grok never prompts. Grok never relays. Grok edit Lanes with writable `dirs` outside the project run without the sandbox and are `best-effort`.

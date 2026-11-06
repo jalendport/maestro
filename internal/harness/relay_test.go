@@ -79,7 +79,7 @@ func TestGrokLaunchPassesNoRules(t *testing.T) {
 	// allow or deny rule is passed for either Access value.
 	for _, access := range []string{"read", "edit"} {
 		g := &Grok{bin: "/bin/grok"}
-		lane := Launch{Access: access, RunFolder: t.TempDir(), AllowCommit: true, AllowedCommands: []string{"go test ./..."}, AllowRules: []string{"Bash(go run *)"}}
+		lane := Launch{Access: access, RunFolder: t.TempDir(), AllowedCommands: []string{"go test ./..."}, AllowRules: []string{"Bash(go run *)"}}
 		command, err := g.Build(lane)
 		if err != nil {
 			t.Fatal(err)

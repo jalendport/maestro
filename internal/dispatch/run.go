@@ -337,6 +337,12 @@ attempts:
 			wait = env.RetryDelay
 		}
 		findings := nudgeFindings(env, t, rec, b)
+		if !t.LedgerByRun && t.Access == brief.AccessEdit && t.Commit && len(findings) == 0 && (rec.Outcome.Outcome == OutcomeVerified || rec.Outcome.Outcome == OutcomeUnverified) {
+			if err := CommitChanges(env, t, rec); err != nil {
+				rec.Outcome.Outcome, rec.Outcome.ErrorText = OutcomeBlocked, err.Error()
+			}
+			_ = rec.Save()
+		}
 		// The Run supervisor records its final attempt after the escalation decision.
 		if !t.LedgerByRun {
 			if err := ledger.Append(rec); err != nil {
@@ -450,7 +456,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	rec := &Record{
 		Canary: t.Canary,
 		Nudged: t.Nudged,
-		Kind:   "dispatch", Project: t.Project, Run: t.Run, Task: t.Task, Attempt: attempt, State: "running",
+		Kind:   "dispatch", Project: t.Project, Workdir: t.Workdir, Run: t.Run, Task: t.Task, Attempt: attempt, State: "running",
 		Pid: os.Getpid(), StartedAt: dispatchNow(), Path: t.Folder, Route: t.Route,
 		TaskInfo:     TaskInfo{Title: t.Title, Category: t.Category, LevelEstimate: string(t.Route.LevelEstimate), Access: t.Access, Commit: t.Commit, WallLimit: t.WallLimit},
 		Permission:   Permission{Enforcement: t.Route.Enforcement, Denials: []harness.Denial{}, Blocked: []string{}, Relays: []json.RawMessage{}},
@@ -494,7 +500,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	}
 	if t.Access == brief.AccessEdit {
 		var err error
-		snap, err = takeBaseline(t.Project, t.Folder)
+		snap, err = takeBaseline(t.workdir(), t.Folder)
 		if err != nil {
 			return fail(FailLane, err.Error())
 		}
@@ -504,7 +510,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 			}
 		}
 	} else {
-		snap.Snapshot, _ = verify.Take(t.Project)
+		snap.Snapshot, _ = verify.Take(t.workdir())
 	}
 	rec.Verification.StartCommit = snap.Commit
 
@@ -513,8 +519,14 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		return fail(FailLane, "unknown harness "+t.Route.Harness)
 	}
 	reportPath := filepath.Join(t.Folder, FileReport)
-	briefRel, _ := filepath.Rel(t.Project, filepath.Join(t.Folder, FileBrief))
-	reportRel, _ := filepath.Rel(t.Project, reportPath)
+	briefRel, _ := filepath.Rel(t.workdir(), filepath.Join(t.Folder, FileBrief))
+	reportRel, _ := filepath.Rel(t.workdir(), reportPath)
+	dirs := append([]string{}, t.Dirs...)
+	if t.Workdir != "" && t.Workdir != t.Project {
+		briefRel = filepath.Join(t.Folder, FileBrief)
+		reportRel = reportPath
+		dirs = append(dirs, t.Folder)
+	}
 
 	// Checks are verification commands for edits; a read Lane cannot run them.
 	projectChecks := []string{}
@@ -541,8 +553,8 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		}
 	}
 	launch := harness.Launch{
-		Model: t.Route.Model, Effort: t.Route.Effort, Access: t.Access, Root: t.Project, Dirs: t.Dirs,
-		TaskID: t.Task, AllowRules: allowRules, AllowedCommands: allChecks, AllowCommit: t.Commit, RunFolder: t.Folder, ReportPath: reportPath,
+		Model: t.Route.Model, Effort: t.Route.Effort, Access: t.Access, Root: t.workdir(), Dirs: dirs,
+		TaskID: t.Task, AllowRules: allowRules, AllowedCommands: allChecks, RunFolder: t.Folder, ReportPath: reportPath,
 		Pointer: brief.Pointer(briefRel), ClaudeAuto: t.ClaudeAuto, WallLimit: wallOf(t.WallLimit),
 		Env: harness.Env(stripEnv, map[string]string{
 			"CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
@@ -564,13 +576,13 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	renderBrief := b
 	if t.Access == brief.AccessRead && h.Name() == "claude" {
 		launch.Pointer = brief.Pointer(filepath.Join(t.Folder, FileBrief))
-		launch.Pointer += fmt.Sprintf(" The repository is at `%s`; read repository files through absolute paths.", t.Project)
+		launch.Pointer += fmt.Sprintf(" The repository is at `%s`; read repository files through absolute paths.", t.workdir())
 		reportRel = reportPath
 		copyBrief := *b
 		copyBrief.Files = make([]string, len(b.Files))
 		for i, path := range b.Files {
 			if !filepath.IsAbs(path) {
-				path = filepath.Join(t.Project, path)
+				path = filepath.Join(t.workdir(), path)
 			}
 			copyBrief.Files[i] = path
 		}
@@ -589,14 +601,14 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	rendered := brief.Render(renderBrief, brief.RenderOpts{
 		TaskID: t.Task, RunID: t.Run, Access: t.Access, ProjectChecks: projectChecks, BriefChecks: briefChecks,
 		ReportPath: reportRel, Retry: retry, ReportByMessage: command.ReportByText, Council: t.Council,
-		SoloProjectID: soloProjectID,
+		SoloProjectID: soloProjectID, Conflict: t.Conflict,
 	})
 	if err := os.WriteFile(filepath.Join(t.Folder, FileBrief), []byte(rendered), 0o644); err != nil {
 		return fail(FailLane, err.Error())
 	}
 	lane, err := json.MarshalIndent(hook.Lane{
-		Task: t.Task, Harness: h.Name(), Access: t.Access, Root: t.Project, Dirs: append([]string{}, t.Dirs...),
-		RunFolder: t.Folder, Allow: append([]string{}, allowRules...), Checks: allChecks, Commit: t.Commit,
+		Task: t.Task, Harness: h.Name(), Access: t.Access, Root: t.workdir(), Dirs: dirs,
+		RunFolder: t.Folder, Allow: append([]string{}, allowRules...), Checks: allChecks,
 	}, "", "  ")
 	if err != nil {
 		return fail(FailLane, err.Error())
@@ -894,8 +906,8 @@ loop:
 }
 
 func recordChanges(t *Task, rec *Record, snap attemptBaseline) {
-	runRel, _ := filepath.Rel(t.Project, config.RunsDir(t.Project))
-	rec.Verification.Changed = without(snap.Changed(t.Project), runRel)
+	runRel, _ := filepath.Rel(t.workdir(), config.RunsDir(t.Project))
+	rec.Verification.Changed = without(snap.Changed(t.workdir()), runRel)
 	rec.judged = true
 	if t.Access == brief.AccessEdit {
 		rec.Verification.TouchViolations = verify.ScopeViolations(rec.Verification.Changed, t.Touch, runRel)
@@ -926,7 +938,7 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 	// but never counted as violations.
 	if t.Access == brief.AccessEdit {
 		if t.Commit {
-			rec.Verification.CommitRange = verify.CommitRange(t.Project, rec.Verification.StartCommit)
+			rec.Verification.CommitRange = verify.CommitRange(t.workdir(), rec.Verification.StartCommit)
 		}
 		if len(allChecks) > 0 {
 			ui.Eventf("verify", "task %s  running %d check(s)", t.Task, len(allChecks))
@@ -934,7 +946,7 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 			_ = rec.Save()
 			idle, _ := time.ParseDuration(t.IdleLimit)
 			budget, _ := time.ParseDuration(t.WallLimit)
-			rec.Verification.Checks = verify.RunChecks(t.Project, allChecks, idle, budget)
+			rec.Verification.Checks = verify.RunChecks(t.workdir(), allChecks, idle, budget)
 			for _, check := range rec.Verification.Checks {
 				result := "ok"
 				if !check.OK {

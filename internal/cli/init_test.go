@@ -172,8 +172,11 @@ func TestInitTemplateIncludesEveryProjectKey(t *testing.T) {
 	}
 	var project config.Project
 	metadata, err := toml.Decode(source.String(), &project)
+	off := false
+	message := "{title}\n\nCo-Authored-By: {lane}"
 	if err != nil || !reflect.DeepEqual(project, config.Project{
 		Forbid: []string{}, Checks: []string{}, Allow: []string{}, Redact: []string{}, Dirs: []string{},
+		Worktrees: &off, CommitMessage: &message,
 	}) {
 		t.Fatalf("Project = %+v, error = %v", project, err)
 	}

@@ -157,6 +157,7 @@ func (a *app) loadEnv(refresh, persist bool) (*dispatch.Env, error) {
 	if err != nil {
 		return nil, err
 	}
+	r.Project = project
 	bf, err := budget.Load()
 	if err != nil {
 		return nil, err

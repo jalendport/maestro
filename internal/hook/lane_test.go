@@ -95,7 +95,7 @@ func TestLoadLane(t *testing.T) {
 			t.Fatalf("invalid Lane %q: %+v, %v", body, lane, ok)
 		}
 	}
-	want := &Lane{Task: "abcd", Harness: "agy", Access: "edit", Root: "/project", Dirs: []string{"/extra"}, RunFolder: "/run", Allow: []string{"Bash(go run *)"}, Checks: []string{"go test ./..."}, Commit: true}
+	want := &Lane{Task: "abcd", Harness: "agy", Access: "edit", Root: "/project", Dirs: []string{"/extra"}, RunFolder: "/run", Allow: []string{"Bash(go run *)"}, Checks: []string{"go test ./..."}}
 	body := `{"task":"abcd","harness":"agy","access":"edit","root":"/project","dirs":["/extra"],"run_folder":"/run","allow":["Bash(go run *)"],"checks":["go test ./..."],"commit":true}`
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -231,24 +231,101 @@ func TestDecideLaneCommandPermissions(t *testing.T) {
 	}
 }
 
-func TestDecideLaneGitWrites(t *testing.T) {
-	for _, access := range []string{"read", "edit"} {
-		for _, commit := range []bool{false, true} {
-			for _, subcommand := range []string{"add", "commit", "push"} {
-				for _, suffix := range []string{"", " argument"} {
-					command := strings.Join([]string{"git", subcommand}, " ") + suffix
-					lane := &Lane{Access: access, Root: "/project", Commit: commit}
-					call := &Call{Harness: "agy", Tool: "run_command", Input: map[string]any{"CommandLine": command}}
+func TestDecideLaneEnvironmentPrefixes(t *testing.T) {
+	for _, prefix := range []string{
+		"env ", "env -u MAESTRO_HOME ", "env -i ", "env FOO=1 ", "FOO=1 BAR=2 ",
+		"FOO=1 env -i -u MAESTRO_HOME -u OTHER BAR=2 env -u THIRD ",
+		`FOO="a b" env -u "MAESTRO_HOME" BAR='c d' `, "FOO=a\\ b\tenv\t-i\t",
+	} {
+		for _, access := range []string{"read", "edit"} {
+			for _, tc := range []struct {
+				command string
+				read    bool
+			}{
+				{"go test ./...", false}, {"go vet ./...", false}, {"go build ./...", false},
+				{"make build", false}, {"npm test", false},
+				{"git status", true}, {"go env GOPATH", true}, {"[ -f main.go ]", true},
+			} {
+				t.Run(access+"/"+prefix+tc.command, func(t *testing.T) {
+					lane := &Lane{Access: access, Root: "/project", Checks: []string{"npm test"}, Allow: []string{
+						"Bash(go test *)", "Bash(go vet *)", "Bash(go build *)", "Bash(make build)",
+					}}
+					command := prefix + tc.command
+					call := &Call{Harness: "grok", Tool: "Bash", Input: map[string]any{"command": command}}
 					want := "deny"
-					if access == "edit" {
-						want = "relay"
-					}
-					if access == "edit" && commit && subcommand != "push" {
+					if access == "edit" || tc.read {
 						want = "auto_approve"
 					}
 					if got := DecideLane(call, lane); got.Kind != want {
-						t.Fatalf("%s commit=%v %q: %+v, want %s", access, commit, command, got, want)
+						t.Fatalf("verdict = %+v, want %s", got, want)
 					}
+					if call.Input["command"] != command {
+						t.Fatal("command changed during matching")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestDecideLaneEnvironmentPrefixLimits(t *testing.T) {
+	lane := &Lane{Access: "edit", Root: "/project", Allow: []string{"Bash(go test *)", "Bash(make build)"}}
+	for _, command := range []string{
+		"sudo go test ./...", "nohup go test ./...", "time go test ./...",
+		"env sudo go test ./...", "FOO=1 nohup go test ./...", "env -i time go test ./...",
+		"env -S 'go test ./...'", "env --chdir=/other go test ./...",
+		"1FOO=1 go test ./...", "FOO-BAR=1 go test ./...", "=1 go test ./...",
+		"env", "env -u", "env -i", "FOO=1 BAR=2", "env -u MAESTRO_HOME",
+		"env go testing ./...", "env go test", "FOO=1 make build extra",
+		`env "go test" ./...`, `FOO=1 make "build"`,
+		"env go test ./... && sudo go test ./...",
+	} {
+		t.Run(command, func(t *testing.T) {
+			call := &Call{Harness: "grok", Tool: "Bash", Input: map[string]any{"command": command}}
+			if got := DecideLane(call, lane); got.Kind != "deny" {
+				t.Fatalf("verdict = %+v, want deny", got)
+			}
+		})
+	}
+	command := "env -u MAESTRO_HOME go test ./... && CGO_ENABLED=0 go test ./..."
+	if got := DecideLane(&Call{Tool: "Bash", Input: map[string]any{"command": command}}, lane); got.Kind != "auto_approve" {
+		t.Fatalf("compound command = %+v", got)
+	}
+}
+
+func TestDecideLaneEnvironmentPrefixWriteFlags(t *testing.T) {
+	for _, access := range []string{"read", "edit"} {
+		for _, command := range []string{
+			"env -u MAESTRO_HOME git diff --output=file", "FOO=1 sort '-o' file",
+			"env -i go env -w GOPROXY=off", "env FOO=1 find . -delete",
+			"FOO=1 env -i node --version --eval 'write()'", "env -i sed 'w output' file",
+			`FOO=1 cat "$FILE"`, `FOO=$VALUE cat file`, `FOO=$VALUE [ -f file ]`,
+		} {
+			t.Run(access+"/"+command, func(t *testing.T) {
+				lane := &Lane{Access: access, Root: "/project", Checks: []string{command}, Allow: []string{"Bash(" + command + ")"}}
+				got := DecideLane(&Call{Tool: "Bash", Input: map[string]any{"command": command}}, lane)
+				if got.Kind != "deny" || !strings.Contains(got.Reason, "read-only command carries") {
+					t.Fatalf("verdict = %+v, want a write flag or form denial", got)
+				}
+			})
+		}
+	}
+}
+
+func TestDecideLaneGitWrites(t *testing.T) {
+	for _, access := range []string{"read", "edit"} {
+		// The Lane never commits, so no Lane file approves these commands.
+		for _, subcommand := range []string{"add", "commit", "push"} {
+			for _, suffix := range []string{"", " argument"} {
+				command := strings.Join([]string{"git", subcommand}, " ") + suffix
+				lane := &Lane{Access: access, Root: "/project"}
+				call := &Call{Harness: "agy", Tool: "run_command", Input: map[string]any{"CommandLine": command}}
+				want := "deny"
+				if access == "edit" {
+					want = "relay"
+				}
+				if got := DecideLane(call, lane); got.Kind != want {
+					t.Fatalf("%s %q: %+v, want %s", access, command, got, want)
 				}
 			}
 		}

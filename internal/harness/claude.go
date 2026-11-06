@@ -92,9 +92,6 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 		for _, cmd := range l.AllowedCommands {
 			tools = append(tools, "Bash("+cmd+")", "Bash("+cmd+" *)")
 		}
-		if l.AllowCommit {
-			tools = append(tools, "Bash(git add *)", "Bash(git commit *)")
-		}
 		if l.SoloMCPCommand != "" {
 			tools = append(tools, solo.LaneTools()...)
 		}

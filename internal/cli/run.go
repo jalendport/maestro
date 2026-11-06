@@ -19,6 +19,7 @@ import (
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/run"
 	"github.com/jalendport/maestro/internal/ui"
+	"github.com/jalendport/maestro/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
@@ -112,7 +113,11 @@ func printPlan(s *run.State) {
 			note = t.Waiting
 		}
 		ui.Outf("  %-2d %-34s %-11s %-12s %-14s %-5s %s  %s", t.Number, cutRunTitle(t.Title, 34), t.Category, level, lane, t.Access, note, blocked)
+		if order := run.OrderLine(t); order != "" {
+			ui.Outf("    %s", order)
+		}
 	}
+	ui.Outf("%s", run.ModeLine(s))
 }
 
 func cutRunTitle(s string, n int) string {
@@ -208,23 +213,23 @@ func (a *app) approveCmd() *cobra.Command {
 
 func (a *app) resumeCmd() *cobra.Command {
 	var task, lane, briefPath string
-	var skip, wait bool
+	var skip, wait, merge, finish bool
 	c := &cobra.Command{
-		Use:   "resume <run> --task <n> (--lane F[:E] | --brief <file> | --skip)",
+		Use:   "resume <run> [--task <n> (--lane F[:E] | --brief <file> | --skip | --merge) | --finish]",
 		Short: "Continue a paused Run with one answer for the stuck Task",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			if task == "" {
+			if task == "" && !finish {
 				return fmt.Errorf("--task is required")
 			}
 			n := 0
-			for _, set := range []bool{lane != "", briefPath != "", skip} {
+			for _, set := range []bool{lane != "", briefPath != "", skip, merge, finish} {
 				if set {
 					n++
 				}
 			}
-			if n != 1 {
-				return fmt.Errorf("give exactly one of --lane, --brief, --skip")
+			if n != 1 || (finish && task != "") {
+				return fmt.Errorf("give exactly one of --lane, --brief, --skip, --merge, --finish; --finish takes no --task")
 			}
 			env, err := a.env(false)
 			if err != nil {
@@ -235,7 +240,7 @@ func (a *app) resumeCmd() *cobra.Command {
 				return err
 			}
 			t, ok := s.Task(task)
-			if !ok {
+			if !ok && !finish {
 				return fmt.Errorf("run %s has no task %q", s.Run, task)
 			}
 			if briefPath != "" {
@@ -246,13 +251,20 @@ func (a *app) resumeCmd() *cobra.Command {
 					return err
 				}
 			}
-			ans := run.Resume{Task: t.ID, Lane: lane, Brief: briefPath, Skip: skip}
+			ans := run.Resume{Lane: lane, Brief: briefPath, Skip: skip, Merge: merge, Finish: finish}
+			if t != nil {
+				ans.Task = t.ID
+			}
 			live, err := run.QueueResume(folder, ans)
 			if err != nil {
 				return err
 			}
 			if !a.json {
 				switch {
+				case finish:
+					ui.Outf("Run %s will retry Finish", s.Run)
+				case merge:
+					ui.Outf("Task %s will retry the merge", t.ID)
 				case skip:
 					ui.Outf("task %s skipped", t.ID)
 				case lane != "":
@@ -262,7 +274,7 @@ func (a *app) resumeCmd() *cobra.Command {
 				}
 			}
 			if live {
-				return a.result(map[string]any{"run": s.Run, "state": s.State, "task": t.ID, "resume": ans}, "run %s is live; the supervisor picks the answer up", s.Run)
+				return a.result(map[string]any{"run": s.Run, "state": s.State, "task": ans.Task, "resume": ans}, "run %s is live; the supervisor picks the answer up", s.Run)
 			}
 			if !a.json {
 				ui.Outf("run %s resumed", s.Run)
@@ -274,6 +286,8 @@ func (a *app) resumeCmd() *cobra.Command {
 	c.Flags().StringVar(&lane, "lane", "", "re-route on this Lane")
 	c.Flags().StringVar(&briefPath, "brief", "", "restart with a corrected Brief file")
 	c.Flags().BoolVar(&skip, "skip", false, "skip the Task; the Run continues")
+	c.Flags().BoolVar(&merge, "merge", false, "retry the merge after a hand fix in the Worktree")
+	c.Flags().BoolVar(&finish, "finish", false, "retry landing the Run branch")
 	c.Flags().BoolVar(&wait, "wait", false, "keep the supervisor in this process")
 	return c
 }
@@ -536,6 +550,17 @@ func (a *app) cleanCmd() *cobra.Command {
 					}
 					if keep {
 						continue
+					}
+					if state, err := run.Load(p); err == nil && state.Mode == "worktree" {
+						if state.State != run.StateFinished && state.State != run.StateCancelled && state.State != run.StatePaused {
+							continue
+						}
+						if state.EndedAt.IsZero() || !state.EndedAt.Before(cutoff) {
+							continue
+						}
+						if err := worktree.Remove(state.Project, state.Run); err != nil {
+							return err
+						}
 					}
 					control, err := config.ControlDirForFolder(p)
 					if err != nil {

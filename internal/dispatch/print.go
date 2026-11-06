@@ -33,6 +33,9 @@ func Print(rec *Record, asJSON bool) int {
 		lane += " " + rec.Route.Effort
 	}
 	fmt.Fprintf(os.Stdout, "task %s  %-32s %-9s %-20s attempt %d  %s\n", rec.Task, cutTitle(rec.TaskInfo.Title, 32), status, lane, rec.Attempt, ui.Duration(time.Duration(rec.DurationS*float64(time.Second))))
+	if rec.Workdir != "" && rec.Workdir != rec.Project {
+		fmt.Fprintf(os.Stdout, "workdir %s\n", rec.Workdir)
+	}
 	if rec.Outcome.FailureClass != "" && rec.Outcome.Status == "" {
 		fmt.Fprintf(os.Stdout, "error    %s\n", rec.Outcome.ErrorText)
 		if rec.Outcome.Timer != "" {

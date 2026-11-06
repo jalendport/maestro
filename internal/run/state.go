@@ -43,6 +43,14 @@ const (
 
 // TaskState is one Task's live record in run.json.
 type TaskState struct {
+	Files             []string      `json:"files,omitempty"`
+	Touch             []string      `json:"touch,omitempty"`
+	After             []int         `json:"after,omitempty"`
+	Workdir           string        `json:"workdir,omitempty"`
+	InTree            []string      `json:"in_tree,omitempty"`
+	Conflicts         []string      `json:"conflicts,omitempty"`
+	ConflictAttempt   bool          `json:"conflict_attempt,omitempty"`
+	ConflictRebase    bool          `json:"conflict_rebase,omitempty"` // the supervisor started a rebase in the Worktree
 	Number            int           `json:"number"`
 	ID                string        `json:"id"`
 	Title             string        `json:"title"`
@@ -78,25 +86,30 @@ type TaskState struct {
 
 // State is run.json.
 type State struct {
-	Run         string       `json:"run"`
-	Project     string       `json:"project"`
-	Plan        string       `json:"plan"`
-	Title       string       `json:"title"`
-	State       string       `json:"state"`
-	Pid         int          `json:"pid,omitempty"`
-	StartedAt   time.Time    `json:"started_at"`
-	EndedAt     time.Time    `json:"ended_at,omitempty"`
-	Tasks       []*TaskState `json:"tasks"`
-	Approval    []string     `json:"approval_needed,omitempty"`
-	PauseReason string       `json:"pause_reason,omitempty"`
-	Councils    []string     `json:"councils,omitempty"`
-	Awake       bool         `json:"caffeinate"`
-	Folder      string       `json:"folder"`
-	Lane        string       `json:"lane,omitempty"` // --lane for every Task
-	Level       roster.Level `json:"level,omitempty"`
-	Floor       roster.Tier  `json:"floor,omitempty"`
-	Ceiling     roster.Tier  `json:"ceiling,omitempty"`
-	CouncilSkip string       `json:"council_skip,omitempty"`
+	Mode          string       `json:"mode,omitempty"`
+	ModeReason    string       `json:"mode_reason,omitempty"`
+	Commit        bool         `json:"commit"`
+	RunBranch     string       `json:"run_branch,omitempty"`
+	FinishPending bool         `json:"finish_pending,omitempty"`
+	Run           string       `json:"run"`
+	Project       string       `json:"project"`
+	Plan          string       `json:"plan"`
+	Title         string       `json:"title"`
+	State         string       `json:"state"`
+	Pid           int          `json:"pid,omitempty"`
+	StartedAt     time.Time    `json:"started_at"`
+	EndedAt       time.Time    `json:"ended_at,omitempty"`
+	Tasks         []*TaskState `json:"tasks"`
+	Approval      []string     `json:"approval_needed,omitempty"`
+	PauseReason   string       `json:"pause_reason,omitempty"`
+	Councils      []string     `json:"councils,omitempty"`
+	Awake         bool         `json:"caffeinate"`
+	Folder        string       `json:"folder"`
+	Lane          string       `json:"lane,omitempty"` // --lane for every Task
+	Level         roster.Level `json:"level,omitempty"`
+	Floor         roster.Tier  `json:"floor,omitempty"`
+	Ceiling       roster.Tier  `json:"ceiling,omitempty"`
+	CouncilSkip   string       `json:"council_skip,omitempty"`
 }
 
 const FileState = "run.json"

@@ -126,7 +126,7 @@ func TestRenderCommitRules(t *testing.T) {
 		rule   string
 	}{
 		{"no commit", false, "- Do not commit.\n"},
-		{"commit", true, "- Commit as your own commit guidance says. Commit only the files that you changed for this Task.\n"},
+		{"commit", true, "- Do not commit.\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b, err := ParseText(sample)
@@ -140,9 +140,6 @@ func TestRenderCommitRules(t *testing.T) {
 			}
 			if !strings.Contains(out, tc.rule) {
 				t.Fatalf("Brief lacks %q:\n%s", tc.rule, out)
-			}
-			if tc.commit && strings.Contains(out, "- Do not commit.\n") {
-				t.Fatal("Brief denies the requested commit")
 			}
 		})
 	}

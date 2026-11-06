@@ -335,15 +335,68 @@ After an Idle limit, a Wall limit, or a failed Docker pre-flight, Maestro skips 
 
 In a Plan file, text after the front matter or optional `# title` and before the first `## <task title>` is the introduction. Maestro adds it to the start of every Task's Context under `Shared context of the Plan:`, before the Task's own `### Context` text. An empty introduction adds nothing. `maestro help plan` prints the format.
 
-These keys control the plan Council for a held Run. The approval hold rules are separate: more than four Tasks, a medium or fallback Route, a Judgment level two steps from the Router's, a Router question, or a Router Council signal.
+These keys control Runs. The approval hold rules are separate: more than four Tasks, a medium or fallback Route, a Judgment level two steps from the Router's, a Router question, or a Router Council signal.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `council_tasks` | integer | `10` | Starts a plan Council when a held Plan has at least this many Tasks. `0` disables the size rule. |
+| `worktrees` | boolean | `true` | Permits Worktree mode. A project can turn it off, but cannot turn it on when this key is `false`. See [Worktrees](#worktrees). |
 
 `maestro run --council <plan>` requests a plan Council for a held Run. A Router question or Council signal for any Task also starts it. `--no-council` stops the plan Council in every case, including when `--council` is set. A hold alone does not start a Council.
 
 Fold any Council findings into the Plan file, then use `maestro approve <run>`. Approval reads the file at the recorded path again, parses it, prints new provisional Routes, and starts the current Tasks under the same Run id. It starts no second plan Council. A parse error leaves the Run held.
+
+## Worktrees
+
+A Run uses Worktree mode when Worktrees are on, the repository has a commit, the tree is clean, and the Plan has more than one edit Task. The mode is recorded once for the Run. Other Runs use tree mode, where an edit Task waits with `tree busy`. In Worktree mode, Tasks with files that overlap wait in Plan order with `files overlap with <n>`; Routes and status show `after <n> (files overlap)`. A Task whose `touch` can write a shared dependency folder uses the tree, one at a time, and status names the folder.
+
+Lanes never commit. Maestro commits a verified edit Task after the gate, or an unverified edit Task with a Report and changed files. In Worktree mode, Maestro merges each Task into the Run branch. The Plan's `commit: true` keeps those commits when the Run lands on the user's branch; `commit: false` leaves the changes uncommitted. In tree mode, Maestro commits only a Task with `commit: true`.
+
+Worktrees live under `~/.maestro/worktrees/<project-key>/<run>/<task>/`. The Run branch is `maestro/<run>/run`; each Task branch is `maestro/<run>/<task>`. Maestro links existing ignored dependency folders from the project: `node_modules`, `vendor`, `.venv`, `.bundle`, and `storage/framework`. A folder that a Task's `touch` can write stays unlinked; that Task uses the tree one at a time.
+
+Each commit keeps the user as its git author. The commit message comes from `[commit] message` in `~/.maestro/config.toml`. A project `commit_message` in `.agents/maestro.toml` replaces it. The default is:
+
+```toml
+[commit]
+message = "{title}\n\nCo-Authored-By: {lane}"
+```
+
+| Placeholder | Value |
+|---|---|
+| `{title}` | The Task title. |
+| `{run}` | The Run id. |
+| `{task}` | The Task id. |
+| `{lane}` | The Lane identity, including its email address. |
+| `{family}` | The Family id. |
+| `{model}` | The model name. |
+| `{summary}` | The Summary section of the Task's Report. |
+
+For example, this template adds a prefix and the Report summary, with no trailer:
+
+```toml
+[commit]
+message = "feat: {title}\n\n{summary}"
+```
+
+`[commit.identities]` in `~/.maestro/config.toml` replaces `{lane}` by Family prefix. Each value is the full identity text. With no override, Maestro uses these identities:
+
+| Family prefix | Default identity |
+|---|---|
+| `codex` | `Codex <noreply@openai.com>` |
+| `claude` | `Claude <model name and version> <noreply@anthropic.com>`, for example `Claude Opus 5.5 <noreply@anthropic.com>`. |
+| `grok` | `Grok <noreply@x.ai>` |
+| `agy` | `Gemini <noreply@google.com>` |
+
+```toml
+[commit.identities]
+codex = "Build assistant <assistant@example.com>"
+```
+
+A merge conflict gets one more attempt in the same Worktree. Maestro starts the rebase onto the Run branch, the Lane edits the conflicted files, and Maestro continues the rebase after the checks and the gate. A second conflict, a conflict marker that stays in a file, or a failed attempt blocks the Task with `merge conflict in <paths>` and keeps its Worktree. To fix it by hand, rebase the Task branch onto the Run branch in that Worktree, resolve the conflicts, and complete the rebase; then `maestro resume <run> --task <n> --merge` retries the merge with no new Lane. If landing fails, the Run pauses with the error and `maestro resume <run> --finish` retries it. When the user's branch moved, rebase the Run branch onto the user's branch, or reset the user's branch to the base, before you retry. A cancelled Run removes its Worktrees and keeps the Run branch named in its report. A failed or paused Run keeps its Worktrees and branches until resume or cleanup.
+
+Worktrees are on by default. To turn them off for every project, set `[run] worktrees = false` in `~/.maestro/config.toml`. To turn them off for one project, set `worktrees = false` in `.agents/maestro.toml`. The project key cannot turn Worktrees on when the global key is off.
+
+`maestro doctor` prints `worktrees on` or `worktrees off (<where>)`, the dependency folders it would link, and a warning when the tree has uncommitted changes: `Runs use the tree one Task at a time until you commit or stash`. `maestro clean --older-than 30d` removes the Worktrees and branches of Runs that ended before that age and reports the number of Run folders removed with the other removed folders. It keeps live Runs.
 
 ### [concurrency]
 
@@ -358,7 +411,7 @@ These keys set how many Lanes run at the same time.
 
 ## .agents/maestro.toml
 
-This file is in the root of a project, and it applies to that project only. `maestro init` writes the file. A missing file is empty. The keys `forbid`, `checks`, `router`, `redact`, and `councils` tighten what the user file allows. The keys `allow`, `dirs`, and `claude_auto` widen it: they give edit Dispatches more permission rules, more writable directories, or the Claude Code auto permission mode.
+This file is in the root of a project, and it applies to that project only. `maestro init` writes the file. A missing file is empty. The keys `forbid`, `checks`, `router`, `redact`, `councils`, and `worktrees` tighten what the user file allows. The keys `allow`, `dirs`, and `claude_auto` widen it: they give edit Dispatches more permission rules, more writable directories, or the Claude Code auto permission mode. `commit_message` replaces the commit message template for this project.
 
 `maestro init` detects each stack from files at the project root. A project can match more than one stack. It writes active `dirs` and `allow` arrays for all matches. It writes `checks` as commented suggestions, such as `# checks = ["go test ./..."]`. Review the suggestions before you activate them: an incorrect check fails every edit Task. With no match, all keys stay commented.
 
@@ -377,6 +430,8 @@ When several Node lockfiles exist, npm takes priority, then pnpm, then yarn. Cac
 
 The generated allow rules use the hook's `Bash(<prefix> *)` form. A trailing ` *` permits arguments; a bare rule permits only that command. The rules cover Go test, vet, build, and gofmt; the Node runner's test and run commands; Composer test, PHPUnit, Pint, and PHPStan; pytest and ruff; Cargo test, build, clippy, and fmt; and Docker compose and build. Node test, Composer test, and pytest also get a bare rule. `Bash(docker run *)` stays a commented suggestion because it permits host path mounts.
 
+For matching against `allow`, `checks`, and the read-only list, the hook removes leading environment words: `env`, its `-i` and `-u NAME` options, and `NAME=value` assignments. These can be combined. Thus `env -u MAESTRO_HOME go test ./...` matches `Bash(go test *)`, and `CGO_ENABLED=0 go build ./...` matches `Bash(go build *)`. The command runs as written. Write-flag and shell checks still apply. The hook does not remove other prefixes, such as `sudo`, `nohup`, or `time`.
+
 If the Project file exists, `maestro init` shows the proposed file and changes nothing. `maestro init --write` merges the additions. It keeps every existing key, value, and comment, and appends only missing values to `dirs` and `allow`. A value in a comment also counts as present, so a value that you comment out stays inactive. It adds a commented `checks` line only when no active or commented `checks` key exists. A second `--write` with the same stack and cache paths adds nothing.
 
 `maestro doctor` warns when a Project file has no active checks. It also warns when a project check starts with `docker` and `dirs` does not include `~/.docker` or its absolute path. These warnings do not fail the doctor command.
@@ -384,6 +439,8 @@ If the Project file exists, `maestro init` shows the proposed file and changes n
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `forbid` | array of strings | none | Lists the Families that Maestro never routes to in this project. |
+| `worktrees` | boolean | none | Turns Worktrees off with `false`; `true` cannot override a global `false`. |
+| `commit_message` | string | none | Replaces the global commit message template for this project. See [Worktrees](#worktrees). |
 | `checks` | array of strings | none | Lists the commands that Maestro runs after every edit Dispatch, and that the Lane may run. |
 | `allow` | array of strings | none | Lists extra permission rules that Maestro gives to every edit Dispatch in this project. |
 | `router` | string | none | When it is `rules`, Maestro never calls Jev for this project, so no text of the project leaves the machine. |

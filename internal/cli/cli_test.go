@@ -41,7 +41,7 @@ func TestBriefHelpHasNoPushRule(t *testing.T) {
 	if strings.Contains(strings.ToLower(out), "push") {
 		t.Fatalf("Brief help contains a push rule:\n%s", out)
 	}
-	if !strings.Contains(out, "commit: false") || !strings.Contains(out, "true lets the Lane commit as its own guidance says") {
+	if !strings.Contains(out, "commit: false") || !strings.Contains(out, "true lets Maestro commit after verification; the Lane never commits") {
 		t.Fatalf("Brief help lacks commit guidance:\n%s", out)
 	}
 }

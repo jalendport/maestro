@@ -14,6 +14,7 @@ import (
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/jev"
 	"github.com/jalendport/maestro/internal/proc"
+	"github.com/jalendport/maestro/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
@@ -110,6 +111,11 @@ func (a *app) doctorCmd() *cobra.Command {
 			}
 			cfg.State = "ok"
 			rows = append(rows, cfg)
+			worktrees, err := worktreeDoctorRows(env)
+			if err != nil {
+				return err
+			}
+			rows = append(rows, worktrees...)
 			user, _, err := config.LoadUser()
 			if err != nil {
 				return err
@@ -193,6 +199,42 @@ func projectDoctorWarnings(root string, project *config.Project) []doctorRow {
 		break
 	}
 	return rows
+}
+
+func worktreeDoctorRows(env *dispatch.Env) ([]doctorRow, error) {
+	mode := "on"
+	if !env.Roster.Worktrees() {
+		where := config.UserFile()
+		if env.Roster.Run.Worktrees == nil || *env.Roster.Run.Worktrees {
+			where = config.ProjectFile(env.Root)
+		}
+		mode = "off (" + where + ")"
+	}
+	rows := []doctorRow{{Name: "worktrees", Detail: mode, State: "info"}}
+	dirty, err := worktree.Dirty(env.Root)
+	if err != nil {
+		// A project with no git repository cannot use Worktrees.
+		return rows, nil
+	}
+	if len(dirty) > 0 {
+		rows = append(rows, doctorRow{Name: "project", Detail: env.Root,
+			State: "warning: Runs use the tree one Task at a time until you commit or stash"})
+	}
+	preview, err := os.MkdirTemp("", "maestro-links-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(preview)
+	links, err := worktree.Link(env.Root, preview)
+	if err != nil {
+		return nil, err
+	}
+	detail := "none"
+	if len(links.Linked) > 0 {
+		detail = strings.Join(links.Linked, ", ")
+	}
+	rows = append(rows, doctorRow{Name: "dependency links", Detail: detail, State: "info"})
+	return rows, nil
 }
 
 func canaryState(result *dispatch.CanaryResult, version, name string) (string, bool) {

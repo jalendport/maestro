@@ -121,7 +121,11 @@ func Status(rec *Record) string {
 	if !rec.StartedAt.IsZero() {
 		duration = ui.Duration(time.Duration(elapsed * float64(time.Second)))
 	}
-	return fmt.Sprintf("  task %s  %s  %s  attempt %d  %s  %s\n", rec.Task, rec.TaskInfo.Title, lane, rec.Attempt, duration, state) + RelayEvents(rec)
+	text := fmt.Sprintf("  task %s  %s  %s  attempt %d  %s  %s\n", rec.Task, rec.TaskInfo.Title, lane, rec.Attempt, duration, state)
+	if rec.Workdir != "" && rec.Workdir != rec.Project {
+		text += fmt.Sprintf("workdir %s\n", rec.Workdir)
+	}
+	return text + RelayEvents(rec)
 }
 
 func RelayEvents(rec *Record) string {

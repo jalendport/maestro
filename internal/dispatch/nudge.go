@@ -42,7 +42,7 @@ func doneItems(text string) []string {
 }
 
 func nudgeFindings(env *Env, t *Task, rec *Record, b *brief.Brief) []string {
-	if t.Nudged || rec.Outcome.Outcome != OutcomeUnverified || len(rec.Verification.Checks) == 0 {
+	if t.Conflict != nil || t.Nudged || rec.Outcome.Outcome != OutcomeUnverified || len(rec.Verification.Checks) == 0 {
 		return nil
 	}
 	for _, check := range rec.Verification.Checks {

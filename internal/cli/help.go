@@ -20,7 +20,7 @@ dirs: [../shared-fixtures]   # extra writable directories
 touch: [internal/probe/**]   # scope guard; a diff outside it is a Bad result
 checks: ["go test ./internal/probe/..."]   # added to the project checks in .agents/maestro.toml
 # Project .agents/maestro.toml: allow = ["Bash(go run *)"] adds tool rules to edit Lanes only.
-commit: false                # true lets the Lane commit as its own guidance says
+commit: false                # true lets Maestro commit after verification; the Lane never commits
 lane: codex-sol:high         # request a Lane; also floor: / ceiling:
 wall_limit: 45m              # raise the Tier's Wall limit for this Task
 facts: {input: very large log}   # short named facts for the Router
@@ -57,6 +57,14 @@ The text after the front matter or optional "# title" and before the first
 "## <task title>" is the Plan's introduction. Maestro adds it to the start
 of every Task's Context under "Shared context of the Plan:", before the
 Task's own "### Context" text. An empty introduction adds nothing.
+
+In Worktree mode, Maestro commits each verified edit Task with the user's
+commit message template (default: the title and a Co-Authored-By trailer
+for the Lane). Lanes never commit. At the end of the Run, the Plan's
+commit: true keeps the Task commits on the user's branch; commit: false
+leaves the changes uncommitted. In tree mode, commit: true lets Maestro
+commit the Task's changed paths after verification; false leaves them
+uncommitted.
 
 ---
 access: edit

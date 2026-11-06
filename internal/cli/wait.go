@@ -136,6 +136,9 @@ func taskJudgedFiles(task *run.TaskState) []string {
 }
 
 func taskWaitReason(task *run.TaskState) string {
+	if len(task.Conflicts) > 0 {
+		return "merge conflict in " + strings.Join(task.Conflicts, ", ") + "; Worktree: " + task.Workdir
+	}
 	if rec, err := dispatch.LoadRecord(task.Folder); err == nil && rec.BlockedReason() != "" {
 		return rec.BlockedReason()
 	}

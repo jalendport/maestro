@@ -28,6 +28,7 @@ type File struct {
 	Failure     Failure            `toml:"failure"`
 	Concurrency Concurrency        `toml:"concurrency"`
 	Run         Run                `toml:"run"`
+	Commit      Commit             `toml:"commit"`
 	Aliases     map[string]string  `toml:"aliases"`
 }
 
@@ -118,7 +119,13 @@ type Failure struct {
 
 // Run is the `run` block. A pointer permits an explicit zero override.
 type Run struct {
-	CouncilTasks *int `toml:"council_tasks"`
+	CouncilTasks *int  `toml:"council_tasks"`
+	Worktrees    *bool `toml:"worktrees"`
+}
+
+type Commit struct {
+	Message    *string           `toml:"message"`
+	Identities map[string]string `toml:"identities"`
 }
 
 // Concurrency is the `concurrency` block.
@@ -142,17 +149,19 @@ func (d *Duration) UnmarshalText(b []byte) error {
 
 func (d Duration) MarshalText() ([]byte, error) { return []byte(d.String()), nil }
 
-// Project is the shape of .agents/maestro.toml: five tighten-only keys plus
-// the per-project Claude permission switch from the permission contract.
+// Project is the shape of .agents/maestro.toml: project restrictions,
+// edit permissions, and a commit message template.
 type Project struct {
-	Unknown    []string `toml:"-"`
-	Forbid     []string `toml:"forbid"`
-	Checks     []string `toml:"checks"`
-	Allow      []string `toml:"allow"`
-	Router     string   `toml:"router"`
-	Redact     []string `toml:"redact"`
-	Councils   string   `toml:"councils"`
-	ClaudeAuto bool     `toml:"claude_auto"`
+	CommitMessage *string  `toml:"commit_message"`
+	Worktrees     *bool    `toml:"worktrees"`
+	Unknown       []string `toml:"-"`
+	Forbid        []string `toml:"forbid"`
+	Checks        []string `toml:"checks"`
+	Allow         []string `toml:"allow"`
+	Router        string   `toml:"router"`
+	Redact        []string `toml:"redact"`
+	Councils      string   `toml:"councils"`
+	ClaudeAuto    bool     `toml:"claude_auto"`
 	// Dirs are extra writable directories for every edit Dispatch in this
 	// project (a toolchain cache, for example). A Brief's dirs: adds to them.
 	Dirs []string `toml:"dirs"`

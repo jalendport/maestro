@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/jalendport/maestro/internal/worktree"
 )
 
 // withControlLock keeps the resume writer and the ownership decision in order.
@@ -32,17 +34,31 @@ func QueueResume(folder string, answer Resume) (bool, error) {
 			return err
 		}
 		task, ok := s.Task(answer.Task)
-		if !ok {
+		if answer.Finish {
+			if !s.FinishPending || s.State != StatePaused {
+				return fmt.Errorf("Run %s has no pending Finish", s.Run)
+			}
+		} else if !ok {
 			return fmt.Errorf("Run %s has no Task %q", s.Run, answer.Task)
 		}
-		if task.State == TaskRunning || task.State == TaskDone || task.State == TaskSkipped {
+		if !answer.Finish && (task.State == TaskRunning || task.State == TaskDone || task.State == TaskSkipped) {
 			return fmt.Errorf("Task %s is %s", task.ID, task.State)
+		}
+		if answer.Merge && (s.Mode != "worktree" || task.Workdir == "" || len(task.Conflicts) == 0) {
+			return fmt.Errorf("Task %s has no merge conflict", task.ID)
+		}
+		if answer.Merge && (worktree.Worktree{Root: s.Project, Dir: task.Workdir}).Rebasing() {
+			return fmt.Errorf("a rebase is in progress in %s; finish it with git rebase --continue, then resume with --merge", task.Workdir)
 		}
 		b, err := json.Marshal(answer)
 		if err != nil {
 			return err
 		}
-		path := filepath.Join(folder, "control", fmt.Sprintf("resume-%s-%d.json", task.ID, time.Now().UnixNano()))
+		ref := answer.Task
+		if answer.Finish {
+			ref = "finish"
+		}
+		path := filepath.Join(folder, "control", fmt.Sprintf("resume-%s-%d.json", ref, time.Now().UnixNano()))
 		if err := os.WriteFile(path, b, 0o644); err != nil {
 			return err
 		}

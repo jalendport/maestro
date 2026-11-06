@@ -141,6 +141,35 @@ func TestStatusWithOnlyStandaloneDispatch(t *testing.T) {
 	}
 }
 
+func TestStatusShowsWorkdir(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	root := t.TempDir()
+	t.Chdir(root)
+	folder := filepath.Join(config.RunsDir(root), "r-0001", "abcd")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := &dispatch.Record{Task: "abcd", Project: root, Workdir: t.TempDir(), Path: folder, State: "ended", EndedAt: time.Now(),
+		Route: &router.Route{FamilyID: "codex-sol"}}
+	if err := rec.Save(); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{nil, {"abcd"}} {
+		out, code := statusOutput(t, args...)
+		if code != 0 || !strings.Contains(out, "workdir "+rec.Workdir+"\n") || strings.Index(out, "workdir ") < strings.Index(out, "codex-sol") {
+			t.Fatalf("status code %d: %s", code, out)
+		}
+	}
+	rec.Workdir = ""
+	if err := rec.Save(); err != nil {
+		t.Fatal(err)
+	}
+	out, code := statusOutput(t, "abcd")
+	if code != 0 || strings.Contains(out, "workdir") {
+		t.Fatalf("status without Worktree code %d: %s", code, out)
+	}
+}
+
 func TestWaitDispatchHasNoTabText(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	t.Setenv("SOLO_PROCESS_ID", "")
@@ -155,13 +184,13 @@ func TestWaitDispatchHasNoTabText(t *testing.T) {
 	if err := os.MkdirAll(folder, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	rec := &dispatch.Record{Task: "abcd", Path: folder, State: "ended",
+	rec := &dispatch.Record{Task: "abcd", Path: folder, State: "ended", Workdir: t.TempDir(),
 		Route: &router.Route{FamilyID: "codex-sol"}, Outcome: dispatch.Outcome{Outcome: dispatch.OutcomeAnswered, Status: "done"}}
 	if err := rec.Save(); err != nil {
 		t.Fatal(err)
 	}
 	out, code := cliOutput(t, "wait", "abcd")
-	if code != 0 || !strings.Contains(out, "task abcd") || strings.Contains(out, "tab") {
+	if code != 0 || !strings.Contains(out, "task abcd") || !strings.Contains(out, "workdir "+rec.Workdir+"\n") || strings.Contains(out, "tab") {
 		t.Fatalf("wait: code %d: %s", code, out)
 	}
 }

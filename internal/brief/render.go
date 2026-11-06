@@ -19,7 +19,17 @@ type RenderOpts struct {
 	// because the Harness cannot permit the Report write.
 	ReportByMessage bool
 	// Council: the read shape ends with a POSITION line instead of STATUS.
-	Council bool
+	Council  bool
+	Conflict *Conflict
+}
+
+type Conflict struct {
+	Branch string
+	Paths  []string
+}
+
+func RenderConflict(goal, branch string, paths []string) string {
+	return fmt.Sprintf("## Merge conflict\n\n%s\n\nConflicted paths: %s\n\nRebase this branch onto `%s` and resolve every conflict so that both sides' intent stays; the Done of the Task still holds.\n\nMaestro started this rebase and stopped it at the conflicts, so the conflicted paths contain conflict markers. Edit the files to resolve the conflicts. Do not run git commands that change the branch; Maestro continues the rebase after the checks.\n", strings.TrimSpace(goal), strings.Join(paths, ", "), branch)
 }
 
 // Retry is the "previous attempt" block on a retry Brief.
@@ -64,11 +74,7 @@ func Render(b *Brief, o RenderOpts) string {
 		w.WriteString("\n")
 	}
 	w.WriteString("## Rules\n\n")
-	if b.WantsCommit() {
-		w.WriteString("- Commit as your own commit guidance says. Commit only the files that you changed for this Task.\n")
-	} else {
-		w.WriteString("- Do not commit.\n")
-	}
+	w.WriteString("- Do not commit.\n")
 	if len(b.Touch) > 0 {
 		fmt.Fprintf(&w, "- Change nothing outside these paths: %s\n", strings.Join(quoteAll(b.Touch), ", "))
 	}
@@ -100,6 +106,9 @@ func Render(b *Brief, o RenderOpts) string {
 				fmt.Fprintf(&w, "- %s\n", f)
 			}
 		}
+	}
+	if o.Conflict != nil {
+		w.WriteString("\n" + RenderConflict(b.Goal, o.Conflict.Branch, o.Conflict.Paths))
 	}
 	return w.String()
 }

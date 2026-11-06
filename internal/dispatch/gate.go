@@ -57,7 +57,7 @@ func askGate(env *Env, t *Task, rec *Record, b *brief.Brief, report *brief.Repor
 	if err != nil {
 		return fallback(err.Error())
 	}
-	diff, err := snap.diff(t.Project, rec.Verification.Changed)
+	diff, err := snap.diff(t.workdir(), rec.Verification.Changed)
 	if err != nil && full {
 		return fallback(err.Error())
 	}
@@ -256,6 +256,20 @@ func (g *Gate) raw() json.RawMessage {
 
 // DiffFor returns the diff of a finished Dispatch's changed paths.
 func DiffFor(root string, rec *Record) string {
+	if rec.Verification.CommitRange != "" {
+		args := []string{"-C", root, "diff", rec.Verification.CommitRange}
+		if !strings.Contains(rec.Verification.CommitRange, "..") {
+			args = []string{"-C", root, "show", "--format=", rec.Verification.CommitRange}
+		}
+		args = append(args, "--")
+		args = append(args, rec.Verification.Changed...)
+		if out, err := exec.Command("git", args...).Output(); err == nil {
+			return string(out)
+		}
+	}
+	if rec.Workdir != "" {
+		root = rec.Workdir
+	}
 	if b, err := os.ReadFile(filepath.Join(rec.Path, FileBaseline)); err == nil {
 		var snap attemptBaseline
 		if json.Unmarshal(b, &snap) == nil && snap.Contents != nil {

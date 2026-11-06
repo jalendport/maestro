@@ -308,7 +308,7 @@ func TestGrokShapesRunAlwaysApproveUnderTheHook(t *testing.T) {
 	if g.Enforcement("read") != Enforced || command.Enforcement != Enforced {
 		t.Fatal("read must be enforced")
 	}
-	command, err = g.Build(Launch{Access: "edit", Root: "/project", RunFolder: "/project/.agents/maestro/runs/r-1/t1", Dirs: []string{"/project/vendor"}, AllowedCommands: []string{"go test ./..."}, AllowCommit: true})
+	command, err = g.Build(Launch{Access: "edit", Root: "/project", RunFolder: "/project/.agents/maestro/runs/r-1/t1", Dirs: []string{"/project/vendor"}, AllowedCommands: []string{"go test ./..."}})
 	if err != nil {
 		t.Fatal(err)
 	}

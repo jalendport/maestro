@@ -39,8 +39,18 @@ func Report(s *State) string {
 		fmt.Fprintf(&w, "\npaused: %s", s.PauseReason)
 	}
 	w.WriteString("\n")
+	w.WriteString(ModeLine(s) + "\n")
+	if s.State == StateCancelled && s.RunBranch != "" {
+		fmt.Fprintf(&w, "Run branch kept: %s\n", s.RunBranch)
+	}
 	for _, t := range sortedTasks(s) {
 		fmt.Fprintf(&w, "  %-2d %-32s %-8s %-18s %d  %s\n", t.Number, cutTitle(t.Title, 32), stateWord(t), laneWord(t), t.Attempt, reportPath(s, t))
+		if order := OrderLine(t); order != "" {
+			fmt.Fprintf(&w, "    %s\n", order)
+		}
+		if t.State == TaskBlocked && t.Workdir != "" {
+			fmt.Fprintf(&w, "    Worktree: %s\n", t.Workdir)
+		}
 		if t.Attempt > 1 {
 			folder := t.Folder
 			if folder == "" {
@@ -81,7 +91,7 @@ func Report(s *State) string {
 		}
 	}
 	if s.State == StatePaused {
-		fmt.Fprintf(&w, "resume with: maestro resume %s --task <n> (--lane F[:E] | --brief <file> | --skip)\n", s.Run)
+		fmt.Fprintf(&w, "resume with: %s\n", ResumeCommand(s, ResumeTask(s)))
 	}
 	councils := []string{}
 	for _, slug := range s.Councils {
@@ -133,6 +143,9 @@ func reportPath(s *State, t *TaskState) string {
 }
 
 func blockedText(t *TaskState) string {
+	if len(t.Conflicts) > 0 {
+		return "merge conflict in " + strings.Join(t.Conflicts, ", ") + "; Worktree: " + t.Workdir
+	}
 	if rec, err := dispatch.LoadRecord(t.Folder); err == nil && rec.BlockedReason() != "" {
 		return rec.BlockedReason()
 	}
@@ -153,6 +166,7 @@ func Status(s *State) string {
 		state = "stale (process gone)"
 	}
 	fmt.Fprintf(&w, "run %s  %s  started %s  %s  %d of %d done%s\n", s.Run, s.Title, s.StartedAt.Format("15:04"), state, done, len(s.Tasks), awake)
+	w.WriteString(ModeLine(s) + "\n")
 	if s.State == StateHeld {
 		for _, a := range s.Approval {
 			fmt.Fprintf(&w, "approval needed: %s\n", a)
@@ -195,6 +209,9 @@ func Status(s *State) string {
 			}
 		}
 		fmt.Fprintf(&w, "  %-2d %-32s %-9s %-26s %s\n", t.Number, cutTitle(t.Title, 32), taskState, lane, tail)
+		if order := OrderLine(t); order != "" {
+			fmt.Fprintf(&w, "    %s\n", order)
+		}
 		if rec, err := dispatch.LoadRecord(filepath.Join(s.Folder, t.ID)); err == nil {
 			w.WriteString(dispatch.RelayEvents(rec))
 		}

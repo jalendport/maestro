@@ -194,12 +194,13 @@ func stateFileExpired(path string, cutoff time.Time) (bool, bool, error) {
 	}
 	var record struct {
 		State   string    `json:"state"`
+		Mode    string    `json:"mode"`
 		EndedAt time.Time `json:"ended_at"`
 	}
 	if err := json.Unmarshal(b, &record); err != nil {
 		return true, false, err
 	}
-	if record.State != "ended" && record.State != "finished" && record.State != "cancelled" {
+	if record.State != "ended" && record.State != "finished" && record.State != "cancelled" && !(record.State == "paused" && record.Mode == "worktree" && !record.EndedAt.IsZero()) {
 		return true, false, nil
 	}
 	if record.EndedAt.IsZero() {

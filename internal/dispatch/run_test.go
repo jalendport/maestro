@@ -514,7 +514,7 @@ func TestRunOnceWritesLaneForEveryHarnessAndAccess(t *testing.T) {
 					Route: &router.Route{Harness: name}, WallLimit: "1m", IdleLimit: "1m"}
 				for attempt := 1; attempt <= 2; attempt++ {
 					want := &hook.Lane{Task: task.Task, Harness: name, Access: access, Root: root, Dirs: task.Dirs,
-						RunFolder: folder, Allow: []string{}, Checks: []string{}, Commit: task.Commit}
+						RunFolder: folder, Allow: []string{}, Checks: []string{}}
 					if access == brief.AccessEdit {
 						want.Allow = project.Allow
 						want.Checks = []string{"git status --short", "git diff --name-only"}

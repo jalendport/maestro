@@ -227,6 +227,8 @@ The Brief gives the Solo project id. Each Solo tool call needs this id in `proje
 
 These are the commands the agent runs. A person can run them by hand too.
 
+`maestro run` uses a separate Worktree for each edit Task when Worktrees are on, the repository has a commit, the tree is clean, and the Plan has more than one edit Task. The mode line says `worktrees: on` or gives the reason for tree mode. Tasks with files that overlap run in Plan order. Maestro owns the commits; Lanes never commit. At the end, the Plan's `commit: true` keeps the Task commits on your branch, and `commit: false` leaves the changes uncommitted. A merge conflict gets one attempt in the Worktree, then blocks with its path. After a hand fix, use `maestro resume <run> --task <n> --merge`; if landing the Run branch fails, use `maestro resume <run> --finish` after you correct the reported condition.
+
 Jev's Judgment level sets the Task's Tier. The Brief's `level` is the Orchestrator's estimate. Jev sees it as context; it does not raise Jev's score or limit its pick. The rules table uses the estimate when Jev is absent or below the confidence floor. Set `floor:` and `ceiling:` in a Brief, or `maestro run --floor` and `--ceiling`, for hard Tier bounds. An edit never goes Light. The Reason line names both levels when Jev's score is below the estimate, for example `jev some, orchestrator estimated expert`.
 
 The Orchestrator writes the `level` it believes and does not raise it or name a Lane to reach a stronger Lane, because Maestro uses a Frontier Lane when the work calls for it.
@@ -313,7 +315,9 @@ backend      = "jev"           # or rules
 orchestrator = "claude-opus"   # the family your orchestrator runs on; Maestro never spends it automatically
 ```
 
-`.agents/maestro.toml` in a project changes things for that repository only; `forbid`, `checks`, `router`, `redact`, and `councils` tighten, and `allow`, `dirs`, and `claude_auto` widen:
+Worktrees are on by default. Set `[run] worktrees = false` in `~/.maestro/config.toml` for every project, or `worktrees = false` in `.agents/maestro.toml` for one project. A project cannot turn Worktrees on when the global key is off. Set `[commit] message` globally or `commit_message` in a project to change the commit message template. See [Worktrees](docs/configuration.md#worktrees) for placeholders and Lane identities.
+
+`.agents/maestro.toml` in a project changes things for that repository only; `forbid`, `checks`, `router`, `redact`, `councils`, and `worktrees` tighten, and `allow`, `dirs`, and `claude_auto` widen:
 
 ```toml
 checks   = ["go build ./...", "go vet ./...", "go test ./..."]   # run after every edit

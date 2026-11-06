@@ -24,7 +24,6 @@ type Lane struct {
 	RunFolder string   `json:"run_folder"`
 	Allow     []string `json:"allow"`
 	Checks    []string `json:"checks"`
-	Commit    bool     `json:"commit"`
 }
 
 type Verdict struct {
@@ -435,6 +434,16 @@ func insideGitDir(path, root string) bool {
 	if inside(path, filepath.Join(root, ".git")) {
 		return true
 	}
+	if data, err := os.ReadFile(filepath.Join(root, ".git")); err == nil {
+		if gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir: "); ok {
+			if !filepath.IsAbs(gitdir) {
+				gitdir = filepath.Join(root, gitdir)
+			}
+			if inside(path, gitdir) {
+				return true
+			}
+		}
+	}
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(root, path)
 	}
@@ -551,12 +560,14 @@ func readCommand(words []string) (string, int) {
 }
 
 func unsafeReadFlag(command string) string {
-	words := commandWords(command)
+	command = strings.TrimSpace(command)
+	matched := stripEnvironmentPrefix(command)
+	words := commandWords(matched)
 	name, start := readCommand(words)
 	if _, ok := readOnlyCommands[name]; ok {
-		expansion := strings.TrimSpace(command)
-		if name == "[" && len(expansion) > 1 && expansion[0] == '[' && (expansion[1] == ' ' || expansion[1] == '\t') {
-			expansion = expansion[1:]
+		expansion := command
+		if name == "[" && len(matched) > 1 && matched[0] == '[' && (matched[1] == ' ' || matched[1] == '\t') {
+			expansion = command[:len(command)-len(matched)] + matched[1:]
 		}
 		if form := shellExpansion(expansion); form != "" {
 			return "shell expansion " + form
@@ -700,6 +711,7 @@ func unsafeBranchForm(words []string) string {
 }
 
 func commandAllowed(command string, lane *Lane) bool {
+	command = stripEnvironmentPrefix(command)
 	words := commandWords(command)
 	if len(words) == 0 {
 		return false
@@ -707,17 +719,6 @@ func commandAllowed(command string, lane *Lane) bool {
 	name, _ := readCommand(words)
 	if _, ok := readOnlyCommands[name]; ok {
 		return true
-	}
-	switch words[0] {
-	case "git":
-		if len(words) > 1 {
-			switch words[1] {
-			case "add", "commit":
-				if lane.Access == "edit" && lane.Commit {
-					return true
-				}
-			}
-		}
 	}
 	if lane.Access != "edit" {
 		return false
@@ -829,8 +830,46 @@ func unsafeShell(command string) string {
 	return ""
 }
 
+var environmentAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// stripEnvironmentPrefix returns the command text after leading environment
+// words. Keep the remaining text as written for check and allow rule matching.
+func stripEnvironmentPrefix(command string) string {
+	words, ends := commandWordsWithEnds(command)
+	i := 0
+	for i < len(words) {
+		if environmentAssignment.MatchString(words[i]) {
+			i++
+			continue
+		}
+		if words[i] != "env" {
+			break
+		}
+		i++
+		for i < len(words) {
+			if words[i] == "-i" {
+				i++
+			} else if words[i] == "-u" && i+1 < len(words) {
+				i += 2
+			} else {
+				break
+			}
+		}
+	}
+	if i == 0 {
+		return command
+	}
+	return strings.TrimSpace(command[ends[i-1]:])
+}
+
 func commandWords(command string) []string {
+	words, _ := commandWordsWithEnds(command)
+	return words
+}
+
+func commandWordsWithEnds(command string) ([]string, []int) {
 	var words []string
+	var ends []int
 	var word strings.Builder
 	var quote byte
 	for i := 0; i < len(command); i++ {
@@ -849,6 +888,7 @@ func commandWords(command string) []string {
 		} else if ch == ' ' || ch == '\t' {
 			if word.Len() > 0 {
 				words = append(words, word.String())
+				ends = append(ends, i)
 				word.Reset()
 			}
 		} else {
@@ -857,8 +897,9 @@ func commandWords(command string) []string {
 	}
 	if word.Len() > 0 {
 		words = append(words, word.String())
+		ends = append(ends, len(command))
 	}
-	return words
+	return words, ends
 }
 
 func commandSegments(command string) []string {

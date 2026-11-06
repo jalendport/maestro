@@ -50,6 +50,12 @@ func PauseReason(s *State) string {
 
 // ResumeCommand is shared by wait and the Solo wake-up.
 func ResumeCommand(s *State, task *TaskState) string {
+	if s.FinishPending {
+		return "maestro resume " + s.Run + " --finish"
+	}
+	if task != nil && len(task.Conflicts) > 0 {
+		return fmt.Sprintf("maestro resume %s --task %d --merge", s.Run, task.Number)
+	}
 	ref := "<n>"
 	if task != nil {
 		ref = fmt.Sprint(task.Number)

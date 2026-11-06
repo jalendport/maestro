@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/worktree"
 )
 
 // Level is a Judgment level: how much a Lane must decide on its own.
@@ -194,6 +195,8 @@ type Roster struct {
 	Failure        config.Failure
 	Concurrency    config.Concurrency
 	Run            config.Run
+	Commit         config.Commit
+	Project        *config.Project
 	Warnings       []string
 }
 
@@ -231,6 +234,7 @@ func Merge(d, u *config.File) *Roster {
 		Failure:        d.Failure,
 		Concurrency:    d.Concurrency,
 		Run:            d.Run,
+		Commit:         config.Commit{Message: d.Commit.Message, Identities: map[string]string{}},
 	}
 	userAccounts := map[string]config.Account{}
 	replaced := map[string]bool{}
@@ -321,6 +325,18 @@ func Merge(d, u *config.File) *Roster {
 	mergeConcurrency(&r.Concurrency, u.Concurrency)
 	if u.Run.CouncilTasks != nil {
 		r.Run.CouncilTasks = u.Run.CouncilTasks
+	}
+	if u.Run.Worktrees != nil {
+		r.Run.Worktrees = u.Run.Worktrees
+	}
+	if u.Commit.Message != nil {
+		r.Commit.Message = u.Commit.Message
+	}
+	for k, v := range d.Commit.Identities {
+		r.Commit.Identities[k] = v
+	}
+	for k, v := range u.Commit.Identities {
+		r.Commit.Identities[k] = v
 	}
 	r.bindAccounts()
 	r.checkDrift(d, u)
@@ -612,6 +628,32 @@ func (r *Roster) WallLimit(t Tier) config.Duration {
 // KeepAwake reports the caffeinate switch.
 func (r *Roster) KeepAwake() bool {
 	return r.Failure.KeepAwake == nil || *r.Failure.KeepAwake
+}
+
+// Worktrees reports whether the global and project switches permit Worktrees.
+func (r *Roster) Worktrees() bool {
+	return (r.Run.Worktrees == nil || *r.Run.Worktrees) &&
+		(r.Project == nil || r.Project.Worktrees == nil || *r.Project.Worktrees)
+}
+
+// CommitTemplate returns the project template, the global template, or the default.
+func (r *Roster) CommitTemplate() string {
+	if r.Project != nil && r.Project.CommitMessage != nil {
+		return *r.Project.CommitMessage
+	}
+	if r.Commit.Message != nil {
+		return *r.Commit.Message
+	}
+	return "{title}\n\nCo-Authored-By: {lane}"
+}
+
+// Identity returns the override for a Family prefix, or its built-in identity.
+func (r *Roster) Identity(family, model string) string {
+	prefix, _, _ := strings.Cut(family, "-")
+	if identity, ok := r.Commit.Identities[prefix]; ok {
+		return identity
+	}
+	return worktree.Identity(family, model)
 }
 
 // Threshold reads one router threshold for the active backend.

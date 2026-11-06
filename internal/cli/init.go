@@ -18,6 +18,8 @@ const projectTemplate = `# Maestro project file. Its presence puts this project 
 # redact = []   # Lists strings that Maestro replaces before it sends text to Jev.
 # councils = ""   # When it is always, every Run in this project ends with a Council, except a Run in which every Task is read-only and no file changed; that Run ends without a Council.
 # claude_auto = false   # Lets Maestro use the Claude Code auto permission mode for Dispatches in this project.
+# worktrees = false   # Turns Worktrees off for this project.
+# commit_message = "{title}\n\nCo-Authored-By: {lane}"   # Replaces the commit message template for this project.
 # dirs = []   # Lists extra writable directories for every edit Dispatch in this project, for example a toolchain cache; a leading ~ is the home directory, and a Brief's dirs: adds to the list. The key exists because a Harness sandbox can deny a build cache outside the project, which fails every check until the cache folder is writable.
 `
 
