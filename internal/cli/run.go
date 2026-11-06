@@ -414,9 +414,10 @@ func (a *app) cancelCmd() *cobra.Command {
 
 // projectStatus is the JSON shape for all status queries.
 type projectStatus struct {
-	Runs       []*run.State       `json:"runs"`
-	Dispatches []*dispatch.Record `json:"dispatches"`
-	Councils   []*council.Council `json:"councils"`
+	Runs          []*run.State       `json:"runs"`
+	Dispatches    []*dispatch.Record `json:"dispatches"`
+	Councils      []*council.Council `json:"councils"`
+	KeptWorktrees []keptWorktree     `json:"kept_worktrees"`
 }
 
 func (a *app) statusCmd() *cobra.Command {
@@ -434,6 +435,7 @@ func (a *app) statusCmd() *cobra.Command {
 				return fmt.Errorf("the home directory cannot be a project root; change to a project folder")
 			}
 			status := projectStatus{Runs: []*run.State{}, Dispatches: []*dispatch.Record{}, Councils: []*council.Council{}}
+			status.KeptWorktrees = sweepWorktrees(root)
 			if len(args) == 1 {
 				id := args[0]
 				if _, s, err := findRun(root, id); err == nil {
@@ -491,8 +493,11 @@ func (a *app) statusCmd() *cobra.Command {
 				fmt.Fprintln(os.Stdout, string(b))
 				return nil
 			}
-			if len(status.Runs)+len(status.Dispatches)+len(status.Councils) == 0 {
+			if len(status.Runs)+len(status.Dispatches)+len(status.Councils)+len(status.KeptWorktrees) == 0 {
 				return run.ErrNoRun
+			}
+			for _, kept := range status.KeptWorktrees {
+				fmt.Fprintf(os.Stdout, "kept Worktree %s  %s\nnext: %s\n", kept.ID, kept.Reason, kept.NextCommand)
 			}
 			for _, s := range status.Runs {
 				fmt.Fprint(os.Stdout, run.Status(s))

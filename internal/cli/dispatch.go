@@ -163,6 +163,7 @@ func (a *app) waitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer sweepWorktrees(env.Root)
 			if folder, _, err := findRun(env.Root, args[0]); err == nil {
 				return a.waitRun(folder)
 			}

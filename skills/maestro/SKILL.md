@@ -62,6 +62,8 @@ Parallel Tasks in Worktrees merge at the end of each Task. Write the Plan so tha
 
 ## Worktree mode and landing
 
+Worktrees landed by hand clean up on the next `maestro run`, `maestro dispatch`, or `maestro status`, or when `maestro wait` returns.
+
 Worktree mode is the default; the mode line names the mode, and the reason for tree mode. `maestro approve` chooses the mode again from the current Plan. The mode stays the same on resume.
 
 Each edit Task works in its own Worktree, which starts from the HEAD commit. The main checkout changes only at landing. Each live Run has its own Run branch and base, so Worktree-mode Runs can share a project: `another Run is live: <id>` is information and does not hold the new Run. A read Task with `blocked_by` on edit Tasks starts at the Run branch head and sees their merged work.

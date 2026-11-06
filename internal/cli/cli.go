@@ -50,8 +50,15 @@ func (a *app) build() *cobra.Command {
 		Short:         "routes, dispatches, checks, and reviews agent work",
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			ui.Quiet = a.quiet
+			if cmd.Name() == "run" || cmd.Name() == "dispatch" {
+				if cwd, err := os.Getwd(); err == nil {
+					if project := config.FindProjectRoot(cwd); project != "" {
+						sweepWorktrees(project)
+					}
+				}
+			}
 			return nil
 		},
 	}
