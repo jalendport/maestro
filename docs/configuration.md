@@ -1,6 +1,6 @@
 # Configuration
 
-Maestro runs with no configuration file. It reads three layers, in this order: the defaults compiled into the binary, then `~/.maestro/config.toml` (your deltas), then `.agents/maestro.toml` in the project root. `MAESTRO_HOME` moves the `~/.maestro` folder. A delta is a change on top of the defaults: a family or a chain that you name in your file replaces that one entry, and every entry you do not name keeps its default. Maestro never rewrites your files.
+Maestro runs with no configuration file. It reads three layers, in this order: the defaults compiled into the binary, then `~/.maestro/config.toml` (your deltas), then `.agents/maestro.toml` in the project root. `MAESTRO_HOME` moves the `~/.maestro` folder. A delta is a change on top of the defaults: a family or a chain that you name in your file replaces that one entry, and every entry you do not name keeps its default. A release updates the defaults. Maestro never rewrites your files.
 
 A key that Maestro does not know gives a warning. It does not stop a Route.
 
@@ -26,7 +26,7 @@ Keys of `accounts.<id>`:
 | `billing` | string | `"subscription"` | Sets the billing kind: `subscription` reads a usage window, `metered` counts money against a cap. An automatic Route gives a `metered` Account read work only, and only when no subscription Lane serves the level; a requested Lane on a `metered` Account takes edit work with a warning. |
 | `plan_price` | float | none | Gives the plan price in USD, which Maestro multiplies by Headroom to break a tie between equally fit subscription Lanes. |
 | `block_at` | float | `0.90` | Sets the used share of a window at which the Account's Lanes leave the Route list. |
-| `reserve` | float | none | Keeps this share of the weekly window for the Orchestrator, so automatic Dispatches cannot use it. |
+| `reserve` | float | none | Keeps this share of the weekly window for the Orchestrator, so automatic Dispatches cannot use it. The reserve applies to any Account. |
 | `budget` | table | none | Sets the spend cap of a `metered` Account. |
 | `budget.usd` | float | none | Sets the cap in USD. |
 | `budget.period` | string | none | Sets the period of the cap, for example `30d`. |
@@ -130,11 +130,13 @@ Text defaults of `good_for` and `not_for`:
 | `agy-flash` | `"very large inputs up to 1M tokens, cited web research"` | `"edits"` |
 | `agy-pro` | `"very large inputs that need judgment, cited web research"` | `"edits"` |
 
+A Family id is written `<harness>-<short model>`, for example `codex-sol`; the default `grok` Family omits the model. A Lane is a Family plus one effort. A fan-out effort is an effort setting that starts sub-agents on its own, such as Codex `ultra` or Claude `ultracode`.
+
 `account`, `request_only`, and `enabled` have no default entry. A default Family has `request_only = false` and `enabled = true`. Setting `[router] orchestrator` to a Family id makes that Family `request_only`.
 
 ### [rules]
 
-The rules table is the deterministic Router. It has one table for each Tier: `[rules.<tier>]` with `light`, `daily`, `heavy`, or `frontier`. Each key in a Tier table is a category, and each value is an ordered chain of Family ids. The key `default` is the chain for a Task whose category has no chain of its own. When your file names a category, that chain replaces the default chain for that category only. Other categories keep their defaults.
+The rules table is the deterministic Router. It observes every Route and decides only when Jev is absent. It has one table for each Tier: `[rules.<tier>]` with `light`, `daily`, `heavy`, or `frontier`. Each key in a Tier table is a category, and each value is an ordered chain of Family ids. The key `default` is the chain for a Task whose category has no chain of its own. When your file names a category, that chain replaces the default chain for that category only. Other categories keep their defaults.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -283,7 +285,7 @@ Each Task gets at most one nudge, including across re-Routes. The nudge adds one
 
 ### [budget]
 
-These keys are the global Budget rules. An Account can override `block_at`.
+These keys are the global Budget rules. An Account can override `block_at`. A window is one usage period that a vendor counts for an Account, such as Claude's five-hour and seven-day windows or Codex's weekly window.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -294,7 +296,7 @@ These keys are the global Budget rules. An Account can override `block_at`.
 
 ### [failure]
 
-These keys set when Maestro stops a Dispatch and when it stops a Run. A duration is a string such as `"10m"` or `"1h"`.
+These keys set when Maestro stops a Dispatch and when it stops a Run. A duration is a string such as `"10m"` or `"1h"`. A Failure class is one of Lane error, Transient error, Limit hit, Stall, or Bad result; every Ledger row and failure message carries exactly one.
 
 For a Task of a Run, Lane error, Transient error, Limit hit, and Stall re-Route one Tier up. A Bad result re-Routes only when its Cause is `capability`: the Lane's work is wrong or incomplete with no blocker. Cause `brief` means the Brief excludes a required file, forbids required work, or contradicts itself. Cause `environment` means a tool or service was denied, down, or missing. Cause `none` means nothing went wrong; on a Bad result, it needs the Orchestrator's judgment. These three Causes block the Task for the Orchestrator, with the Cause and the Blocked items. A blocked Report stays blocked. The Dispatch cap, Tier ceiling, and same-error-twice rule still apply.
 
@@ -310,7 +312,7 @@ The Ledger stores `cause` and `cause_source` (`jev` or `rule`) under `verificati
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `idle_limit` | duration | `"10m"` | Sets the longest time that a Dispatch or a check may run with no new output before Maestro stops it. A Lane tool call in progress pauses the Lane's Idle limit; the Wall limit still applies. For checks, output on stdout or stderr resets the Idle limit. |
+| `idle_limit` | duration | `"10m"` | Sets the longest time that a Dispatch or a check may run with no new output before Maestro stops it. It is one value for every Tier. A Lane tool call in progress pauses the Lane's Idle limit; the Wall limit still applies. For checks, output on stdout or stderr resets the Idle limit. |
 | `wall_limit` | table of durations | see below | Sets the longest total time of a Dispatch for each Tier. The checks share a separate budget of the same length, counted from the start of the first check. |
 | `max_dispatches` | integer | `6` | Sets how many Dispatches a Task may use before Maestro fails it instead of re-routing it. |
 | `keep_awake` | boolean | `true` | Keeps the Mac awake during every Lane, Run, Council, and verb that blocks on live work, and during the Orchestrator's turn in Claude Code, Codex, and Antigravity. See below. |
@@ -352,6 +354,8 @@ When a check fails with a normal exit, Maestro runs that command once more if th
 Check output keeps its last 4 KB. When a check fails, it also keeps up to 2 KB of lines that contain `--- FAIL`, `FAIL\t` (with a tab), `panic:`, `Error:`, `error:`, `✗`, or `not ok`, before that tail. These lines keep the test name and failure message when the output is long.
 
 ### [run]
+
+A Brief file has a front matter of short fields and fixed headings for the Goal and the Done. A Plan file holds every Task of a Run, each as a section with the same fields as a Brief file plus `blocked_by`.
 
 In a Plan file, text after the front matter or optional `# title` and before the first `## <task title>` is the introduction. Maestro adds it to the start of every Task's Context under `Shared context of the Plan:`, before the Task's own `### Context` text. An empty introduction adds nothing. `maestro help plan` prints the format.
 
@@ -531,7 +535,7 @@ Maestro rejects a Ledger row with no `kind`. It drops Budget Accounts that are a
 | Path | Written by |
 |---|---|
 | `~/.maestro/env` | `maestro key set` writes the Jev key. |
-| `~/.maestro/ledger.jsonl` | Every finished Dispatch, Council, and Run appends one row. |
+| `~/.maestro/ledger.jsonl` | Every finished Dispatch, Council, and Run appends one row. The Ledger is append only; rows are never updated. |
 | `~/.maestro/budget.json` | Dispatches (Harvest) and `maestro budget` (Probe) store Readings. |
 | `~/.maestro/cache/discovery.json` | `maestro roster refresh` rewrites it, and any verb rewrites it when it is stale. |
 | `~/.maestro/control/<project-key>/` | Dispatches store Lane policy and Relay files. |
@@ -541,11 +545,19 @@ Maestro rejects a Ledger row with no `kind`. It drops Budget Accounts that are a
 | `.agents/maestro/runs/` | `maestro dispatch` and `maestro run` write one Run folder for each Run. |
 | `.agents/maestro/councils/` | `maestro council` writes one folder for each Council. |
 
+The Run folder of a Dispatch is `.agents/maestro/runs/<run>/<task>/`. It holds the rendered Brief, the Report, the raw stream, and the Dispatch record. `run.json` in the Run folder is the Run state: the per-Run supervisor rewrites it while a Run is live, and `maestro status` reads it. `report.md` in the Run folder is the Run report: the short text that the Orchestrator gets when a Run ends or pauses, with a header, one line per Task, then the items that need the Orchestrator.
+
 Maestro writes a `.gitignore` into each Run and Council folder it creates, so nothing under them reaches git.
 
 ## Adapters
 
 `maestro adapter` prints the steps for each Harness and writes nothing. `maestro adapter install` does the steps. Maestro touches nothing else in the configuration of a Harness. To connect one Harness only, give its name: `maestro adapter install claude`. The names are `claude`, `codex`, `grok`, and `agy`. For the stale Adapter line in the Reminder, see [hook](#hook).
+
+An Adapter is one shared skill file, one hook file, and the Carrier of the Reminder. Maestro itself works without any Adapter. Maestro and its docs say Lane, not "tool", because Claude Code and MCP already use "tool" for functions such as Read, Bash, or `spawn_agent`.
+
+Access has two values, `read` and `edit`; there is no third value. Claude and Grok use "permission mode" for their own flag, and Maestro says Access for the Brief field. Maestro passes no bypass flag to a Claude, Codex, or Antigravity Lane.
+
+Enforcement is a measured fact for each Harness and Access value. It is `enforced` when a sandbox, a tool allowlist, or the Maestro hook holds the Access with no help from the model, and `best-effort` when only an instruction, a weak flag, or a model decision does. A `read` Task goes only to `enforced` Lanes. `claude_auto` makes Claude edit Lanes `best-effort`; Grok edit Lanes with writable `dirs` outside the project are also `best-effort`.
 
 ### Claude Code
 
@@ -559,7 +571,7 @@ The Codex sandbox holds the Access of a Codex Lane. A Codex Lane does not relay;
 
 ### Grok
 
-Grok takes read and edit work. Headless Grok runs with full tool access. A Grok Lane runs in always-approve mode and never prompts. The Maestro hook is the policy: it runs before every tool call and denies what the Lane may not do, and the workspace sandbox backs it at the kernel level:
+Grok takes read and edit work. Headless Grok runs with full tool access. A Grok Lane runs in always-approve mode and never prompts, because Grok has no mode that is prompt-free and deny-by-default; the Maestro hook and the workspace sandbox hold the Access. The Maestro hook is the policy: it runs before every tool call and denies what the Lane may not do, and the workspace sandbox backs it at the kernel level:
 
 - A read Lane runs the built-in read-only commands and writes only its Report in the Run folder
 - An edit Lane also runs the checks and the project `allow` list, and writes inside the project, the Run folder, and the extra `dirs`; the workspace sandbox also permits writes to temp directories and `~/.grok`
@@ -627,7 +639,17 @@ The Brief gives the Solo project id. Each Solo tool call needs this id in `proje
 
 `0` ok, `1` failed, `2` needs the Orchestrator (an open Relay, a held breakdown, a paused Run, a blocked or failed Task, or a single-opinion Council). A Run that holds for approval exits with `2`; the hold rules are under [run](#run). `--json` prints one object per verb.
 
+### Council
+
+A Council puts several Lanes on the same question in parallel. The Router picks one Seat per vendor at the Council's Tier. The Orchestrator does the synthesis; Maestro returns a Merge.
+
+Round 1 is independent: every Seat answers the question alone. Each later Round is a Challenge round, where each Seat sees the other answers with the names removed and may confirm, refine, or withdraw. A Seat's report ends with a fixed last line, its Position: `confirmed`, `changed`, or `withdrawn`. A Council stops early when every Seat says `confirmed`.
+
+The Merge holds a status table, the findings per Seat, and the report paths. Jev marks weak findings and never deletes them.
+
 ### Relay
+
+A Relay passes a Lane's permission prompt to the Orchestrator, which types the answer back. The Orchestrator may ask the user.
 
 Answer a Relay with `maestro answer <task> allow|deny --relay <id>`. Use the id from the `relay` event printed by `maestro wait` or `maestro status`.
 

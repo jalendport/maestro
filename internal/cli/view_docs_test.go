@@ -21,11 +21,9 @@ func TestSoloAndEnforcementDocumentation(t *testing.T) {
 	if !strings.Contains(skill, "Four rules") || strings.Count(rules, "\n- ") != 4 || strings.Contains(rules, "`tab:`") {
 		t.Fatalf("Brief rules are incomplete: %s", rules)
 	}
-	for _, path := range []string{"docs/configuration.md", "CONTEXT.md"} {
-		text := read(path)
-		if !strings.Contains(text, "cannot detect three limits") || !strings.Contains(text, "Grok Lane through the `transcriptPath` key") {
-			t.Fatalf("%s does not state the Grok transcript limit", path)
-		}
+	configuration := read("docs/configuration.md")
+	if !strings.Contains(configuration, "cannot detect three limits") || !strings.Contains(configuration, "Grok Lane through the `transcriptPath` key") {
+		t.Fatal("docs/configuration.md does not state the Grok transcript limit")
 	}
 	changelog := strings.SplitN(read("CHANGELOG.md"), "## 1.2.0", 2)[0]
 	if !strings.Contains(changelog, "read-only Solo MCP tools for Claude Lanes with a Solo link") || !strings.Contains(changelog, "other Solo tools are denied without a Relay") {

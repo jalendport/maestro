@@ -1,83 +1,235 @@
 # Maestro — ubiquitous language
 
-The glossary for Maestro. Terms only; no implementation detail. Code, docs, and briefs use these words and no others for these things.
+The glossary for Maestro: the words for its parts and what they mean, and nothing else. Code, docs, Briefs, and the skill use these words and no others for these things; rules, limits, and settings live in the configuration reference.
 
-## Terms
+## Actors
 
-- **Maestro** — a local tool that owns the work after the thinking is done. It turns a plan into Tasks, routes, dispatches, checks, and runs Councils.
-- **Orchestrator** — the model session the user talks to, in any Harness. It plans and hands work to Maestro. It is a role, not a program.
-- **Harness** — a CLI agent program that can run a model on a task: Claude Code, Codex, Grok, Antigravity.
-- **Lane** — one runnable combination of harness + model + effort, for example `codex gpt-5.6-sol high`. Maestro routes Tasks to Lanes and starts each Lane as a headless child process, inside Solo and outside it.
-- **Roster** — the list of all Lanes with their facts: cost, speed, strengths, limits, billing kind.
-- **Billing kind** — whether a Lane draws on a vendor subscription or pays per token through an API key. Drives how often the Lane is used.
-- **Budget** — what is left for a Lane's billing source: percent of a subscription window and its reset time, or money for a token-billed Lane.
-- **Task** — one unit of work with a brief and a definition of done.
-- **Route** — the decision "this Task goes to this Lane".
-- **Router** — the part of Maestro that makes Routes: Jev, with a rules fallback.
-- **Dispatch** — starting a Lane on a Task and collecting its result.
-- **Council** — several Lanes answering the same question in parallel. The Orchestrator synthesizes; Maestro returns a Merge.
-- **Plan check** — one read Dispatch before a Run with two or more edit Tasks that checks the Plan against the project tree for defects in paths, symbols, scope, and order.
-- **Landing check** — the project's checks on the merged Run branch before a Worktree-mode Run or standalone Dispatch lands, after any landing rebase. A failure keeps the Run branch for a fix and a landing retry.
-- **Adapter** — the small per-Harness piece that connects an Orchestrator to Maestro: one shared skill file, one hook file, and the Carrier of the Reminder. Maestro itself works without any Adapter. `maestro adapter install` writes it.
-- **Run** — one invocation of Maestro on a plan: its Tasks, their Routes and Dispatches, the checks, and the report back to the Orchestrator.
-- **Worktree** — a separate git checkout for one Task, outside the project tree. An edit Task in a Run or a standalone Dispatch uses a Task branch; a read Task in a Run uses a detached checkout at the Run branch head.
-- **Run branch** — the branch `maestro/<run>/run` that holds the commits of a Run, made from the user's HEAD when the Run starts. A standalone edit Dispatch uses `d-<run>-<task>` in place of `<run>`.
-- **Task branch** — the branch `maestro/<run>/<task>` that holds one Task's commits, made from the Run branch when the Task starts. A standalone edit Dispatch uses `d-<run>-<task>` in place of `<run>` in its branch names.
-- **Worktree mode** — a Run or standalone edit Dispatch mode in which edit Tasks use separate Worktrees and Maestro merges their commits into the Run branch. The main checkout is never changed except at landing.
-- **Tree mode** — a Run or standalone edit Dispatch mode that uses the project tree. In a Run, edit Tasks run one at a time.
-- **Container-bound check** — a check whose command runs in a container bound to the project folder. A Run or standalone Dispatch with such a check uses tree mode.
-- **Brief** — the text a Lane receives for one Task: the goal, the definition of done, the files, the checks, and the Access.
-- **Scope guard** — the check that limits an edit Task's changed paths to its `touch` patterns and project test files. Test files can be added or edited outside `touch`; Maestro records them for review. A deleted test file must match `touch`. An empty `touch` sets no path limit.
-- **Tier** — a rung on the strength ladder that Lane families sit on: Light, Daily, Heavy, Frontier. "One Tier up" means the next rung.
-- **Judgment level** — how much a Lane must decide on its own to finish a Task: none, some, significant, or expert. The level Jev scores sets the Tier. The Brief's `level` is the Orchestrator's estimate: context for Jev and the level for the rules fallback. Only `floor` and `ceiling` set hard Tier bounds; an edit never goes Light.
-- **Account** — one login that Lanes bill against, with its billing kind and plan price. Several Lanes can share one Account.
-- **Headroom** — the part of an Account's usage window that is still free.
-- **Allocation weight** — what breaks a near-tie between equally fit subscription Lanes: the Account's plan price times its Headroom.
-- **Fan-out effort** — an effort setting that starts sub-agents on its own, such as Codex `ultra` or Claude `ultracode`.
-- **Rules table** — the deterministic Router: per Tier and category, an ordered chain of Lane families. It observes every Route and decides only when Jev is absent.
-- **Reason line** — the one line Maestro prints for each Route: the Lane family, its Tier, the Judgment level, and the tie-break used.
-- **Window** — one usage period a vendor counts for an Account, such as Claude's five-hour and seven-day windows or Codex's weekly window.
-- **Reading** — one stored Budget value for a window, with the time it was read and where it came from.
-- **Block point** — the used share of a window at which a Lane leaves the Route list.
-- **Reserve** — the part of an Account's weekly window that automatic Dispatches may not use. It applies to any Account and keeps room for the Orchestrator.
-- **Probe** — a cheap call Maestro makes only to read a Budget.
-- **Canary** — a small read Dispatch that the user starts to check the launch and Report of an installed Harness, and the Maestro hook when it holds the Lane's Access.
-- **Harvest** — reading a Budget from the output of a Dispatch that ran anyway.
-- **Family** — one Harness × model pair, the unit the Router chooses between. A Lane is a Family plus one effort. Written `<harness>-<short model>`, for example `codex-sol`.
-- **Catalog** — the list of models a Harness can run today, as its own list command reports it.
-- **Embedded defaults** — Roster data compiled into the `maestro` binary: families, levels, text, chains, prices. A release updates them; the user file holds only deltas.
-- **Discovery cache** — the file Maestro generates from the catalogs and rewrites freely. Never edited by hand.
-- **Level map** — a Family's map from Judgment level to effort. The Tier is derived from the levels a Family serves.
-- **Access** — the part of the Brief that says whether a Lane may change files. Two values: `read` and `edit`. There is no third value. Maestro passes no bypass flag to a Claude, Codex, or Antigravity Lane; a Grok Lane runs in Grok's always-approve mode because Grok has no mode that is prompt-free and deny-by-default, and there the Maestro hook and the workspace sandbox hold the Access.
-- **Enforcement** — a measured fact per Harness and Access value: `enforced` when a sandbox, a tool allowlist, or the Maestro hook holds the Access with no help from the model (the sandbox is the boundary that holds a shell; the hook holds paths, tool names, and a read-only command list judged as written, and denies a read-only command with a shell expansion), `best-effort` when only an instruction, a weak flag, or a model decision does. `claude_auto` makes Claude edit Lanes `best-effort`; Grok edit Lanes with writable `dirs` outside the project are also `best-effort`. A `read` Task goes only to `enforced` Lanes. Maestro cannot detect three limits: Grok warns and continues without the kernel sandbox when the OS refuses a built-in profile; Maestro finds a Grok Lane through the `transcriptPath` key in the hook payload, so a Grok release that drops the key leaves the Lane under the Orchestrator rule; and a check that runs Lane-written code under the Grok workspace sandbox can write `~/.grok`, Grok's own home.
-- **Relay** — Maestro passing a Lane's permission prompt to the Orchestrator and typing the answer back. The Orchestrator may ask the user. An unanswered Relay is denied after 10 minutes.
-- **Failure class** — the name Maestro gives to one kind of Dispatch failure. Five values: Lane error, Transient error, Limit hit, Stall, Bad result. Every ledger row and failure message carries exactly one.
-- **Cause** — why a Task went wrong: `brief` (the Brief excludes required work or contradicts itself), `environment` (a tool or service was denied, down, or missing), `capability` (the Lane's work is wrong or incomplete with no blocker), or `none` (nothing went wrong). A Bad result gets a Cause from Jev or a rule. In a Run, a Bad result with `brief`, `environment`, or `none` needs the Orchestrator; only `capability` can use a stronger Lane.
-- **Idle limit** — the longest time a Dispatch or a check may run with no new output. One value for every Tier. An open Relay or a Lane tool call in progress pauses it for the Lane. A check ends with Failure class Stall when stdout and stderr stay silent for this time.
-- **Wall limit** — the longest total time a Dispatch may run. Grows with the Tier; a Brief may raise it for one Task. The checks share a separate budget of the same length, counted from the start of the first check. When it ends, the check has Failure class Stall.
-- **Seat** — one Lane's place in a Council. The Router picks one Seat per vendor at the Council's Tier.
-- **Round** — one pass where every Seat answers the same question. Round 1 is independent.
-- **Challenge round** — a Round after the first, where each Seat sees the other answers with the names removed and may confirm, refine, or withdraw.
-- **Position** — the fixed last line of a Seat's report: `confirmed`, `changed`, or `withdrawn`. A Council stops early when every Seat says `confirmed`.
-- **Merge** — what Maestro returns from a Council: a status table, the findings per Seat (Jev marks weak ones, never deletes them), and the report paths. The Orchestrator does the synthesis.
-- **Brief file** — the Markdown file the Orchestrator writes for one Task: a front matter of short fields and fixed headings for the Goal and the Done.
-- **Plan file** — the Markdown file with every Task of a Run, each a section with the same fields as a Brief file plus `blocked_by`.
-- **Pointer** — the one-line prompt a Lane receives in every launch form: read the Brief at this path, write the Report in the same folder.
-- **Report** — the file a Lane writes when it finishes (`result.md`): fixed headings by Access, ending with the Status line.
-- **Status line** — the fixed last line of a Report: `done`, `partial`, or `blocked`. Maestro writes `unshaped` when the Lane left no usable Report.
-- **Run folder** — the per-Dispatch folder `.agents/maestro/runs/<run>/<task>/` with the rendered Brief, the Report, the raw stream, and the Dispatch record.
-- **Ledger** — the one global file (`~/.maestro/ledger.jsonl`) where Maestro records every finished Dispatch, Council, and Run. Append only; rows are never updated.
-- **Run state** — the file (`run.json` in the Run folder) the per-Run supervisor rewrites while a Run is live. `maestro status` reads it.
-- **Run report** — the short text (`report.md` in the Run folder) the Orchestrator gets when a Run ends or pauses: a header, one line per Task, then the items that need the Orchestrator.
-- **Reminder** — the fixed text that tells the Orchestrator, on every prompt, that Maestro owns the work after the thinking is done, followed by the project's live items: open Relays, paused Runs, blocked and failed Tasks of live Runs, and running Lanes. The Grok Carrier delivers only the fixed text.
-- **Reminder event** — a Harness hook event that fires before the model sees a prompt: Claude Code and Codex `UserPromptSubmit`, Antigravity `PreInvocation`. The hook answers it with the Reminder when the project is in hook scope.
-- **Carrier** — the per-Harness path that delivers the Reminder: a hook entry for a Reminder event, or a rules file where a Harness's hooks cannot add context (Grok).
-- **Project file** — `.agents/maestro.toml` at the project root. Its presence puts the project in hook scope; `maestro init` writes it.
+**Maestro**:
+A local tool that owns the work after the thinking is done. It turns a plan into Tasks, routes, dispatches, checks, and runs Councils.
+_Avoid_: Orchestrator (Maestro is the magic box; the Orchestrator is the session that directs it)
 
-## Words to avoid
+**Orchestrator**:
+The model session the user talks to, in any Harness. It plans and hands work to Maestro. It is a role, not a program.
+_Avoid_: Planner
 
-- **Tool** for a Lane. Claude Code and MCP already use "tool" for functions such as Read, Bash, or `spawn_agent`.
-- **Planner** for the Orchestrator.
-- **Orchestrator** for Maestro itself. Maestro is the magic box; the Orchestrator is the session that directs it.
-- **Provider** for a Lane or a Harness. Say Harness for the program and vendor for the company.
-- **Permission mode** for Access. Claude and Grok use "permission mode" for their own flag; Maestro says Access for the Brief field.
+**Harness**:
+A CLI agent program that can run a model on a task: Claude Code, Codex, Grok, Antigravity.
+_Avoid_: Provider (say Harness for the program and vendor for the company)
+
+**Adapter**:
+The small per-Harness piece that connects an Orchestrator to Maestro: a skill, a hook, and the Carrier of the Reminder. Maestro itself works without any Adapter.
+
+## Lanes and the Roster
+
+**Lane**:
+One runnable combination of harness + model + effort, for example `codex gpt-5.6-sol high`. Maestro routes Tasks to Lanes and starts each Lane as a headless child process.
+_Avoid_: Tool (the word already names a function a model calls)
+
+**Family**:
+One Harness × model pair, the unit the Router chooses between. A Lane is a Family plus one effort.
+
+**Roster**:
+The list of all Lanes with their facts: cost, speed, strengths, limits, billing kind.
+
+**Catalog**:
+The list of models a Harness can run today, as its own list command reports it.
+
+**Embedded defaults**:
+Roster data compiled into the Maestro binary: families, levels, text, chains, prices.
+
+**Discovery cache**:
+The cache Maestro generates from the catalogs and rewrites freely.
+
+**Level map**:
+A Family's map from Judgment level to effort. The Tier is derived from the levels a Family serves.
+
+**Fan-out effort**:
+An effort setting that starts sub-agents on its own.
+
+## Work
+
+**Task**:
+One unit of work with a brief and a definition of done.
+
+**Run**:
+One invocation of Maestro on a plan: its Tasks, their Routes and Dispatches, the checks, and the report back to the Orchestrator.
+
+**Dispatch**:
+Starting a Lane on a Task and collecting its result.
+
+**Brief**:
+The text a Lane receives for one Task: the goal, the definition of done, the files, the checks, and the Access.
+
+**Brief file**:
+The Markdown file the Orchestrator writes for one Task.
+
+**Plan file**:
+The Markdown file with every Task of a Run, each Task a section shaped like a Brief file.
+
+**Project file**:
+The per-project configuration file at the root of a project.
+
+**Pointer**:
+The one-line prompt a Lane receives in every launch form: read the Brief at this path, write the Report in the same folder.
+
+**Report**:
+The file a Lane writes when it finishes: fixed headings by Access, ending with the Status line.
+
+**Status line**:
+The fixed last line of a Report: `done`, `partial`, or `blocked`. Maestro writes `unshaped` when the Lane left no usable Report.
+
+**Run folder**:
+The per-Dispatch folder with the rendered Brief, the Report, the raw stream, and the Dispatch record.
+
+**Run state**:
+The record the per-Run supervisor rewrites while a Run is live.
+
+**Run report**:
+The short text the Orchestrator gets when a Run ends or pauses: a header, one line per Task, then the items that need the Orchestrator.
+
+**Ledger**:
+The one global record of every finished Dispatch, Council, and Run.
+
+## Routing
+
+**Route**:
+The decision "this Task goes to this Lane".
+
+**Router**:
+The part of Maestro that makes Routes: Jev, with a rules fallback.
+
+**Rules table**:
+The deterministic Router: per Tier and category, an ordered chain of Lane families.
+
+**Reason line**:
+The one line Maestro prints for each Route: the Lane family, its Tier, the Judgment level, and the tie-break used.
+
+**Tier**:
+A rung on the strength ladder that Lane families sit on: Light, Daily, Heavy, Frontier. "One Tier up" means the next rung.
+
+**Judgment level**:
+How much a Lane must decide on its own to finish a Task: none, some, significant, or expert. It sets the Tier.
+
+**Allocation weight**:
+What breaks a near-tie between equally fit subscription Lanes: the Account's plan price weighted by its Headroom.
+
+## Budget
+
+**Account**:
+One login that Lanes bill against, with its billing kind and plan price. Several Lanes can share one Account.
+
+**Billing kind**:
+Whether a Lane draws on a vendor subscription or pays per token through an API key. Drives how often the Lane is used.
+
+**Budget**:
+What is left for a Lane's billing source: percent of a subscription window and its reset time, or money for a token-billed Lane.
+
+**Window**:
+One usage period a vendor counts for an Account.
+
+**Reading**:
+One stored Budget value for a window, with the time it was read and where it came from.
+
+**Headroom**:
+The part of an Account's usage window that is still free.
+
+**Block point**:
+The used share of a window at which a Lane leaves the Route list.
+
+**Reserve**:
+The part of an Account's usage that automatic Dispatches leave free for the Orchestrator.
+
+**Probe**:
+A cheap call Maestro makes only to read a Budget.
+
+**Harvest**:
+Reading a Budget from the output of a Dispatch that ran anyway.
+
+## Checks and Access
+
+**Access**:
+The part of the Brief that says whether a Lane may change files: `read` or `edit`.
+_Avoid_: Permission mode (Access is the Brief field)
+
+**Enforcement**:
+How firmly a Harness holds an Access value: `enforced` when something other than the model holds it, `best-effort` when only an instruction or a model decision does.
+
+**Relay**:
+Maestro passing a Lane's permission prompt to the Orchestrator and typing the answer back.
+
+**Scope guard**:
+The check that limits an edit Task's changed paths to the ones its Brief allows.
+
+**Plan check**:
+A read Dispatch before a Run that checks the Plan against the project tree for defects in paths, symbols, scope, and order.
+
+**Landing check**:
+The project's checks on the merged Run branch just before a Run or standalone Dispatch lands.
+
+**Container-bound check**:
+A check whose command runs in a container bound to the project folder.
+
+**Canary**:
+A small read Dispatch that checks the launch and Report of an installed Harness, and the Maestro hook where it holds the Lane's Access.
+
+## Worktrees
+
+**Worktree**:
+A separate git checkout for one Task, outside the project tree.
+
+**Run branch**:
+The git branch that holds the commits of a Run, made from the user's HEAD when the Run starts.
+
+**Task branch**:
+The git branch that holds one Task's commits, made from the Run branch when the Task starts.
+
+**Worktree mode**:
+A Run or standalone edit Dispatch mode in which edit Tasks use separate Worktrees and Maestro merges their commits into the Run branch.
+
+**Tree mode**:
+A Run or standalone edit Dispatch mode that uses the project tree.
+
+## Failure and limits
+
+**Failure class**:
+The name Maestro gives to one kind of Dispatch failure: Lane error, Transient error, Limit hit, Stall, or Bad result.
+
+**Cause**:
+Why a Task went wrong: `brief` (the Brief excludes required work or contradicts itself), `environment` (a tool or service was denied, down, or missing), `capability` (the Lane's work is wrong or incomplete with no blocker), or `none` (nothing went wrong).
+
+**Idle limit**:
+The longest time a Dispatch or a check may run with no new output.
+
+**Wall limit**:
+The longest total time a Dispatch may run.
+
+## Councils
+
+**Seat**:
+One Lane's place in a Council.
+
+**Round**:
+One pass where every Seat answers the same question.
+
+**Challenge round**:
+A Round after the first, where each Seat sees the other answers and may confirm, refine, or withdraw.
+
+**Position**:
+The fixed last line of a Seat's report: `confirmed`, `changed`, or `withdrawn`.
+
+**Council**:
+Several Lanes answering the same question in parallel. The Orchestrator synthesizes; Maestro returns a Merge.
+
+**Merge**:
+What Maestro returns from a Council: a status table, the findings per Seat, and the report paths.
+
+## Reminders
+
+**Reminder**:
+The fixed text that tells the Orchestrator, on every prompt, that Maestro owns the work after the thinking is done, followed by the project's live items: open Relays, paused Runs, blocked and failed Tasks of live Runs, and running Lanes.
+
+**Reminder event**:
+A Harness hook event that fires before the model sees a prompt; the hook answers it with the Reminder.
+
+**Carrier**:
+The per-Harness path that delivers the Reminder: a hook entry for a Reminder event, or a rules file where hooks cannot add context.
