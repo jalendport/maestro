@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -71,6 +72,10 @@ func landedIdentity(root, id, userBranch string) (dir string, trees []string, re
 			return dir, nil, "", err
 		}
 	}
+	base, err := landedBase(root, dir, id, target, branches)
+	if err != nil {
+		return dir, nil, "", err
+	}
 	// Git lists resolved paths, including the system temporary folder.
 	if resolved, resolveErr := filepath.EvalSymlinks(dir); resolveErr == nil {
 		dir = resolved
@@ -111,7 +116,7 @@ func landedIdentity(root, id, userBranch string) (dir string, trees []string, re
 			return dir, nil, "", err
 		}
 		for _, path := range paths {
-			ok, err := landedPath(root, tree, target, path)
+			ok, err := landedPath(root, tree, target, base, path)
 			if err != nil {
 				return dir, nil, "", err
 			}
@@ -129,41 +134,64 @@ func landedIdentity(root, id, userBranch string) (dir string, trees []string, re
 			if path == "" {
 				continue
 			}
-			_, err := git(root, tree, "diff", "--cached", "--quiet", target, "--", ":(literal)"+path)
+			entry, err := git(root, tree, "ls-files", "--stage", "-z", "--", ":(literal)"+path)
 			if err != nil {
-				var exit *exec.ExitError
-				if errors.As(err, &exit) && exit.ExitCode() == 1 {
+				return dir, nil, "", err
+			}
+			metadata, _, _ := strings.Cut(entry, "\t")
+			fields := strings.Fields(metadata)
+			mode, blob := "", ""
+			if entry != "" {
+				if len(fields) != 3 || fields[2] != "0" {
 					return dir, nil, "uncommitted changes in " + filepath.Join(tree, path), nil
 				}
+				mode, blob = fields[0], fields[1]
+			}
+			ok, err := landedBlob(root, target, base, path, mode, blob)
+			if err != nil {
 				return dir, nil, "", err
+			}
+			if !ok {
+				return dir, nil, "uncommitted changes in " + filepath.Join(tree, path), nil
 			}
 		}
 	}
 	return dir, trees, "", nil
 }
 
-func landedPath(root, tree, target, path string) (bool, error) {
-	out, err := git(root, "", "ls-tree", "-z", target, "--", ":(literal)"+path)
-	if err != nil {
-		return false, err
+func landedBase(root, dir, id, target string, branches []string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "run.json"))
+	if err == nil {
+		var saved Run
+		if err := json.Unmarshal(data, &saved); err != nil {
+			return "", err
+		}
+		if saved.Base != "" {
+			return saved.Base, nil
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
 	}
+	for _, branch := range branches {
+		if branch == "refs/heads/maestro/"+id+"/run" {
+			out, err := git(root, "", "merge-base", branch, target)
+			return strings.TrimSpace(out), err
+		}
+	}
+	return "", nil
+}
+
+func landedPath(root, tree, target, base, path string) (bool, error) {
 	info, statErr := os.Lstat(filepath.Join(tree, path))
 	if os.IsNotExist(statErr) {
-		return out == "", nil
+		return landedBlob(root, target, base, path, "", "")
 	}
 	if statErr != nil {
 		return false, statErr
 	}
-	if out == "" {
-		return false, nil
-	}
-	metadata, _, _ := strings.Cut(out, "\t")
-	fields := strings.Fields(metadata)
-	if len(fields) != 3 || fields[1] != "blob" {
-		return false, nil
-	}
 	mode := "100644"
 	var content []byte
+	var err error
 	if info.Mode()&os.ModeSymlink != 0 {
 		mode = "120000"
 		link, readErr := os.Readlink(filepath.Join(tree, path))
@@ -179,6 +207,48 @@ func landedPath(root, tree, target, path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	blob, err := git(root, "", "cat-file", "blob", fields[2])
-	return mode == fields[0] && string(content) == blob, err
+	cmd := exec.Command("git", "-C", root, "hash-object", "--stdin")
+	cmd.Stdin = strings.NewReader(string(content))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("git hash-object: %w: %s", err, out)
+	}
+	return landedBlob(root, target, base, path, mode, strings.TrimSpace(string(out)))
+}
+
+func landedBlob(root, target, base, path, mode, blob string) (bool, error) {
+	matches := func(commit string) (bool, error) {
+		out, err := git(root, "", "ls-tree", "-z", commit, "--", ":(literal)"+path)
+		if err != nil {
+			return false, err
+		}
+		if blob == "" {
+			return out == "", nil
+		}
+		metadata, _, _ := strings.Cut(out, "\t")
+		return metadata == mode+" blob "+blob, nil
+	}
+	if ok, err := matches(target); ok || err != nil {
+		return ok, err
+	}
+	if base == "" {
+		return false, nil
+	}
+	args := []string{"log", "--format=%H"}
+	if blob == "" {
+		args = append(args, "--diff-filter=D")
+	} else {
+		args = append(args, "--find-object="+blob)
+	}
+	args = append(args, base+".."+target, "--", ":(literal)"+path)
+	out, err := git(root, "", args...)
+	if err != nil {
+		return false, err
+	}
+	for _, commit := range strings.Fields(out) {
+		if ok, err := matches(commit); ok || err != nil {
+			return ok, err
+		}
+	}
+	return false, nil
 }

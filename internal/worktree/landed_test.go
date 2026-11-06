@@ -149,6 +149,160 @@ func TestRemoveLandedAllWorktrees(t *testing.T) {
 	}
 }
 
+func TestLandedPathsCommittedAfterBase(t *testing.T) {
+	for _, kind := range []string{"edit", "staged", "untracked", "delete", "staged delete", "symlink", "executable"} {
+		t.Run(kind, func(t *testing.T) {
+			root := repository(t)
+			r := openRun(t, root)
+			w := addTask(t, r, "task")
+			path := "base.txt"
+			if kind == "untracked" || kind == "symlink" {
+				path = "new file\n[1].txt"
+			}
+			for _, dir := range []string{w.Dir, root} {
+				switch kind {
+				case "delete", "staged delete":
+					if err := os.Remove(filepath.Join(dir, path)); err != nil {
+						t.Fatal(err)
+					}
+				case "symlink":
+					if err := os.Symlink("base.txt", filepath.Join(dir, path)); err != nil {
+						t.Fatal(err)
+					}
+				default:
+					write(t, dir, path, "landed\n")
+					if kind == "executable" {
+						tgit(t, root, "config", "core.filemode", "true")
+						if err := os.Chmod(filepath.Join(dir, path), 0o755); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+			}
+			if strings.HasPrefix(kind, "staged") {
+				tgit(t, w.Dir, "add", "-A")
+			}
+			assertLanded(t, root, r.ID, false, "uncommitted changes in ")
+			tgit(t, root, "add", "-A")
+			tgit(t, root, "commit", "-m", "Land files by hand")
+			if kind == "symlink" {
+				if err := os.Remove(filepath.Join(root, path)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write(t, root, path, "later edit\n")
+			tgit(t, root, "add", "-A")
+			tgit(t, root, "commit", "-m", "Change landed files again")
+			assertLanded(t, root, r.ID, true, "")
+			if kind == "staged" {
+				write(t, w.Dir, path, "never landed\n")
+				tgit(t, w.Dir, "add", path)
+				write(t, w.Dir, path, "later edit\n")
+				assertLanded(t, root, r.ID, false, "uncommitted changes in ")
+				if err := RemoveLanded(root, r.ID, "master"); err == nil {
+					t.Fatal("removed an identity with unlanded staged content")
+				}
+			} else if err := RemoveLanded(root, r.ID, "master"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestLandedRejectsContentBeforeBase(t *testing.T) {
+	for _, staged := range []bool{false, true} {
+		t.Run(map[bool]string{false: "disk", true: "index"}[staged], func(t *testing.T) {
+			root := repository(t)
+			write(t, root, "base.txt", "at base\n")
+			tgit(t, root, "add", "base.txt")
+			tgit(t, root, "commit", "-m", "Change original content")
+			r := openRun(t, root)
+			w := addTask(t, r, "task")
+			write(t, w.Dir, "base.txt", "base\n")
+			if staged {
+				tgit(t, w.Dir, "add", "base.txt")
+				write(t, w.Dir, "base.txt", "at base\n")
+			}
+			assertLanded(t, root, r.ID, false, "uncommitted changes in ")
+		})
+	}
+}
+
+func TestLandedHistoryRequiresPathAndMode(t *testing.T) {
+	for _, kind := range []string{"path", "mode", "deletion before base"} {
+		t.Run(kind, func(t *testing.T) {
+			root := repository(t)
+			if kind == "deletion before base" {
+				tgit(t, root, "rm", "base.txt")
+				tgit(t, root, "commit", "-m", "Delete original path")
+				write(t, root, "base.txt", "restored\n")
+				tgit(t, root, "add", "base.txt")
+				tgit(t, root, "commit", "-m", "Restore original path")
+			}
+			r := openRun(t, root)
+			w := addTask(t, r, "task")
+			if kind == "deletion before base" {
+				if err := os.Remove(filepath.Join(w.Dir, "base.txt")); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				path := "base.txt"
+				if kind == "path" {
+					path = "other.txt"
+				}
+				write(t, root, path, "landed\n")
+				tgit(t, root, "add", path)
+				tgit(t, root, "commit", "-m", "Commit content elsewhere")
+				write(t, w.Dir, "base.txt", "landed\n")
+				if kind == "mode" {
+					tgit(t, root, "config", "core.filemode", "true")
+					if err := os.Chmod(filepath.Join(w.Dir, "base.txt"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				write(t, root, path, "later edit\n")
+				tgit(t, root, "add", path)
+				tgit(t, root, "commit", "-m", "Change content again")
+			}
+			assertLanded(t, root, r.ID, false, "uncommitted changes in ")
+		})
+	}
+}
+
+func TestLandedBaseFallback(t *testing.T) {
+	for _, kind := range []string{"saved base", "missing saved run", "empty saved base", "no run branch"} {
+		t.Run(kind, func(t *testing.T) {
+			root := repository(t)
+			r := openRun(t, root)
+			w := addTask(t, r, "task")
+			write(t, w.Dir, "base.txt", "landed\n")
+			write(t, root, "base.txt", "landed\n")
+			tgit(t, root, "add", "base.txt")
+			tgit(t, root, "commit", "-m", "Land edit by hand")
+			if kind == "saved base" {
+				tgit(t, root, "branch", "-f", r.Branch, "master")
+			}
+			write(t, root, "base.txt", "later edit\n")
+			tgit(t, root, "add", "base.txt")
+			tgit(t, root, "commit", "-m", "Change landed file again")
+			switch kind {
+			case "missing saved run", "no run branch":
+				if err := os.Remove(filepath.Join(r.dir, "run.json")); err != nil {
+					t.Fatal(err)
+				}
+			case "empty saved base":
+				write(t, r.dir, "run.json", "{}")
+			}
+			if kind == "no run branch" {
+				tgit(t, root, "branch", "-D", r.Branch)
+				assertLanded(t, root, r.ID, false, "uncommitted changes in ")
+				write(t, w.Dir, "base.txt", "later edit\n")
+			}
+			assertLanded(t, root, r.ID, true, "")
+		})
+	}
+}
+
 func TestRemoveLandedRefusesWithoutChanges(t *testing.T) {
 	for _, blocker := range []string{"branch", "task", "read", "landing"} {
 		t.Run(blocker, func(t *testing.T) {
