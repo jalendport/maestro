@@ -54,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Removed `maestro tell` and `maestro roster solo`, which used Lane tabs and Solo agent tool discovery
 
 ### Fixed
+- Fixed two live Runs on one project: the checkout is guarded when either Run uses tree mode, `maestro approve` chooses the mode again from the corrected Plan, and `maestro add --run <id>` and `maestro cancel` find the right live Run
+- Fixed `Finish` retries after a crash that left untracked Run files or a landing Worktree
+- Fixed Task waits on paused and held Runs to return the Run's item with exit 2, Gate records from before `scored` to print their score line, the doctor line for uncommitted changes to be information, and the brace deny reason to say how to quote `@{u}`
+- Fixed the Plan check's Route to ignore Council and approval triggers, so the check runs as one Lane
 - Fixed the scope guard to keep test files in scope, flagged as `tests outside touch` for the gate and the end-of-Run Council when they are outside the Brief's own `touch`, while a deleted test file outside `touch` stays a violation; the read-only command check denies a glob in a word that starts with `-` unless it follows `=`
 - Fixed checks that failed by chance under concurrent Lanes: a failed check runs once more and records `flaky: true` when it passes, and the recorded output keeps the failure lines before its tail; four timing tests lost their tight bounds
 - Fixed the read-only command check to deny unquoted brace lists and globs that can match a file name that starts with `-`; globs after a fixed prefix stay permitted, and the deny reason tells the Lane to write `./` before the glob
