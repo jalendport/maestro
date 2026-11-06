@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+func intp(v int) *int { return &v }
+
 func feed(t *testing.T, p Parser, path string) *Outcome {
 	t.Helper()
 	b, err := os.ReadFile(path)

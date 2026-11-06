@@ -31,7 +31,11 @@ func TestRunOnceTakesFreshBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := old.SaveTo(filepath.Join(folder, FileBaseline)); err != nil {
+	data, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, FileBaseline), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "earlier-task.txt"), []byte("earlier work\n"), 0o644); err != nil {
@@ -58,8 +62,12 @@ func TestRunOnceTakesFreshBaseline(t *testing.T) {
 		if got := rec.Verification.Changed; !reflect.DeepEqual(got, []string{path}) {
 			t.Fatalf("attempt %d: changed %v, want only %s", i+1, got, path)
 		}
-		snap, err := verify.LoadSnapshot(filepath.Join(folder, FileBaseline))
+		data, err := os.ReadFile(filepath.Join(folder, FileBaseline))
 		if err != nil {
+			t.Fatal(err)
+		}
+		var snap verify.Snapshot
+		if err := json.Unmarshal(data, &snap); err != nil {
 			t.Fatal(err)
 		}
 		if _, ok := snap.Dirty["earlier-task.txt"]; !ok || !snap.Taken.After(old.Taken) {

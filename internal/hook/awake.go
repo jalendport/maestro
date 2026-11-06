@@ -122,7 +122,7 @@ func logAwakeParent(pid int) {
 }
 
 // PruneAwake removes lease records for Orchestrator processes that have ended.
-// home is the Maestro home directory. Clean can use the same lease lock.
+// home is the Maestro home directory.
 func PruneAwake(home string) error {
 	dir := filepath.Join(home, "control", "awake")
 	if _, err := os.Stat(dir); os.IsNotExist(err) {

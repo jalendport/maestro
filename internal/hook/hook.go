@@ -214,7 +214,7 @@ func readOnlyAgent(sub, cwd string) bool {
 			return true
 		}
 	}
-	tools, _, ok := agentTools(sub, cwd)
+	tools, ok := agentTools(sub, cwd)
 	if !ok || tools == nil {
 		return false
 	}
@@ -228,12 +228,12 @@ func readOnlyAgent(sub, cwd string) bool {
 	return true
 }
 
-// agentTools reads the `tools` and `disallowedTools` front matter of the
+// agentTools reads the `tools` front matter of the
 // agent definition `<name>.md`, looked up under `.claude/agents` from cwd
 // upward and then in the Claude home. A missing list stays nil.
-func agentTools(name, cwd string) (tools, disallowed []string, ok bool) {
+func agentTools(name, cwd string) (tools []string, ok bool) {
 	if name == "" || strings.ContainsAny(name, `/\`) {
-		return nil, nil, false
+		return nil, false
 	}
 	var raw []byte
 	for _, dir := range agentDirs(cwd) {
@@ -244,11 +244,11 @@ func agentTools(name, cwd string) (tools, disallowed []string, ok bool) {
 		}
 	}
 	if raw == nil {
-		return nil, nil, false
+		return nil, false
 	}
 	lines := strings.Split(string(raw), "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return nil, nil, false
+		return nil, false
 	}
 	end := 0
 	for i, line := range lines[1:] {
@@ -258,16 +258,15 @@ func agentTools(name, cwd string) (tools, disallowed []string, ok bool) {
 		}
 	}
 	if end == 0 {
-		return nil, nil, false
+		return nil, false
 	}
 	var front struct {
-		Tools      yaml.Node `yaml:"tools"`
-		Disallowed yaml.Node `yaml:"disallowedTools"`
+		Tools yaml.Node `yaml:"tools"`
 	}
 	if yaml.Unmarshal([]byte(strings.Join(lines[1:end], "\n")), &front) != nil {
-		return nil, nil, false
+		return nil, false
 	}
-	return toolList(front.Tools), toolList(front.Disallowed), true
+	return toolList(front.Tools), true
 }
 
 func agentDirs(cwd string) []string {
@@ -312,26 +311,6 @@ func toolList(value yaml.Node) []string {
 		}
 	}
 	return out
-}
-
-func hasAny(list, wanted []string) bool {
-	for _, w := range wanted {
-		for _, item := range list {
-			if strings.EqualFold(item, w) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func hasAll(list, wanted []string) bool {
-	for _, w := range wanted {
-		if !hasAny(list, []string{w}) {
-			return false
-		}
-	}
-	return true
 }
 
 func nonEmpty(a, b string) string {

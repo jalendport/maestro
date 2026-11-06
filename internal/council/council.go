@@ -49,16 +49,14 @@ type Opts struct {
 
 // Seat is one Lane's place.
 type Seat struct {
-	Family    string         `json:"family"`
-	Harness   string         `json:"harness"`
-	Effort    string         `json:"effort"`
-	Model     string         `json:"model"`
-	Account   string         `json:"account"`
-	Requested bool           `json:"requested"`
-	Author    bool           `json:"author"`
-	Rounds    []SeatRound    `json:"rounds"`
-	Route     *router.Route  `json:"-"`
-	Family_   *roster.Family `json:"-"`
+	Family    string      `json:"family"`
+	Harness   string      `json:"harness"`
+	Effort    string      `json:"effort"`
+	Model     string      `json:"model"`
+	Account   string      `json:"account"`
+	Requested bool        `json:"requested"`
+	Author    bool        `json:"author"`
+	Rounds    []SeatRound `json:"rounds"`
 }
 
 // SeatRound is one Seat's result in one Round.
@@ -283,7 +281,7 @@ func pickSeats(env *dispatch.Env, c *Council, o Opts) ([]*Seat, []string, error)
 			}
 		}
 		model, _ := env.Disc.Resolve(f.Harness, f.Models)
-		seats = append(seats, &Seat{Family: f.ID, Harness: f.Harness, Effort: effort, Model: model, Account: f.Account, Requested: requested, Author: authors[f.ID], Family_: f})
+		seats = append(seats, &Seat{Family: f.ID, Harness: f.Harness, Effort: effort, Model: model, Account: f.Account, Requested: requested, Author: authors[f.ID]})
 		taken[f.ID] = true
 	}
 	// Requested Seats first.

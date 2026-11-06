@@ -19,8 +19,6 @@ type Report struct {
 	Order    []string
 	Status   string
 	Position string // Council Seats end with POSITION instead
-	Changed  []string
-	Checks   []string
 	Blocked  []string
 	Raw      string
 }
@@ -42,8 +40,6 @@ func ParseReport(text string) *Report {
 	if m := positionRe.FindAllStringSubmatch(text, -1); len(m) > 0 {
 		r.Position = strings.ToLower(m[len(m)-1][1])
 	}
-	r.Changed = cleanList(listItems(r.Sections["Changed"]))
-	r.Checks = cleanList(listItems(r.Sections["Checks"]))
 	r.Blocked = cleanList(listItems(r.Sections["Blocked"]))
 	return r
 }

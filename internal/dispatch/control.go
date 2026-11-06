@@ -2,8 +2,6 @@ package dispatch
 
 import (
 	"context"
-	"encoding/json"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -35,34 +33,4 @@ func MonitorCancel(ctx context.Context, folder string) <-chan struct{} {
 		}
 	}()
 	return cancelled
-}
-
-// HasRunningRecord protects live Dispatches and Councils even without an index.
-// An unreadable record cannot prove that the folder is safe to remove.
-func HasRunningRecord(folder string) bool {
-	live := false
-	err := filepath.WalkDir(folder, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() || (entry.Name() != FileRecord && entry.Name() != "council.json") {
-			return nil
-		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		var record struct {
-			State string `json:"state"`
-		}
-		if err := json.Unmarshal(b, &record); err != nil {
-			return err
-		}
-		if record.State == "running" {
-			live = true
-			return fs.SkipAll
-		}
-		return nil
-	})
-	return live || err != nil
 }

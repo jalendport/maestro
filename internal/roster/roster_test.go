@@ -86,9 +86,6 @@ func TestDefaultsParseAndBind(t *testing.T) {
 	if f.Account != "codex" {
 		t.Fatalf("codex-sol bound to %q", f.Account)
 	}
-	if got := f.Tiers(); len(got) != 2 || got[0] != TierDaily || got[1] != TierHeavy {
-		t.Fatalf("codex-sol tiers %v", got)
-	}
 	for _, family := range r.Families {
 		if family.RequestOnly {
 			t.Fatalf("default family %s is request only", family.ID)

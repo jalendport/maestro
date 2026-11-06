@@ -18,10 +18,9 @@ var (
 	Name    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#2563EB", Dark: "#93C5FD"})
 	Dim     = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#6B7280"})
 
-	warnStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#B45309", Dark: "#FBBF24"})
-	errStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#B91C1C", Dark: "#FCA5A5"})
-	successStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#047857", Dark: "#6EE7B7"})
-	labelStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#9CA3AF"})
+	warnStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#B45309", Dark: "#FBBF24"})
+	errStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#B91C1C", Dark: "#FCA5A5"})
+	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#9CA3AF"})
 )
 
 // Quiet suppresses human event lines on stdout; set by --quiet.
@@ -49,14 +48,6 @@ func Outf(format string, a ...any) {
 		return
 	}
 	fmt.Fprintf(os.Stdout, format+"\n", a...)
-}
-
-// Successf prints a styled success line to stdout.
-func Successf(format string, a ...any) {
-	if Quiet {
-		return
-	}
-	fmt.Fprintln(os.Stdout, successStyle.Render("✓")+" "+fmt.Sprintf(format, a...))
 }
 
 // Fprintln writes a plain line to the given writer.

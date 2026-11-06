@@ -36,7 +36,6 @@ type Request struct {
 	Level    roster.Level // --level, beats the Brief's estimate
 	Project  *config.Project
 	Excluded []string // families removed for this Task (failed attempts)
-	InSolo   bool
 	// IgnoreTriggers lets a Plan check use one Lane without Council or approval gates.
 	IgnoreTriggers bool
 	// Seat pins a Council Seat: family id and effort, Route source "council".

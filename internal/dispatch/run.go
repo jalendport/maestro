@@ -222,7 +222,6 @@ func RouteBrief(env *Env, b *brief.Brief, req router.Request) (*router.Route, er
 	req.Project = env.Project
 	req.Root = env.Root
 	req.Access = b.EffectiveAccess()
-	req.InSolo = solo.InSolo()
 	return rt.Route(req)
 }
 

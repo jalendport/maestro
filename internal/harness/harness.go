@@ -240,5 +240,3 @@ func VersionLess(a, b string) bool {
 	}
 	return false
 }
-
-func intp(v int) *int { return &v }

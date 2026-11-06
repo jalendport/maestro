@@ -1,7 +1,6 @@
 package verify
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,31 +18,6 @@ type Snapshot struct {
 	Commit string               `json:"commit"`
 	Taken  time.Time            `json:"taken"`
 	Dirty  map[string]time.Time `json:"dirty"`
-}
-
-// SaveTo writes the snapshot as JSON so later attempts share one baseline.
-func (s Snapshot) SaveTo(path string) error {
-	b, err := json.Marshal(s)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, b, 0o644)
-}
-
-// LoadSnapshot reads a saved baseline.
-func LoadSnapshot(path string) (Snapshot, error) {
-	var s Snapshot
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return s, err
-	}
-	if err := json.Unmarshal(b, &s); err != nil {
-		return s, err
-	}
-	if s.Dirty == nil {
-		s.Dirty = map[string]time.Time{}
-	}
-	return s, nil
 }
 
 // Take records the baseline for root.

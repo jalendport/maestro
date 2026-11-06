@@ -15,7 +15,6 @@ import (
 	"github.com/jalendport/maestro/internal/ledger"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/router"
-	"github.com/jalendport/maestro/internal/solo"
 	"github.com/jalendport/maestro/internal/ui"
 )
 
@@ -34,11 +33,10 @@ func Start(env *dispatch.Env, folder string) (*Council, error) {
 	todoFor(env, c)
 	// Rehydrate families.
 	for _, s := range c.Seats {
-		f, ok := env.Roster.Family(s.Family)
+		_, ok := env.Roster.Family(s.Family)
 		if !ok {
 			return nil, fmt.Errorf("seat family %q is not in the roster", s.Family)
 		}
-		s.Family_ = f
 	}
 	c.Pid = os.Getpid()
 	c.State = "running"
@@ -140,7 +138,7 @@ func runSeat(env *dispatch.Env, c *Council, s *Seat, round int, roundDir string,
 		return
 	}
 	b.Path = filepath.Join(seatDir, "brief.source.md")
-	req := router.Request{Seat: s.Family, SeatEffort: s.Effort, Access: brief.AccessRead, Level: c.Level, Project: env.Project, InSolo: solo.InSolo()}
+	req := router.Request{Seat: s.Family, SeatEffort: s.Effort, Access: brief.AccessRead, Level: c.Level, Project: env.Project}
 	task, err := dispatch.PrepareIn(env, b, req, c.Slug, s.Family, roundDir)
 	if err != nil {
 		sr.Status = "failed"
@@ -148,7 +146,6 @@ func runSeat(env *dispatch.Env, c *Council, s *Seat, round int, roundDir string,
 		s.Rounds = append(s.Rounds, sr)
 		return
 	}
-	s.Route = task.Route
 	task.MaxAttempt = 2
 	rec, err := dispatch.Execute(env, task)
 	if err != nil {

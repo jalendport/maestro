@@ -132,29 +132,6 @@ type Family struct {
 	Council     string // effort of an automatic Council Seat; empty = the level's effort
 }
 
-// Tiers returns the Tiers this family serves, derived from its level map.
-func (f *Family) Tiers() []Tier {
-	seen := map[Tier]bool{}
-	var out []Tier
-	if f.Frontier {
-		seen[TierFrontier] = true
-		out = append(out, TierFrontier)
-	}
-	for _, l := range Levels {
-		if _, ok := f.Levels[l]; ok {
-			t := TierOf(l)
-			if f.Frontier {
-				continue
-			}
-			if !seen[t] {
-				seen[t] = true
-				out = append(out, t)
-			}
-		}
-	}
-	return out
-}
-
 // Serves reports whether the family lists an effort for the level.
 func (f *Family) Serves(l Level) bool {
 	_, ok := f.Levels[l]

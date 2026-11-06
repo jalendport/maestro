@@ -77,10 +77,8 @@ type TaskState struct {
 	Excluded          []string      `json:"excluded_families,omitempty"`
 	Escalations       int           `json:"escalations"`
 	// Resume answers from the Orchestrator, consumed on the next start.
-	ResumeLane  string `json:"resume_lane,omitempty"`
-	ResumeBrief string `json:"resume_brief,omitempty"`
-	ResumeSkip  bool   `json:"resume_skip,omitempty"`
-	Cancel      bool   `json:"cancel,omitempty"`
+	ResumeLane string `json:"resume_lane,omitempty"`
+	Cancel     bool   `json:"cancel,omitempty"`
 }
 
 // State is run.json.

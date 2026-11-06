@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -20,7 +19,6 @@ import (
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
-	"github.com/jalendport/maestro/internal/solo"
 	"github.com/jalendport/maestro/internal/ui"
 	"github.com/jalendport/maestro/internal/worktree"
 )
@@ -150,7 +148,7 @@ func routePlan(env *dispatch.Env, s *State, plan *brief.Plan) (bool, error) {
 		if ts.BlockedBy == nil {
 			ts.BlockedBy = []string{}
 		}
-		req := router.Request{Brief: b, Access: ts.Access, Root: env.Root, Lane: firstNonEmpty(b.Lane, s.Lane), Level: s.Level, Project: env.Project, InSolo: solo.InSolo()}
+		req := router.Request{Brief: b, Access: ts.Access, Root: env.Root, Lane: firstNonEmpty(b.Lane, s.Lane), Level: s.Level, Project: env.Project}
 		req.Floor, req.Ceiling = routeBounds(s, b)
 		route, err := rt.Route(req)
 		switch e := err.(type) {
@@ -253,7 +251,6 @@ func firstNonEmpty(a, b string) string {
 type Supervisor struct {
 	Env   *dispatch.Env
 	State *State
-	mu    sync.Mutex
 	// running holds the cancel channel of every running Task.
 	running map[string]chan struct{}
 	results chan result
