@@ -775,15 +775,27 @@ func commandAllowed(command string, lane *Lane) bool {
 // shellExpansion names the first word of a read-only command the shell would
 // execute or rewrite before the command runs: a parameter or ANSI-C form (`$`),
 // a backquote, a parenthesis, or a brace. A glob needs a fixed prefix so it
-// cannot match a file name that starts with a dash.
+// cannot match a file name that starts with a dash. In a word that starts with
+// a dash, a glob must follow an equals sign.
 func shellExpansion(command string) string {
 	var quote byte
-	prefix := false
+	prefix, dash, equals := false, false, false
+	fixed := func(ch byte) {
+		if !prefix {
+			dash = ch == '-'
+		}
+		if ch == '=' {
+			equals = true
+		}
+		prefix = true
+	}
 	for i := 0; i < len(command); i++ {
 		ch := command[i]
 		if ch == '\\' && quote != '\'' {
 			i++
-			prefix = true
+			if i < len(command) {
+				fixed(command[i])
+			}
 			continue
 		}
 		if quote != 0 {
@@ -792,7 +804,7 @@ func shellExpansion(command string) string {
 			} else if quote == '"' && (ch == '$' || ch == '`') {
 				return string(ch)
 			} else {
-				prefix = true
+				fixed(ch)
 			}
 			continue
 		}
@@ -803,13 +815,13 @@ func shellExpansion(command string) string {
 			// `(` covers zsh glob qualifiers such as `file(e:'cmd':)`.
 			return string(ch)
 		case ' ', '\t':
-			prefix = false
+			prefix, dash, equals = false, false, false
 		case '*', '?', '[':
-			if !prefix {
+			if !prefix || dash && !equals {
 				return "glob can match a file name that starts with -; write ./ before it"
 			}
 		default:
-			prefix = true
+			fixed(ch)
 		}
 	}
 	return ""

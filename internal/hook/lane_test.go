@@ -1050,6 +1050,39 @@ func TestDecideLaneReadOnlyShellExpansion(t *testing.T) {
 	}
 }
 
+func TestDecideLaneFlagWordGlobs(t *testing.T) {
+	for _, access := range []string{"read", "edit"} {
+		lane := &Lane{Access: access, Root: "/project"}
+		for _, command := range []string{
+			"sort -*", "rg --pr* x", "ls -?", "ls -[ab]",
+			`sort "-"*`, `sort '-'*`, `sort \-*`, `sort ''-*`,
+			"grep --include=*.go x -*", "rg --pr*=value x",
+			"ls -- -*", "ls\t-?",
+		} {
+			t.Run(access+"/"+command, func(t *testing.T) {
+				got := DecideLane(&Call{Tool: "Bash", Input: map[string]any{"command": command}}, lane)
+				want := "read-only command carries a write flag or form: shell expansion glob can match a file name that starts with -; write ./ before it"
+				if got.Kind != "deny" || got.Reason != want {
+					t.Fatalf("verdict = %+v, want deny with reason %q", got, want)
+				}
+			})
+		}
+		for _, command := range []string{
+			"grep -r --include=*.go x .", "grep --include=a?.go x .",
+			"grep --include=[ab].go x .", `grep "--include="*.go x .`,
+			`grep --include\=*.go x .`, `ls '-*'`, `ls "-?"`, `ls -\*`,
+			"ls ./-*", "cat src/-*.go",
+		} {
+			t.Run(access+"/"+command, func(t *testing.T) {
+				got := DecideLane(&Call{Tool: "Bash", Input: map[string]any{"command": command}}, lane)
+				if got.Kind != "auto_approve" {
+					t.Fatalf("verdict = %+v, want auto_approve", got)
+				}
+			})
+		}
+	}
+}
+
 func TestDecideLaneKnownReadTools(t *testing.T) {
 	tools := []string{
 		"read_file", "list_dir", "grep", "web_search", "web_fetch", "todo_write",

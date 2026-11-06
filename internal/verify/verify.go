@@ -181,8 +181,8 @@ func CommitRange(root, start string) string {
 	return start[:12] + ".." + head[:12]
 }
 
-// ScopeViolations returns changed paths outside the touch globs. Paths under
-// ignore (the Run folder) never count.
+// ScopeViolations returns changed paths outside InScope. Paths under ignore
+// (the Run folder) never count.
 func ScopeViolations(changed, touch []string, ignore string) []string {
 	if len(touch) == 0 {
 		return nil
@@ -192,17 +192,35 @@ func ScopeViolations(changed, touch []string, ignore string) []string {
 		if ignore != "" && (p == ignore || strings.HasPrefix(p, ignore+"/")) {
 			continue
 		}
-		ok := false
-		for _, g := range touch {
-			if Match(g, p) {
-				ok = !strings.HasPrefix(g, "!")
-			}
-		}
-		if !ok {
+		if !InScope(p, touch) {
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+// InScope reports whether path is inside the touch globs or is a test file.
+// An empty touch permits every path. Test files stay in scope even when a
+// negation excludes them; other paths use the last matching touch pattern.
+func InScope(path string, touch []string) bool {
+	if len(touch) == 0 {
+		return true
+	}
+	for _, pattern := range []string{
+		"**/*_test.go", "**/*_test.*", "**/*.test.*", "**/*.spec.*", "**/*Test.php",
+		"**/test/**", "**/tests/**", "**/__tests__/**", "**/spec/**", "**/testdata/**",
+	} {
+		if Match(pattern, path) {
+			return true
+		}
+	}
+	ok := false
+	for _, pattern := range touch {
+		if Match(pattern, path) {
+			ok = !strings.HasPrefix(pattern, "!")
+		}
+	}
+	return ok
 }
 
 // Match uses case-sensitive gitignore patterns: * and ? stay within a segment,
