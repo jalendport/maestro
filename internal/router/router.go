@@ -37,6 +37,8 @@ type Request struct {
 	Project  *config.Project
 	Excluded []string // families removed for this Task (failed attempts)
 	InSolo   bool
+	// IgnoreTriggers lets a Plan check use one Lane without Council or approval gates.
+	IgnoreTriggers bool
 	// Seat pins a Council Seat: family id and effort, Route source "council".
 	Seat       string
 	SeatEffort string
@@ -156,6 +158,9 @@ func (rt *Router) Route(req Request) (route *Route, err error) {
 	}
 	category := req.Brief.Category
 	var defaults []string
+	if req.IgnoreTriggers {
+		defaults = append(defaults, "plan check: triggers ignored")
+	}
 	if category == "" {
 		category = "implement"
 		defaults = append(defaults, "category=implement")

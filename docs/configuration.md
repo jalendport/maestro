@@ -361,7 +361,7 @@ These keys control Runs. The approval hold rules are separate: more than four Ta
 
 `maestro run --council <plan>` requests a plan Council for a held Run. A Router question or Council signal for any Task also starts it. `--no-council` stops the plan Council in every case, including when `--council` is set. A hold alone does not start a Council.
 
-The Plan check is one detached read Dispatch in `<run>/plan-check/`, with category `review`, a Daily Tier ceiling, and a five-minute Wall limit. It checks these six questions against the project tree by reading and searching only:
+The Plan check is one detached read Dispatch in `<run>/plan-check/`, with category `review`, Judgment level `some`, a Daily Tier ceiling, and a five-minute Wall limit. Its Route ignores Council and approval triggers, including `wants_independent_view` and `needs_write`, and records `plan check: triggers ignored`. It checks these six questions against the project tree by reading and searching only:
 
 1. Does a Task name a path in Files, touch, or text that does not exist, without saying it creates that path?
 2. Does a Task name an existing function, type, flag, or config key that a search cannot find?

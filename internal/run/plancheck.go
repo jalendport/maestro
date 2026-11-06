@@ -65,7 +65,7 @@ func preparePlanCheck(env *dispatch.Env, s *State) error {
 	if err := brief.Write(b, b.Path); err != nil {
 		return err
 	}
-	t, err := dispatch.PrepareIn(env, b, router.Request{Ceiling: roster.TierDaily}, s.Run, "plan-check", s.Folder)
+	t, err := dispatch.PrepareIn(env, b, router.Request{Floor: roster.TierDaily, Ceiling: roster.TierDaily, IgnoreTriggers: true}, s.Run, "plan-check", s.Folder)
 	if err != nil {
 		return err
 	}

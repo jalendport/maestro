@@ -3,6 +3,8 @@ package run
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +98,9 @@ func TestPlanCheckFakeLane(t *testing.T) {
 			if task.Access != brief.AccessRead || task.Category != "review" || task.Route.Tier.Rank() > roster.TierDaily.Rank() || task.WallLimit != "5m" || task.MaxAttempt != 1 {
 				t.Fatalf("check Dispatch: %+v", task)
 			}
+			if task.Route.Level != roster.LevelSome || !strings.Contains(task.Route.ReasonLine, "plan check: triggers ignored") {
+				t.Fatalf("rules Route lost Plan check constraints: %+v", task.Route)
+			}
 			if tc.timeout {
 				task.WallLimit = "20ms"
 				if err := task.Save(); err != nil {
@@ -156,5 +161,76 @@ func TestPlanCheckSkip(t *testing.T) {
 				t.Fatalf("started skipped check: %+v", s)
 			}
 		})
+	}
+}
+
+func TestPlanCheckIgnoresRouterTriggers(t *testing.T) {
+	for _, tc := range []struct {
+		name, pick     string
+		score          int
+		concrete, view float64
+	}{
+		{name: "Council", pick: "codex-sol", score: 1, concrete: 1, view: 0.96},
+		{name: "vague Brief", pick: "codex-sol", score: 1},
+		{name: "Orchestrator", pick: "ask_orchestrator", score: 1, concrete: 1},
+		{name: "Light score", pick: "codex-sol", score: 0, concrete: 1},
+		{name: "expert score", pick: "codex-sol", score: 3, concrete: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, plan, starts := planCheckEnv(t, "none", false)
+			t.Setenv("TYPESAFE_API_KEY", "test-key")
+			calls := make(chan struct{}, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls <- struct{}{}
+				fmt.Fprintf(w, `{"answers":{"lane":{"choice":%q,"confidence":0.96},"judgment_level":{"score":%d},"spec_is_concrete":{"noul":%g},"wants_independent_view":{"noul":%g},"needs_write":{"noul":0.06}}}`, tc.pick, tc.score, tc.concrete, tc.view)
+			}))
+			defer server.Close()
+			env.Roster.Router.Backend = "jev"
+			env.Roster.Router.BaseURL = server.URL
+			s, err := Create(env, plan, CreateOpts{NoCouncil: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.PlanCheck != "running" || *starts != 1 || len(calls) != 1 {
+				t.Fatalf("Plan check did not start: %+v; starts %d; Router calls %d", s, *starts, len(calls))
+			}
+			task, err := dispatch.LoadTask(filepath.Join(s.Folder, "plan-check"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if task.Route.Level != roster.LevelSome || task.Route.Tier != roster.TierDaily || task.Council || !strings.Contains(task.Route.ReasonLine, "plan check: triggers ignored") {
+				t.Fatalf("Plan check Route: %+v", task.Route)
+			}
+			if task.Route.Jev == nil || task.Route.Jev.WantsView != tc.view {
+				t.Fatalf("Router signal missing: %+v", task.Route.Jev)
+			}
+			if err := executePlanCheck(env, s); err != nil {
+				t.Fatal(err)
+			}
+			if s.State != StateLive || s.PlanCheck != "done" || s.PlanCheckNote != "" || len(s.Approval) != 0 {
+				t.Fatalf("Plan check did not finish: %+v", s)
+			}
+		})
+	}
+}
+
+func TestPlanCheckRouteErrorKeepsRunLive(t *testing.T) {
+	env, plan, starts := planCheckEnv(t, "none", false)
+	// Provisional Tasks request this Lane; the automatic Plan check cannot use it.
+	env.Project = &config.Project{Forbid: []string{"codex-sol"}}
+	s, err := Create(env, plan, CreateOpts{NoCouncil: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "plan check: no result (no lane passes the hard rules for a read review task at level some)"
+	if s.State != StateLive || s.PlanCheck != "done" || s.PlanCheckNote != want || *starts != 0 || len(s.Approval) != 0 {
+		t.Fatalf("Route error stopped Run or lost reason: %+v; starts %d", s, *starts)
+	}
+	saved, err := Load(s.Folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.State != StateLive || !strings.Contains(Status(saved), want) {
+		t.Fatalf("saved Run lost Route error: %s", Status(saved))
 	}
 }

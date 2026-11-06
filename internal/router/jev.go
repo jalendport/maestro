@@ -99,15 +99,15 @@ func (rt *Router) jevRoute(req Request, cands []*roster.Family, category string,
 	}
 
 	// 1. Vague-Brief gate.
-	if jr.SpecConcrete < th("vague_brief") && !(pick != nil && pickTier.Rank() >= roster.TierHeavy.Rank() && conf >= th("heavy_override")) {
+	if !req.IgnoreTriggers && jr.SpecConcrete < th("vague_brief") && !(pick != nil && pickTier.Rank() >= roster.TierHeavy.Rank() && conf >= th("heavy_override")) {
 		return nil, jr, &AskOrchestrator{Reason: fmt.Sprintf("%s: spec_is_concrete %.2f", GateVague, jr.SpecConcrete)}
 	}
 	// 2. Council gate.
-	if jr.WantsView > th("council_view") && jr.NeedsWrite < th("council_write") {
+	if !req.IgnoreTriggers && jr.WantsView > th("council_view") && jr.NeedsWrite < th("council_write") {
 		return nil, jr, &CouncilSignal{Reason: fmt.Sprintf("%s: wants_independent_view %.2f, needs_write %.2f", GateCouncil, jr.WantsView, jr.NeedsWrite)}
 	}
 	// 3. Ask gate.
-	if pickID == GateAsk && conf >= th("ask") {
+	if !req.IgnoreTriggers && pickID == GateAsk && conf >= th("ask") {
 		return nil, jr, &AskOrchestrator{Reason: fmt.Sprintf("router asked for the orchestrator (confidence %.2f)", conf)}
 	}
 	band := "high"
