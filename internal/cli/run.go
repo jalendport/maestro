@@ -425,7 +425,7 @@ func (a *app) cancelCmd() *cobra.Command {
 			if err := os.WriteFile(filepath.Join(folder, "control", "cancel"), nil, 0o644); err != nil {
 				return err
 			}
-			if s.PlanCheck == "running" && (run.SupervisorAlive(s) || (s.Pid == 0 && time.Since(s.StartedAt) < 5*time.Second)) {
+			if s.PlanCheck == "running" {
 				return a.result(map[string]any{"run": s.Run, "state": "cancel_requested"}, "run %s cancel requested", s.Run)
 			}
 			for _, idx := range live {
@@ -735,6 +735,9 @@ func (a *app) waitRun(folder string) error {
 		}
 		if s.State == run.StateHeld {
 			reasons := append([]string{}, s.Approval...)
+			if _, err := os.Stat(filepath.Join(folder, "control", "cancel")); err == nil {
+				reasons = append(reasons, "cancel pending; approve to cancel the Run")
+			}
 			if s.PlanCheckNote != "" {
 				reasons = append(reasons, s.PlanCheckNote)
 			}

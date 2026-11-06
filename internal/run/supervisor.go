@@ -194,6 +194,10 @@ func Approve(env *dispatch.Env, s *State) error {
 	if s.State != StateHeld {
 		return fmt.Errorf("run %s is %s, not held", s.Run, s.State)
 	}
+	if fileExists(filepath.Join(s.Folder, "control", "cancel")) && !SupervisorAlive(s) {
+		s.State = StateLive
+		return s.Save()
+	}
 	plan, err := brief.ParsePlan(s.Plan)
 	if err != nil {
 		return err

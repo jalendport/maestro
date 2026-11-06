@@ -80,6 +80,7 @@ func preparePlanCheck(env *dispatch.Env, s *State) error {
 		return err
 	}
 	s.State, s.PlanCheck = StateHeld, "running"
+	s.PlanCheckStarted = time.Now()
 	s.Approval = append(s.Approval, "plan check running")
 	return s.Save()
 }
@@ -156,7 +157,7 @@ func executePlanCheck(env *dispatch.Env, s *State) error {
 
 // RecoverPlanCheck releases a held Run when its check supervisor is gone.
 func RecoverPlanCheck(s *State) error {
-	if s.PlanCheck != "running" || SupervisorAlive(s) || (s.Pid == 0 && time.Since(s.StartedAt) < 5*time.Second) {
+	if s.PlanCheck != "running" || SupervisorAlive(s) || planCheckStarting(s) {
 		return nil
 	}
 	return withControlLock(s.Folder, func() error {
@@ -164,7 +165,7 @@ func RecoverPlanCheck(s *State) error {
 		if err != nil {
 			return err
 		}
-		if current.PlanCheck == "running" && !SupervisorAlive(current) {
+		if current.PlanCheck == "running" && !SupervisorAlive(current) && !planCheckStarting(current) {
 			finishPlanCheck(current, nil, fmt.Errorf("supervisor gone"))
 			current.State, current.Pid = StateHeld, 0
 			if err := current.Save(); err != nil {
@@ -174,6 +175,14 @@ func RecoverPlanCheck(s *State) error {
 		*s = *current
 		return nil
 	})
+}
+
+func planCheckStarting(s *State) bool {
+	started := s.PlanCheckStarted
+	if started.IsZero() {
+		started = s.StartedAt
+	}
+	return s.Pid == 0 && time.Since(started) < 5*time.Second
 }
 
 var planFinding = regexp.MustCompile(`^([-*] )?task [1-9][0-9]*: .+; fix: .+$`)

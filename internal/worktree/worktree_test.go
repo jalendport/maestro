@@ -141,6 +141,42 @@ func TestOpenAndAddResume(t *testing.T) {
 	}
 }
 
+func TestExistingIDPrefersNewIdentity(t *testing.T) {
+	for _, mode := range []string{"none", "old folder", "old branch", "new folder", "new branch"} {
+		t.Run(mode, func(t *testing.T) {
+			root := repository(t)
+			preferred, old := "d-r-0001-abcd", "abcd"
+			if mode != "none" && mode != "old folder" {
+				tgit(t, root, "branch", "maestro/"+old+"/run")
+			}
+			if mode == "old folder" || mode == "new folder" {
+				id := old
+				if mode == "new folder" {
+					id = preferred
+				}
+				dir, err := runDir(root, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "new branch" {
+				tgit(t, root, "branch", "maestro/"+preferred+"/abcd")
+			}
+			want := preferred
+			if strings.HasPrefix(mode, "old ") {
+				want = old
+			}
+			got, err := ExistingID(root, preferred, old)
+			if err != nil || got != want {
+				t.Fatalf("identity: %s, want %s: %v", got, want, err)
+			}
+		})
+	}
+}
+
 func TestDirty(t *testing.T) {
 	root := repository(t)
 	write(t, root, ".gitignore", "ignored/\n")

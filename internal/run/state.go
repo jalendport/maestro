@@ -113,6 +113,8 @@ type State struct {
 	CouncilSkip   string                 `json:"council_skip,omitempty"`
 	PlanCheck     string                 `json:"plan_check,omitempty"` // running | done
 	PlanCheckNote string                 `json:"plan_check_note,omitempty"`
+
+	PlanCheckStarted time.Time `json:"plan_check_started,omitempty"`
 }
 
 const FileState = "run.json"

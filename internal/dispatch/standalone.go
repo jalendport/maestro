@@ -161,7 +161,11 @@ func landStandalone(env *Env, t *Task, rec *Record) {
 }
 
 func finishStandalone(env *Env, t *Task, rec *Record) error {
-	r, err := worktree.Open(t.Project, StandaloneRunID(t))
+	id, err := StandaloneWorktreeID(t)
+	if err != nil {
+		return err
+	}
+	r, err := worktree.Open(t.Project, id)
 	if err != nil {
 		return err
 	}
@@ -240,11 +244,19 @@ func finishStandalone(env *Env, t *Task, rec *Record) error {
 }
 
 func blockStandalone(t *Task, rec *Record, err error) {
-	reason := strings.ReplaceAll(err.Error(), "maestro resume "+StandaloneRunID(t)+" --finish", "maestro dispatch --finish "+t.Task)
-	rec.RunBranch = "maestro/" + StandaloneRunID(t) + "/run"
+	if rec.RunBranch == "" {
+		rec.RunBranch = "maestro/" + StandaloneRunID(t) + "/run"
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(rec.RunBranch, "maestro/"), "/run")
+	reason := strings.ReplaceAll(err.Error(), "maestro resume "+id+" --finish", "maestro dispatch --finish "+t.Task)
 	rec.Outcome.Outcome, rec.Outcome.Decision = OutcomeBlocked, "blocked"
 	rec.Outcome.ErrorText = reason + "; Run branch " + rec.RunBranch
 	rec.FinishPending = true
+}
+
+// StandaloneWorktreeID finds the saved identity of a standalone Dispatch.
+func StandaloneWorktreeID(t *Task) (string, error) {
+	return worktree.ExistingID(t.Project, StandaloneRunID(t), t.Task)
 }
 
 // FinishStandalone retries a stopped landing. It does not start a Lane.

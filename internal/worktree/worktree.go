@@ -100,6 +100,30 @@ func runDir(root, run string) (string, error) {
 	return filepath.Join(config.Home(), "worktrees", filepath.Base(filepath.Dir(control)), run), nil
 }
 
+// ExistingID uses the old identity only when the new identity has no Worktree
+// folder or branch and the old identity has one.
+func ExistingID(root, preferred, old string) (string, error) {
+	for _, id := range []string{preferred, old} {
+		dir, err := runDir(root, id)
+		if err != nil {
+			return "", err
+		}
+		if _, err := os.Stat(dir); err == nil {
+			return id, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		out, err := git(root, "", "for-each-ref", "--format=%(refname)", "refs/heads/maestro/"+id+"/")
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(out) != "" {
+			return id, nil
+		}
+	}
+	return preferred, nil
+}
+
 func Open(root, run string) (Run, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -566,6 +590,11 @@ func (r Run) merge(w Worktree) (result MergeResult, mergeErr error) {
 	}
 	commit, err := head(r.Root, "refs/heads/"+w.Branch)
 	if err != nil {
+		return MergeResult{}, err
+	}
+	// A new merge must land and pass the landing check, even when an earlier
+	// Finish reached cleanup before a hand fix was added.
+	if err := os.Remove(filepath.Join(r.dir, "finish")); err != nil && !os.IsNotExist(err) {
 		return MergeResult{}, err
 	}
 	if _, err := git(r.Root, "", "worktree", "remove", "--force", w.Dir); err != nil {

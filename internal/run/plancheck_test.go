@@ -174,6 +174,7 @@ func TestApproveRecoversDeadPlanCheck(t *testing.T) {
 				t.Fatal(err)
 			}
 			s.Pid, s.StartedAt = pid, time.Now().Add(-time.Minute)
+			s.PlanCheckStarted = s.StartedAt
 			if err := s.Save(); err != nil {
 				t.Fatal(err)
 			}
@@ -184,6 +185,76 @@ func TestApproveRecoversDeadPlanCheck(t *testing.T) {
 				t.Fatalf("dead check did not permit approval: %+v", s)
 			}
 		})
+	}
+}
+
+func TestPlanCheckGraceStartsAfterRouting(t *testing.T) {
+	env, plan, _ := planCheckEnv(t, "none", false)
+	t.Setenv("TYPESAFE_API_KEY", "test-key")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(5100 * time.Millisecond)
+		fmt.Fprint(w, `{"answers":{"lane":{"choice":"codex-sol","confidence":0.96},"judgment_level":{"score":1},"spec_is_concrete":{"noul":1}}}`)
+	}))
+	defer server.Close()
+	env.Roster.Router.Backend, env.Roster.Router.BaseURL = "jev", server.URL
+	env.Roster.Router.Thresholds["jev"]["timeout_s"] = 10
+	s, err := Create(env, plan, CreateOpts{NoCouncil: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(s.StartedAt) < 5*time.Second || s.PlanCheckStarted.Before(s.StartedAt.Add(5*time.Second)) {
+		t.Fatalf("check time did not follow routing: %+v", s)
+	}
+	if err := Approve(env, s); err == nil || s.PlanCheck != "running" {
+		t.Fatalf("approval took the new supervisor's place: %+v, %v", s, err)
+	}
+	if err := executePlanCheck(env, s); err != nil || s.PlanCheck != "done" || s.PlanCheckNote != "" {
+		t.Fatalf("check did not run: %+v, %v", s, err)
+	}
+}
+
+func TestApproveHonoursPendingPlanCheckCancel(t *testing.T) {
+	env, plan, _ := planCheckEnv(t, "none", false)
+	s, err := Create(env, plan, CreateOpts{NoCouncil: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.PlanCheckStarted = time.Now().Add(-time.Minute)
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	runWrite(t, filepath.Join(s.Folder, "control", "cancel"), "")
+	// Cancellation must not parse or route the Plan again.
+	runWrite(t, plan, "invalid Plan")
+	if err := Approve(env, s); err != nil {
+		t.Fatal(err)
+	}
+	if err := Start(env, s.Folder); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Load(s.Folder)
+	if err != nil || s.State != StateCancelled {
+		t.Fatalf("cancel did not finish: %+v, %v", s, err)
+	}
+}
+
+func TestPlanCheckCancelBeforeSupervisorStarts(t *testing.T) {
+	env, plan, _ := planCheckEnv(t, "none", false)
+	s, err := Create(env, plan, CreateOpts{NoCouncil: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.StartedAt = time.Now().Add(-time.Minute)
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	runWrite(t, filepath.Join(s.Folder, "control", "cancel"), "")
+	if err := Start(env, s.Folder); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Load(s.Folder)
+	if err != nil || s.State != StateCancelled || s.PlanCheck != "done" {
+		t.Fatalf("new check did not cancel: %+v, %v", s, err)
 	}
 }
 

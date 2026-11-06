@@ -115,3 +115,25 @@ func TestPlanCheckHelpAndFlag(t *testing.T) {
 		t.Fatal("missing Dispatch commit help")
 	}
 }
+
+func TestCancelPlanCheckBeforeSupervisorStarts(t *testing.T) {
+	_, s := waitFixture(t)
+	s.State, s.PlanCheck, s.Pid = run.StateHeld, "running", 0
+	s.StartedAt = time.Now().Add(-time.Minute)
+	s.PlanCheckStarted = time.Now()
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	output, err := waitCommand(t, "cancel", s.Run)
+	if err != nil || !strings.Contains(output, "cancel requested") {
+		t.Fatalf("cancel: %s, %v", output, err)
+	}
+	s.PlanCheckStarted = time.Now().Add(-time.Minute)
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	output, err = waitCommand(t, "wait", s.Run)
+	if code, ok := proc.Code(err); !ok || code != proc.CodeOrchestrator || !strings.Contains(output, "cancel pending") {
+		t.Fatalf("wait: %s, %v", output, err)
+	}
+}

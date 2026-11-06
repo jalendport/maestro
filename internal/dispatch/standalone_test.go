@@ -82,6 +82,82 @@ func writeStandalone(t *testing.T, path, text string) {
 
 const standaloneChange = "printf 'Lane work\\n' > work.txt\nprintf '## Summary\\nChange the file.\\n\\nSTATUS: done\\n' > \"$MAESTRO_TASK_FOLDER/result.md\""
 
+func TestStandaloneFinishUsesOldIdentity(t *testing.T) {
+	env, task, git := standaloneFixture(t, true, standaloneChange)
+	r, err := worktree.Open(env.Root, task.Task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := r.Add(task.Task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.Workdir = w.Dir
+	outcome := Outcome{Outcome: OutcomeUnverified}
+	task.Standalone = &Standalone{Outcome: &outcome}
+	writeStandalone(t, filepath.Join(w.Dir, "work.txt"), "old Dispatch\n")
+	writeStandalone(t, filepath.Join(task.Folder, FileReport), "## Summary\nChange the file.\n\nSTATUS: done\n")
+	if err := task.Save(); err != nil {
+		t.Fatal(err)
+	}
+	rec := &Record{Kind: "dispatch", Project: env.Root, Run: task.Run, Task: task.Task, Path: task.Folder,
+		State: "ended", FinishPending: true, Outcome: outcome}
+	rec.Verification.Changed = []string{"work.txt"}
+	if err := rec.Save(); err != nil {
+		t.Fatal(err)
+	}
+	rec, err = FinishStandalone(env, task)
+	if err != nil || rec.FinishPending || rec.RunBranch != r.Branch {
+		t.Fatalf("Finish: %+v, %v", rec, err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(env.Root, "work.txt")); string(data) != "old Dispatch\n" {
+		t.Fatalf("old work lost: %q", data)
+	}
+	if got := git("branch", "--list", "maestro/*"); got != "" {
+		t.Fatalf("branches remain: %s", got)
+	}
+}
+
+func TestStandaloneHandFixAfterFailedCleanup(t *testing.T) {
+	env, task, git := standaloneFixture(t, true, standaloneChange)
+	env.Project = &config.Project{Checks: []string{"test ! -f user.txt || test -f fixed.txt"}}
+	if err := openStandalone(env, task); err != nil {
+		t.Fatal(err)
+	}
+	writeStandalone(t, filepath.Join(env.Root, "user.txt"), "user change\n")
+	git("add", "user.txt")
+	git("commit", "-m", "Change user file")
+	rec, err := Execute(env, task)
+	if err != nil || !rec.FinishPending {
+		t.Fatalf("landing did not stop: %+v, %v", rec, err)
+	}
+	lock := filepath.Join(env.Root, ".git", "refs", "heads", "maestro", StandaloneRunID(task), "run.lock")
+	writeStandalone(t, lock, "")
+	env.Project.Checks = []string{"true"}
+	rec, err = FinishStandalone(env, task)
+	if err != nil || !rec.FinishPending || !strings.Contains(rec.Outcome.ErrorText, "Finish remove") {
+		t.Fatalf("cleanup did not stop: %+v, %v", rec, err)
+	}
+	if err := os.Remove(lock); err != nil {
+		t.Fatal(err)
+	}
+	writeStandalone(t, filepath.Join(task.Workdir, "fixed.txt"), "hand fix\n")
+	env.Project.Checks = []string{"test -f fixed.txt"}
+	rec, err = FinishStandalone(env, task)
+	if err != nil || rec.FinishPending || task.Standalone.LandingCheck.State != "passed" {
+		t.Fatalf("Finish: %+v, %v", rec, err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(env.Root, "fixed.txt")); string(data) != "hand fix\n" {
+		t.Fatalf("hand fix lost: %q", data)
+	}
+	if got := git("log", "-1", "--format=%s"); got != "Task "+task.Task+": Change the file" {
+		t.Fatalf("fix commit lost: %s", got)
+	}
+	if got := git("branch", "--list", "maestro/*"); got != "" {
+		t.Fatalf("branches remain: %s", got)
+	}
+}
+
 func TestStandaloneIdentityIncludesRun(t *testing.T) {
 	env, first, git := standaloneFixture(t, true, standaloneChange)
 	if err := openStandalone(env, first); err != nil {

@@ -16,10 +16,14 @@ import (
 )
 
 func TestCleanStandaloneWorktrees(t *testing.T) {
-	for _, mode := range []string{"failed", "blocked", "cancelled", "finish-pending", "landed", "recent", "running"} {
+	for _, mode := range []string{"old identity", "failed", "blocked", "cancelled", "finish-pending", "landed", "recent", "running"} {
 		t.Run(mode, func(t *testing.T) {
 			root, git := worktreeConfigFixture(t)
-			r, err := worktree.Open(root, dispatch.StandaloneRunID(&dispatch.Task{Run: "r-0001", Task: "abcd"}))
+			id := dispatch.StandaloneRunID(&dispatch.Task{Run: "r-0001", Task: "abcd"})
+			if mode == "old identity" {
+				id = "abcd"
+			}
+			r, err := worktree.Open(root, id)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -79,7 +83,7 @@ func TestCleanStandaloneWorktrees(t *testing.T) {
 					t.Fatalf("keep=%t: %s: %v", keep, path, err)
 				}
 			}
-			branches := git("branch", "--list", "maestro/"+dispatch.StandaloneRunID(task)+"/*")
+			branches := git("branch", "--list", "maestro/"+id+"/*")
 			for _, branch := range []string{r.Branch, w.Branch} {
 				want := keep || (mode != "landed" && (branch == w.Branch || mode == "finish-pending"))
 				if strings.Contains(branches, branch) != want || (!keep && want && !strings.Contains(output, "kept branch "+branch)) {
