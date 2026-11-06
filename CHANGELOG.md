@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added the landing check: the project's `checks` run on the merged Run branch before it lands; a failure pauses the Run for a fix Task from `maestro add`
 - Added the merge conflict rule: a Task that conflicts with the Run branch gets one more attempt to resolve it; after a hand fix, `maestro resume <run> --task <n> --merge` retries the merge
 - Added Worktree cleanup: a cancelled Run removes its Worktrees, and `maestro clean` removes old Worktrees and keeps and names each branch whose commits did not land
+- Added an automatic sweep on `maestro run`, `dispatch`, `status`, and `wait` that removes the Worktrees and branches of landed work, including work landed by hand; `maestro status` lists what it keeps and why
 - Added live Runs that share a project in Worktree mode; tree mode needs the checkout to itself, and `maestro add <brief> --run <id>` names the Run when more than one is live
 - Added the Plan check: one read Dispatch checks the Plan against the tree before a Run with two or more edit Tasks; findings hold the Run, and `--no-plan-check` or `[run] plan_check = false` skips it
 - Added the Plan's introduction to the start of every Task's Context under `Shared context of the Plan:`
