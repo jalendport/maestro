@@ -211,7 +211,11 @@ func TestHookReminder200RunFolders(t *testing.T) {
 		reminderJSON(t, filepath.Join(folder, "old", dispatch.FileRecord), &dispatch.Record{State: "ended"})
 	}
 	payload := reminderPayload(t, "codex", root)
+	start := time.Now()
 	output := runHookPayload(t, payload, "codex")
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("Reminder for 200 Run folders took %s", elapsed)
+	}
 	requireLiveReminder(t, reminderText(t, "codex", output))
 }
 

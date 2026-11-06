@@ -343,7 +343,7 @@ Before the first check whose command starts with `docker` (including `docker com
 
 After an Idle limit, a Wall limit, or a failed Docker pre-flight, Maestro skips the remaining checks and records the same reason. A check that fails on its own exit code does not stop the next check. The Ledger and `maestro wait` show the reason and Failure class.
 
-When a check fails with a normal exit, Maestro runs that command once more. Both runs use the same shared Wall limit budget. A pass on the second run records `ok: true` and `flaky: true`, keeps the first run's failed output, and prints `ok (flaky: passed on rerun)` in `maestro wait`. A second failure records the second result. A Stall, a process stopped by a signal, or a failed Docker pre-flight gets no rerun.
+When a check fails with a normal exit, Maestro runs that command once more if the remaining Wall limit budget can hold the first run's duration. Both runs use the same shared Wall limit budget. A pass on the second run records `ok: true` and `flaky: true`, keeps the first run's failed output, and prints `ok (flaky: passed on rerun)` in `maestro wait`. A second failure records the second result. If the rerun has a Stall, Maestro keeps the first failure and its output with Failure class Bad result, then continues with the next check under the shared Wall limit budget. A Stall, a process stopped by a signal, or a failed Docker pre-flight gets no rerun.
 
 Check output keeps its last 4 KB. When a check fails, it also keeps up to 2 KB of lines that contain `--- FAIL`, `FAIL\t` (with a tab), `panic:`, `Error:`, `error:`, `✗`, or `not ok`, before that tail. These lines keep the test name and failure message when the output is long.
 

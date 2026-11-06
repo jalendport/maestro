@@ -96,16 +96,59 @@ func TestCheckDoesNotRerunStallOrSignal(t *testing.T) {
 	}
 }
 
-func TestCheckRerunSharesWallBudget(t *testing.T) {
+func TestCheckDoesNotRerunWithoutEnoughWallBudget(t *testing.T) {
 	root := t.TempDir()
-	command := "printf 'call\\n' >> calls; sleep 2; exit 1"
-	results := RunChecks(root, []string{command, "printf skipped"}, time.Minute, 3*time.Second)
-	if len(results) != 2 || results[0].OK || results[0].Flaky || results[0].Reason != "wall limit" || results[0].FailureClass != "stall" || !results[1].Skipped {
+	command := "printf 'call\\n' >> calls; sleep 2; printf 'first failure'; exit 1"
+	results := RunChecks(root, []string{command, "printf next"}, time.Minute, 3*time.Second)
+	if len(results) != 2 || results[0].OK || results[0].Flaky || results[0].Skipped || results[0].Reason != "" || results[0].FailureClass != "bad result" || results[0].Output != "first failure" || !results[1].OK || results[1].Output != "next" {
 		t.Fatalf("checks: %+v", results)
 	}
 	calls, err := os.ReadFile(filepath.Join(root, "calls"))
-	if err != nil || string(calls) != "call\ncall\n" {
+	if err != nil || string(calls) != "call\n" {
 		t.Fatalf("calls: %q, %v", calls, err)
+	}
+}
+
+func TestCheckKeepsFirstFailureWhenRerunStalls(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		idle, budget time.Duration
+		nextReason   string
+	}{
+		{"idle", 100 * time.Millisecond, 10 * time.Second, ""},
+		{"idle without Wall limit", 100 * time.Millisecond, 0, ""},
+		{"wall", time.Minute, 400 * time.Millisecond, "wall limit"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			command := "printf 'call\\n' >> calls; if [ ! -f first ]; then touch first; printf 'first failure'; exit 3; fi; printf 'rerun output'; sleep 30"
+			results := RunChecks(root, []string{command, "printf next"}, tt.idle, tt.budget)
+			if len(results) != 2 || results[0].OK || results[0].Flaky || results[0].Skipped || results[0].Reason != "" || results[0].FailureClass != "bad result" || results[0].Output != "first failure" {
+				t.Fatalf("first failure: %+v", results)
+			}
+			if results[1].Skipped || results[1].Reason != tt.nextReason {
+				t.Fatalf("next check: %+v", results[1])
+			}
+			if tt.nextReason == "" {
+				if !results[1].OK || results[1].Output != "next" {
+					t.Fatalf("next check did not run: %+v", results[1])
+				}
+			} else if results[1].OK || results[1].FailureClass != "stall" {
+				t.Fatalf("next check did not use the shared Wall limit: %+v", results[1])
+			}
+			calls, err := os.ReadFile(filepath.Join(root, "calls"))
+			if err != nil || string(calls) != "call\ncall\n" {
+				t.Fatalf("calls: %q, %v", calls, err)
+			}
+			duration, err := time.ParseDuration(results[0].Duration)
+			limit := tt.idle
+			if tt.nextReason != "" {
+				limit = tt.budget
+			}
+			if err != nil || duration < limit {
+				t.Fatalf("duration does not include the rerun: %s, %v", results[0].Duration, err)
+			}
+		})
 	}
 }
 

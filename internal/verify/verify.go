@@ -64,9 +64,13 @@ func RunChecks(root string, cmds []string, idle, budget time.Duration) []CheckRe
 		}
 		start := time.Now()
 		result, normalExit := runCheck(root, c, idle, deadline)
-		if !result.OK && normalExit {
+		firstDuration := time.Since(start)
+		if !result.OK && normalExit && (deadline.IsZero() || time.Until(deadline) >= firstDuration) {
 			first := result
 			result, _ = runCheck(root, c, idle, deadline)
+			if result.FailureClass == "stall" {
+				result = first
+			}
 			result.Duration = time.Since(start).Round(time.Millisecond).String()
 			if result.OK {
 				result.Flaky = true
@@ -169,6 +173,9 @@ loop:
 	output.mu.Lock()
 	result.Output = recordedOutput(output.buf.String(), !result.OK)
 	output.mu.Unlock()
+	if !result.OK && normalExit {
+		result.FailureClass = "bad result"
+	}
 	return result, normalExit
 }
 

@@ -320,6 +320,9 @@ func TestOneShotRelayHarness(t *testing.T) {
 	if answer == "denied: no answer" && time.Since(started) < relayDeadline {
 		t.Fatal("Relay denied before its deadline")
 	}
+	if elapsed := time.Since(started); answer == "denied: no answer" && elapsed > 10*relayDeadline {
+		t.Fatalf("Relay timeout took %s", elapsed)
+	}
 	if err := os.WriteFile(filepath.Join(folder, FileReport), []byte("## Summary\n"+answer+"\n\nSTATUS: done\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
