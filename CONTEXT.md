@@ -19,10 +19,10 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Plan check** — one read Dispatch before a Run with two or more edit Tasks that checks the Plan against the project tree for defects in paths, symbols, scope, and order.
 - **Adapter** — the small per-Harness piece that connects an Orchestrator to Maestro: one shared skill file, one hook file, and the Carrier of the Reminder. Maestro itself works without any Adapter. `maestro adapter install` writes it.
 - **Run** — one invocation of Maestro on a plan: its Tasks, their Routes and Dispatches, the checks, and the report back to the Orchestrator.
-- **Worktree** — a separate git checkout for one Task, outside the project tree. An edit Task uses a Task branch; a read Task uses a detached checkout at the Run branch head.
-- **Run branch** — the branch `maestro/<run>/run` that holds the commits of a Run, made from the user's HEAD when the Run starts.
-- **Task branch** — the branch `maestro/<run>/<task>` that holds one Task's commits, made from the Run branch when the Task starts.
-- **Worktree mode** — a Run mode in which edit Tasks use separate Worktrees and Maestro merges their commits into the Run branch. The main checkout is never changed except at landing.
+- **Worktree** — a separate git checkout for one Task, outside the project tree. An edit Task in a Run or a standalone Dispatch uses a Task branch; a read Task in a Run uses a detached checkout at the Run branch head.
+- **Run branch** — the branch `maestro/<run>/run` that holds the commits of a Run, made from the user's HEAD when the Run starts. A standalone edit Dispatch uses its Task id in place of `<run>`.
+- **Task branch** — the branch `maestro/<run>/<task>` that holds one Task's commits, made from the Run branch when the Task starts. A standalone edit Dispatch uses its Task id in place of `<run>`.
+- **Worktree mode** — a Run or standalone edit Dispatch mode in which edit Tasks use separate Worktrees and Maestro merges their commits into the Run branch. The main checkout is never changed except at landing.
 - **Tree mode** — a Run mode in which edit Tasks use the project tree one at a time.
 - **Brief** — the text a Lane receives for one Task: the goal, the definition of done, the files, the checks, and the permission mode.
 - **Scope guard** — the check that limits an edit Task's changed paths to its `touch` patterns and project test files. Test files are always in scope. An empty `touch` sets no path limit.

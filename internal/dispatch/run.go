@@ -183,7 +183,12 @@ func nearestReset(ws []harness.Window, fallback time.Time) time.Time {
 // Prepare routes one Brief and lays out its Run folder. It returns the Task
 // to execute, inline or in a detached supervisor.
 func Prepare(env *Env, b *brief.Brief, req router.Request, runID, taskID string) (*Task, error) {
-	return PrepareIn(env, b, req, runID, taskID, "")
+	t, err := PrepareIn(env, b, req, runID, taskID, "")
+	if err == nil && !t.Council && t.Access == brief.AccessEdit {
+		t.Standalone = &Standalone{}
+		err = t.Save()
+	}
+	return t, err
 }
 
 // PrepareIn is Prepare with the Run directory given (Councils keep their
@@ -308,6 +313,9 @@ func Execute(env *Env, t *Task) (*Record, error) {
 		}
 		t.Route.Family = f
 	}
+	if err := openStandalone(env, t); err != nil {
+		return nil, err
+	}
 	stopAwake := proc.KeepAwake(env.Roster.KeepAwake())
 	if stopAwake != nil {
 		defer stopAwake()
@@ -337,10 +345,17 @@ attempts:
 			wait = env.RetryDelay
 		}
 		findings := nudgeFindings(env, t, rec, b)
-		if !t.LedgerByRun && t.Access == brief.AccessEdit && t.Commit && len(findings) == 0 && (rec.Outcome.Outcome == OutcomeVerified || rec.Outcome.Outcome == OutcomeUnverified) {
-			if err := CommitChanges(env, t, rec); err != nil {
-				rec.Outcome.Outcome, rec.Outcome.ErrorText = OutcomeBlocked, err.Error()
+		if !t.LedgerByRun && t.Access == brief.AccessEdit && len(findings) == 0 && (rec.Outcome.Outcome == OutcomeVerified || rec.Outcome.Outcome == OutcomeUnverified) {
+			if t.Standalone != nil && t.Workdir != "" {
+				landStandalone(env, t, rec)
+			} else if t.Commit {
+				if err := CommitChanges(env, t, rec); err != nil {
+					rec.Outcome.Outcome, rec.Outcome.ErrorText = OutcomeBlocked, err.Error()
+				}
 			}
+		}
+		rec.supervisorPending = false
+		if !rec.nudgePending {
 			_ = rec.Save()
 		}
 		// The Run supervisor records its final attempt after the escalation decision.
@@ -454,9 +469,10 @@ func archiveAttempt(folder string, n int) {
 
 func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry) *Record {
 	rec := &Record{
-		Canary: t.Canary,
-		Nudged: t.Nudged,
-		Kind:   "dispatch", Project: t.Project, Workdir: t.Workdir, Run: t.Run, Task: t.Task, Attempt: attempt, State: "running",
+		supervisorPending: t.Standalone != nil && t.Workdir != "",
+		Canary:            t.Canary,
+		Nudged:            t.Nudged,
+		Kind:              "dispatch", Project: t.Project, Workdir: t.Workdir, Run: t.Run, Task: t.Task, Attempt: attempt, State: "running",
 		Pid: os.Getpid(), StartedAt: dispatchNow(), Path: t.Folder, Route: t.Route,
 		TaskInfo:     TaskInfo{Title: t.Title, Category: t.Category, LevelEstimate: string(t.Route.LevelEstimate), Access: t.Access, Commit: t.Commit, WallLimit: t.WallLimit},
 		Permission:   Permission{Enforcement: t.Route.Enforcement, Denials: []harness.Denial{}, Blocked: []string{}, Relays: []json.RawMessage{}},

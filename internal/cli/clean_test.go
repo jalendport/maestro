@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +12,83 @@ import (
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/hook"
 	"github.com/jalendport/maestro/internal/run"
+	"github.com/jalendport/maestro/internal/worktree"
 )
+
+func TestCleanStandaloneWorktrees(t *testing.T) {
+	for _, mode := range []string{"failed", "blocked", "cancelled", "finish-pending", "landed", "recent", "running"} {
+		t.Run(mode, func(t *testing.T) {
+			root, git := worktreeConfigFixture(t)
+			r, err := worktree.Open(root, "abcd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			w, err := r.Add("abcd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeWorktreeConfig(t, filepath.Join(w.Dir, "base.txt"), "Lane work\n")
+			if _, err := w.Commit("Change the file", []string{"base.txt"}); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "landed" || mode == "finish-pending" {
+				if _, err := r.Merge("abcd"); err != nil {
+					t.Fatal(err)
+				}
+				if mode == "landed" {
+					git("merge", "--ff-only", r.Branch)
+				}
+				w, err = r.Add("abcd")
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			folder := filepath.Join(config.RunsDir(root), "r-0001", "abcd")
+			if err := os.MkdirAll(folder, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			task := &dispatch.Task{Project: root, Workdir: w.Dir, Folder: folder, Run: "r-0001", Task: "abcd",
+				Access: "edit", Standalone: &dispatch.Standalone{}}
+			if err := task.Save(); err != nil {
+				t.Fatal(err)
+			}
+			old := time.Now().Add(-48 * time.Hour)
+			rec := &dispatch.Record{Project: root, Workdir: w.Dir, Run: task.Run, Task: task.Task, Path: folder,
+				State: "ended", EndedAt: old, Outcome: dispatch.Outcome{Outcome: mode}, FinishPending: mode == "finish-pending"}
+			if mode == "recent" {
+				rec.EndedAt = time.Now()
+			} else if mode == "running" {
+				rec.State, rec.EndedAt = "running", time.Time{}
+			}
+			if err := rec.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(filepath.Dir(folder), old, old); err != nil {
+				t.Fatal(err)
+			}
+			control := controlFolder(t, folder)
+			writeWorktreeConfig(t, filepath.Join(control, "lane.json"), `{"root":"`+root+`","run_folder":"`+folder+`"}`)
+			output, err := waitCommand(t, "clean", "--older-than", "1d")
+			if err != nil {
+				t.Fatalf("clean: %s, %v", output, err)
+			}
+			keep := mode == "recent" || mode == "running"
+			for _, path := range []string{w.Dir, folder, control} {
+				_, err := os.Stat(path)
+				if (keep && err != nil) || (!keep && !os.IsNotExist(err)) {
+					t.Fatalf("keep=%t: %s: %v", keep, path, err)
+				}
+			}
+			branches := git("branch", "--list", "maestro/abcd/*")
+			for _, branch := range []string{r.Branch, w.Branch} {
+				want := keep || (mode != "landed" && (branch == w.Branch || mode == "finish-pending"))
+				if strings.Contains(branches, branch) != want || (!keep && want && !strings.Contains(output, "kept branch "+branch)) {
+					t.Fatalf("keep=%t for branch %s: %s, %s", want, branch, branches, output)
+				}
+			}
+		})
+	}
+}
 
 func TestCleanGlobalControlAndCache(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())

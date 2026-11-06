@@ -7,10 +7,41 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/hook"
+	"github.com/jalendport/maestro/internal/worktree"
 )
+
+func cleanStandaloneWorktrees(folder string) ([]string, error) {
+	entries, err := os.ReadDir(folder)
+	if err != nil {
+		return nil, err
+	}
+	var kept []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		task, err := dispatch.LoadTask(filepath.Join(folder, entry.Name()))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return kept, err
+		}
+		if task.Standalone == nil || task.LedgerByRun || task.Council || task.Access != brief.AccessEdit || task.Workdir == "" || task.Workdir == task.Project {
+			continue
+		}
+		branches, err := worktree.Remove(task.Project, task.Task)
+		kept = append(kept, branches...)
+		if err != nil {
+			return kept, err
+		}
+	}
+	return kept, nil
+}
 
 func hasCurrentRecord(folder string, cutoff time.Time) (bool, error) {
 	keep := false

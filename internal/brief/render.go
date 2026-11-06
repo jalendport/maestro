@@ -77,7 +77,7 @@ func Render(b *Brief, o RenderOpts) string {
 	w.WriteString("## Rules\n\n")
 	w.WriteString("- Do not commit.\n")
 	if len(b.Touch) > 0 {
-		fmt.Fprintf(&w, "- Change nothing outside these paths: %s\n", strings.Join(quoteAll(b.Touch), ", "))
+		fmt.Fprintf(&w, "- Change nothing outside these paths: %s; test files are always in scope.\n", strings.Join(quoteAll(b.Touch), ", "))
 	}
 	if o.Access == AccessRead {
 		w.WriteString("- This is a read task: write nothing in the repository except your report.\n")

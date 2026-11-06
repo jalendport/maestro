@@ -22,15 +22,39 @@ import (
 )
 
 func (a *app) dispatchCmd() *cobra.Command {
-	var lane, floor, ceiling, level string
+	var lane, floor, ceiling, level, finish string
 	var wait bool
 	c := &cobra.Command{
-		Use:     "dispatch <brief.md>",
-		Short:   "Route and dispatch one Task",
-		Long:    "Route one Brief file to a Lane and start it. Returns at once with the Task id; --wait blocks and prints the result.",
-		Args:    cobra.ExactArgs(1),
+		Use:   "dispatch <brief.md> | --finish <task>",
+		Short: "Route and dispatch one Task",
+		Long:  "Route one Brief file to a Lane and start it. Returns at once with the Task id; --wait blocks and prints the result. Use --finish <task> to retry a stopped standalone landing without a new Lane.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if finish != "" {
+				return cobra.NoArgs(cmd, args)
+			}
+			return cobra.ExactArgs(1)(cmd, args)
+		},
 		PreRunE: refreshSkill,
 		RunE: func(_ *cobra.Command, args []string) error {
+			if finish != "" {
+				env, err := a.env(false)
+				if err != nil {
+					return err
+				}
+				folder, ok := dispatch.FindTask(env.Root, finish)
+				if !ok {
+					return fmt.Errorf("no task %q under %s", finish, env.Root)
+				}
+				t, err := dispatch.LoadTask(folder)
+				if err != nil {
+					return err
+				}
+				rec, err := dispatch.FinishStandalone(env, t)
+				if err != nil {
+					return err
+				}
+				return exit(dispatch.Print(rec, a.json))
+			}
 			b, err := brief.Parse(args[0])
 			if err != nil {
 				return err
@@ -69,7 +93,13 @@ func (a *app) dispatchCmd() *cobra.Command {
 				}
 				return err
 			}
+			if t.Standalone != nil {
+				ui.Eventf("dispatch", "%s", dispatch.StandaloneModeLine(env, t))
+			}
 			if wait {
+				ctx, stop := context.WithCancel(context.Background())
+				defer stop()
+				t.Cancel = dispatch.MonitorCancel(ctx, t.Folder)
 				rec, err := dispatch.Execute(env, t)
 				if err != nil {
 					return err
@@ -88,6 +118,7 @@ func (a *app) dispatchCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&lane, "lane", "", "request a Lane: family[:effort]")
+	c.Flags().StringVar(&finish, "finish", "", "retry a stopped Task landing without a new Lane")
 	c.Flags().StringVar(&floor, "floor", "", "at least this Tier")
 	c.Flags().StringVar(&ceiling, "ceiling", "", "at most this Tier")
 	c.Flags().StringVar(&level, "level", "", "Judgment level estimate")
@@ -188,6 +219,11 @@ func (a *app) waitTask(folder, id string) error {
 	for {
 		rec, err := dispatch.LoadRecord(folder)
 		if err == nil && rec.State == "ended" {
+			if rec.FinishPending {
+				return a.printWaitItem(&waitItem{Kind: "task_blocked", Task: rec.Task,
+					Reason:      rec.Outcome.ErrorText + "; Worktree: " + rec.Workdir,
+					NextCommand: "maestro dispatch --finish " + rec.Task})
+			}
 			return exit(dispatch.Print(rec, a.json))
 		}
 		if item, err := relayItem(folder, id); err != nil {

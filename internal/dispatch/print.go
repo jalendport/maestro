@@ -36,6 +36,9 @@ func Print(rec *Record, asJSON bool) int {
 	if rec.Workdir != "" && rec.Workdir != rec.Project {
 		fmt.Fprintf(os.Stdout, "workdir %s\n", rec.Workdir)
 	}
+	if rec.FinishPending {
+		fmt.Fprintf(os.Stdout, "blocked  %s\nnext     maestro dispatch --finish %s\n", rec.Outcome.ErrorText, rec.Task)
+	}
 	if rec.Outcome.FailureClass != "" && rec.Outcome.Status == "" {
 		fmt.Fprintf(os.Stdout, "error    %s\n", rec.Outcome.ErrorText)
 		if rec.Outcome.Timer != "" {

@@ -68,29 +68,34 @@ type Task struct {
 	FirstAttempt int `json:"first_attempt,omitempty"`
 	// LedgerByRun lets the Run record its final attempt after deciding on escalation.
 	LedgerByRun bool `json:"ledger_by_run,omitempty"`
+	// Standalone holds the landing state of an edit Dispatch outside a Run.
+	Standalone *Standalone `json:"standalone,omitempty"`
 	// Cancel, when closed, stops the running Lane (never serialized).
 	Cancel <-chan struct{} `json:"-"`
 }
 
 // Record is dispatch.json: the full Dispatch record. The ledger row is a copy.
 type Record struct {
-	judged       bool      // judge has recorded Changed; the deferred recording stands down
-	nudgePending bool      // keep wait on the live Task until Execute starts the nudge
-	Kind         string    `json:"kind"`
-	Canary       bool      `json:"canary,omitempty"`
-	Project      string    `json:"project"`
-	Workdir      string    `json:"workdir,omitempty"`
-	Run          string    `json:"run"`
-	Task         string    `json:"task"`
-	Attempt      int       `json:"attempt"`
-	Nudged       bool      `json:"nudged,omitempty"`
-	State        string    `json:"state"` // running | ended
-	Pid          int       `json:"pid,omitempty"`
-	StartedAt    time.Time `json:"started_at"`
-	EndedAt      time.Time `json:"ended_at,omitempty"`
-	DurationS    float64   `json:"duration_s"`
-	Path         string    `json:"path"`
-	SessionID    string    `json:"session_id,omitempty"`
+	supervisorPending bool      // keep wait running through the standalone landing
+	judged            bool      // judge has recorded Changed; the deferred recording stands down
+	nudgePending      bool      // keep wait on the live Task until Execute starts the nudge
+	Kind              string    `json:"kind"`
+	Canary            bool      `json:"canary,omitempty"`
+	Project           string    `json:"project"`
+	Workdir           string    `json:"workdir,omitempty"`
+	FinishPending     bool      `json:"finish_pending,omitempty"`
+	RunBranch         string    `json:"run_branch,omitempty"`
+	Run               string    `json:"run"`
+	Task              string    `json:"task"`
+	Attempt           int       `json:"attempt"`
+	Nudged            bool      `json:"nudged,omitempty"`
+	State             string    `json:"state"` // running | ended
+	Pid               int       `json:"pid,omitempty"`
+	StartedAt         time.Time `json:"started_at"`
+	EndedAt           time.Time `json:"ended_at,omitempty"`
+	DurationS         float64   `json:"duration_s"`
+	Path              string    `json:"path"`
+	SessionID         string    `json:"session_id,omitempty"`
 
 	TaskInfo     TaskInfo      `json:"task_info"`
 	Route        *router.Route `json:"route"`
@@ -192,7 +197,12 @@ const (
 
 // Save writes the record to its folder.
 func (r *Record) Save() error {
-	b, err := json.MarshalIndent(r, "", "  ")
+	saved := *r
+	if r.supervisorPending {
+		saved.State = "running"
+		saved.Pid = os.Getpid()
+	}
+	b, err := json.MarshalIndent(&saved, "", "  ")
 	if err != nil {
 		return err
 	}

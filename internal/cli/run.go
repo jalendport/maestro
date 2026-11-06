@@ -586,6 +586,13 @@ func (a *app) cleanCmd() *cobra.Command {
 					if protected[control] {
 						continue
 					}
+					if dir == config.RunsDir(root) {
+						kept, err := cleanStandaloneWorktrees(p)
+						if err != nil {
+							return err
+						}
+						keptBranches = append(keptBranches, kept...)
+					}
 					if err := os.RemoveAll(p); err == nil {
 						if err := os.RemoveAll(control); err != nil {
 							return err
