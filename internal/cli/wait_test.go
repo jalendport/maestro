@@ -65,7 +65,12 @@ func TestWaitRunTaskDuringChecks(t *testing.T) {
 		ended := *rec
 		ended.State = "ended"
 		ended.Outcome = dispatch.Outcome{Status: "done", Outcome: dispatch.OutcomeVerified}
-		done <- ended.Save()
+		if err := ended.Save(); err != nil {
+			done <- err
+			return
+		}
+		s.State, s.Tasks[0].State = run.StateFinished, run.TaskDone
+		done <- s.Save()
 	}()
 	output, err := waitCommand(t, "wait", rec.Task)
 	if saveErr := <-done; saveErr != nil {
@@ -73,6 +78,74 @@ func TestWaitRunTaskDuringChecks(t *testing.T) {
 	}
 	if err != nil || !strings.Contains(output, "done") {
 		t.Fatalf("wait stopped during checks: %v; %s", err, output)
+	}
+}
+
+func TestWaitTaskFollowsRunAndDoesNotReturnAnsweredAttempt(t *testing.T) {
+	for _, state := range []string{run.StateLive, run.StatePaused} {
+		for _, taskState := range []string{run.TaskBlocked, run.TaskFailed} {
+			for _, asJSON := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/json=%t", state, taskState, asJSON), func(t *testing.T) {
+					rec, s := waitFixture(t)
+					rec.State = "ended"
+					rec.Outcome = dispatch.Outcome{Outcome: dispatch.OutcomeFailed, FailureClass: dispatch.FailBad, Decision: "blocked"}
+					rec.Permission.Blocked = []string{"required.go is outside touch", "second Blocked item"}
+					rec.Verification.Gate = json.RawMessage(`{"cause":"brief","cause_source":"jev"}`)
+					if err := rec.Save(); err != nil {
+						t.Fatal(err)
+					}
+					s.State, s.Tasks[0].State = state, taskState
+					if state == run.StatePaused {
+						s.Pid, s.PauseReason = 0, "needs an answer"
+					}
+					if err := s.Save(); err != nil {
+						t.Fatal(err)
+					}
+					args := []string{"wait", rec.Task}
+					if asJSON {
+						args = append(args, "--json")
+					}
+					output, err := waitCommand(t, args...)
+					kind := "task_blocked"
+					if state == run.StatePaused {
+						kind = "run_paused"
+					} else if taskState == run.TaskFailed {
+						kind = "task_failed"
+					}
+					requireWaitItem(t, output, err, asJSON, kind, rec.Task, s.Run, "maestro resume r-0001 --task 1")
+					for _, want := range []string{"cause brief", "required.go is outside touch", "second Blocked item"} {
+						if !strings.Contains(output, want) {
+							t.Fatalf("wait lacks %q: %s", want, output)
+						}
+					}
+					s.State, s.Pid, s.PauseReason = run.StateLive, os.Getpid(), ""
+					if err := s.Save(); err != nil {
+						t.Fatal(err)
+					}
+					if err := run.WriteIndex(s); err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { run.RemoveIndex(s.Project, s.Run) })
+					if _, err := waitCommand(t, "resume", s.Run, "--task", "1", "--skip"); err != nil {
+						t.Fatal(err)
+					}
+					oldSleep := waitSleep
+					t.Cleanup(func() { waitSleep = oldSleep })
+					polled := false
+					waitSleep = func(time.Duration) {
+						polled = true
+						s.State, s.Tasks[0].State = run.StateFinished, run.TaskSkipped
+						if err := s.Save(); err != nil {
+							t.Fatal(err)
+						}
+					}
+					output, err = waitCommand(t, args...)
+					if err != nil || !polled || !strings.Contains(output, run.StateFinished) {
+						t.Fatalf("wait returned the answered attempt: %v, %s", err, output)
+					}
+				})
+			}
+		}
 	}
 }
 

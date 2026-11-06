@@ -11,6 +11,8 @@ Every Lane runs as a headless child process on the one-shot path, inside Solo an
 
 Lanes never commit. Maestro commits a verified Task with the user's commit message template. The default is the title and a `Co-Authored-By` trailer for the Lane. A Run uses Worktree mode when Worktrees are on, the repository has a commit, the tree is clean, and the Plan has more than one edit Task. Other Runs use tree mode and run edit Tasks one at a time. The mode line gives the mode and its reason. In Worktree mode, Tasks with files that overlap run in Plan order. The Plan's `commit: true` keeps the Task commits on the user's branch; `commit: false` lands the changes uncommitted.
 
+Each read Task of a Worktree-mode Run starts in a detached Worktree at the Run branch head, with dependency links. A review with `blocked_by` the edit Tasks sees their merged work. Maestro removes the read Worktree when the Task ends, including after failure or cancellation. A detached HEAD requires tree mode with `HEAD is not on a branch`; an edit Task whose `touch` names a shared dependency folder requires tree mode with `task <n> touches <folder>`.
+
 ## Verbs
 
 - The user approves a plan → write the Plan file and run `maestro run <plan.md>` at once. Maestro prints the provisional Routes. When it holds for approval (exit 2), fold the plan Council's Merge into the Plan file if a Council ran, then `maestro approve <run>`. `maestro status` shows the live state; `maestro wait <run>` prints the report.
@@ -32,7 +34,7 @@ Ask the user only when a verb exits 2, or when a Task touches a human gate: push
 - `touch:` lists every path the Task may change, including the tests, fixtures, and docs the Done names, and `CHANGELOG.md` when the Done asks for an entry. A Lane that must change a file outside `touch` stops blocked, and Maestro sends the Task back to you with Cause `brief`.
 - A token-billed Lane takes edit work only when `lane:` names it, so name one only when no subscription Lane fits.
 
-A blocked Task comes back to you with its Cause: for `brief`, correct the Brief; for `environment`, resolve the blocker; for `capability`, a stronger Lane can help.
+A blocked Task comes back to you with its Cause: for `brief`, correct the Brief; for `environment`, resolve the blocker; for `none`, judge the Bad result before you resume; for `capability`, a stronger Lane can help.
 
 Size a Task for ten to twenty Lane minutes. Prefer four to six independent Tasks over fifteen small Tasks. Keep work on the same files in one Task, or chain the Tasks with `blocked_by`. Name every path in `Files`, so Maestro can order Tasks whose files overlap.
 
@@ -43,6 +45,8 @@ Jev sees the `level` as context. `maestro dispatch --level` and `maestro run --l
 ## Results
 
 `maestro wait` returns with exit 2 as soon as Maestro needs the Orchestrator: a Relay opens, a Run pauses, or a Task of a Run is blocked or failed and waits for an answer. It prints the item, the reason, and the next `maestro answer` or `maestro resume` command. Relay input in the reason is limited to 300 characters. Answer, then use `maestro wait` with the same id to continue; answered or resolved items do not stop it again. `--json` prints one object with `kind`, `run` or `task`, and `next_command`. A failed Task has the kind `task_failed`. A paused Run also gives the path to `report.md`, in text and in the JSON field `report_path`.
+
+`maestro wait <task>` follows the Task's Run when it belongs to one. After a resume answer, it waits for the Run and does not return the old Dispatch result. Approval reuses held Task ids in Plan order and removes folders for Tasks that the Plan no longer has. If a commit fails after verification, the Dispatch record and Ledger say `decision: blocked` with the error text. The Run report names the Worktree for both blocked and failed Tasks.
 
 The Reminder lists blocked and failed Tasks of live Runs. It uses the CLI's project root, including from a nested git folder. It leaves out a live Run or running Dispatch whose process is gone; `maestro status` marks it `stale (process gone)`. Use only live processes for the running Lanes table.
 
@@ -60,7 +64,7 @@ A Task is accepted when you have read its diff. Outcome `unverified` means Maest
 
 ## When a Run pauses or a Task is blocked
 
-Read the Cause and the Lane's Blocked items. Cause `brief` means the Brief excludes required work or contradicts itself; correct the Brief. Cause `environment` means a tool or service was denied, down, or missing; resolve that blocker before you resume. Maestro does not re-Route these Tasks automatically. Cause `capability` can use a stronger Lane. A blocked Report still needs your answer, regardless of its Cause. If Jev is absent, a rule classifies a touch violation or blocked Report as `brief`, a partial Report with Blocked items or a failed Docker pre-flight as `environment`, and other failures as `capability`. A partial Report with Blocked items keeps its Bad result and Cause after a check Stall. A Gate with only a Cause shows `cause <value> (<source>)` in `maestro wait` and `maestro status`; absent scores stay out of the Ledger. The Run report, `maestro wait`, the Reminder, and the Solo wake-up give the Cause and the Blocked items.
+Read the Cause and the Lane's Blocked items. Cause `brief` means the Brief excludes required work or contradicts itself; correct the Brief. Cause `environment` means a tool or service was denied, down, or missing; resolve that blocker before you resume. Cause `none` means nothing went wrong; on a Bad result, judge the result before you resume. These three Causes block for the Orchestrator. Only Cause `capability` can re-Route a Bad result to a stronger Lane. A blocked Report still needs your answer, regardless of its Cause. If Jev is absent, a rule classifies a touch violation or blocked Report as `brief`, a partial Report with Blocked items or a failed Docker pre-flight as `environment`, and other failures as `capability`. A partial Report with Blocked items keeps its Bad result and Cause after a check Stall. A Gate with only a Cause shows `cause <value> (<source>)` in `maestro wait` and `maestro status`; absent scores stay out of the Ledger. The Run report, `maestro wait`, the Reminder, and the Solo wake-up give the Cause and the Blocked items.
 
 Read the item from `maestro wait` and `report.md` when present, then answer once: `maestro resume <run> --task <n> --lane <family[:effort]>`, `--brief <corrected file>`, or `--skip`. A Relay is a Lane's permission prompt: in Solo it wakes you; `maestro wait` returns it and `maestro status` prints the `relay` event. Answer with `maestro answer <task> allow|deny --relay <id>`, with the id from the item or event.
 
@@ -75,3 +79,5 @@ With `[failure] keep_awake = true` (the default), Maestro keeps the Mac awake fo
 `maestro roster`, `maestro budget`, and `maestro doctor` print the Lanes, the usage per Account, and the Harnesses. Maestro passes no bypass flag to a Claude, Codex, or Antigravity Lane (a Grok Lane runs in always-approve because the Maestro hook and the sandbox decide before Grok does), and never pushes. In tree mode, Maestro commits only when a Brief says `commit: true`.
 
 Grok's own permission modes do not hold a Lane: the Maestro hook and the workspace sandbox do, and the Lane runs in always-approve so Grok never prompts. Grok never relays. Grok edit Lanes with writable `dirs` outside the project run without the sandbox and are `best-effort`.
+
+In a Worktree, Grok keeps the workspace sandbox when no extra writable directory is outside its root. It reads the Brief by absolute path and returns the Report in its final message. The Run folder needs no write access. Writable `dirs` outside the Worktree still make the launch `best-effort`; the Route records the launch's Enforcement.

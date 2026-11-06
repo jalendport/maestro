@@ -24,6 +24,7 @@ func TestSupervisorRoutesOnlyFailuresAStrongerLaneCanHelp(t *testing.T) {
 		{"Transient error", dispatch.FailTransient, "", "", dispatch.OutcomeFailed, "", "", "re-route", TaskWaiting},
 		{"Limit hit", dispatch.FailLimit, "", "", dispatch.OutcomeFailed, "", "", "re-route", TaskWaiting},
 		{"capability", dispatch.FailBad, dispatch.CauseCapability, brief.StatusDone, dispatch.OutcomeFailed, "", dispatch.CauseCapability, "re-route", TaskWaiting},
+		{"none", dispatch.FailBad, dispatch.CauseNone, brief.StatusDone, dispatch.OutcomeFailed, "gate needs an answer", dispatch.CauseNone, "blocked", TaskBlocked},
 		{"brief", dispatch.FailBad, dispatch.CauseBrief, brief.StatusDone, dispatch.OutcomeFailed, "required.go is outside touch", dispatch.CauseBrief, "blocked", TaskBlocked},
 		{"environment", dispatch.FailBad, dispatch.CauseEnvironment, brief.StatusDone, dispatch.OutcomeEscalated, "Docker is down", dispatch.CauseEnvironment, "blocked", TaskBlocked},
 		{"rules partial", dispatch.FailBad, "", brief.StatusPartial, dispatch.OutcomeFailed, "module is missing", dispatch.CauseEnvironment, "blocked", TaskBlocked},

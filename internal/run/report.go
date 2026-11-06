@@ -48,7 +48,7 @@ func Report(s *State) string {
 		if order := OrderLine(t); order != "" {
 			fmt.Fprintf(&w, "    %s\n", order)
 		}
-		if t.State == TaskBlocked && t.Workdir != "" {
+		if (t.State == TaskBlocked || t.State == TaskFailed) && t.Workdir != "" {
 			fmt.Fprintf(&w, "    Worktree: %s\n", t.Workdir)
 		}
 		if t.Attempt > 1 {

@@ -35,7 +35,7 @@ func ResumeTask(s *State) *TaskState {
 func PauseReason(s *State) string {
 	reason := s.PauseReason
 	for _, task := range sortedTasks(s) {
-		if task.State != TaskBlocked || task.DependencyBlocked || PendingResume(s.Folder, task.ID) {
+		if (task.State != TaskBlocked && task.State != TaskFailed) || task.DependencyBlocked || PendingResume(s.Folder, task.ID) {
 			continue
 		}
 		if text := blockedText(task); text != "" && !strings.Contains(reason, text) {

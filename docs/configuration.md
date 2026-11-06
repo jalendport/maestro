@@ -62,7 +62,7 @@ Default entries:
 | `grok` | `"1.0.50"` | `["GROK_SANDBOX"]` |
 | `agy` | `"1.2.9"` | `[]` |
 
-The Maestro hook installed by `maestro adapter install agy` or `maestro adapter install grok` holds the Access of Antigravity and Grok Lanes; Grok edit Lanes also need the workspace sandbox for `enforced` Access.
+The Maestro hook installed by `maestro adapter install agy` or `maestro adapter install grok` holds the Access of Antigravity and Grok Lanes; Grok edit Lanes also need the workspace sandbox for `enforced` Access. A Grok Lane in a Worktree keeps `--sandbox workspace` when no extra writable directory is outside its root. It reads the Brief by absolute path and returns the Report in its final message, so the Run folder needs no write access. Extra writable directories outside the Worktree still make the launch `best-effort`; the Route records the launch's Enforcement.
 
 ### [aliases]
 
@@ -290,7 +290,7 @@ These keys are the global Budget rules. An Account can override `block_at`.
 
 These keys set when Maestro stops a Dispatch and when it stops a Run. A duration is a string such as `"10m"` or `"1h"`.
 
-For a Task of a Run, Lane error, Transient error, Limit hit, and Stall re-Route one Tier up. A Bad result re-Routes when its Cause is `capability`: the Lane's work is wrong or incomplete with no blocker. Cause `brief` means the Brief excludes a required file, forbids required work, or contradicts itself. Cause `environment` means a tool or service was denied, down, or missing. These two Causes block the Task for the Orchestrator. A blocked Report stays blocked. The Dispatch cap, Tier ceiling, and same-error-twice rule still apply.
+For a Task of a Run, Lane error, Transient error, Limit hit, and Stall re-Route one Tier up. A Bad result re-Routes only when its Cause is `capability`: the Lane's work is wrong or incomplete with no blocker. Cause `brief` means the Brief excludes a required file, forbids required work, or contradicts itself. Cause `environment` means a tool or service was denied, down, or missing. Cause `none` means nothing went wrong; on a Bad result, it needs the Orchestrator's judgment. These three Causes block the Task for the Orchestrator, with the Cause and the Blocked items. A blocked Report stays blocked. The Dispatch cap, Tier ceiling, and same-error-twice rule still apply.
 
 A touch violation has Cause `brief` without a Jev call. Otherwise Jev answers the `cause` choice question with the gate's `satisfies`, `verdict`, and `risk` questions, or answers `cause` alone for a blocked or partial Report or failed checks. The choices are `brief`, `environment`, `capability`, and `none` (nothing went wrong). The state includes the Brief's title, Goal, and Done, the Report's Blocked section and Status, failed check output, and the diff when present. Each text field is limited to 60 KiB. If `router = "rules"`, no key is available, or Jev fails, a rule supplies the Cause: a touch violation or blocked Report is `brief`; a partial Report with Blocked items or a failed Docker pre-flight is `environment`; other failures are `capability`. A Gate with only a Cause omits absent scores and verdicts from the Record and Ledger. `maestro wait` and `maestro status` show `cause <value> (<source>)` for it.
 
@@ -350,7 +350,7 @@ These keys control Runs. The approval hold rules are separate: more than four Ta
 
 `maestro run --council <plan>` requests a plan Council for a held Run. A Router question or Council signal for any Task also starts it. `--no-council` stops the plan Council in every case, including when `--council` is set. A hold alone does not start a Council.
 
-Fold any Council findings into the Plan file, then use `maestro approve <run>`. Approval reads the file at the recorded path again, parses it, prints new provisional Routes, and starts the current Tasks under the same Run id. It starts no second plan Council. A parse error leaves the Run held.
+Fold any Council findings into the Plan file, then use `maestro approve <run>`. Approval reads the file at the recorded path again, parses it, prints new provisional Routes, and starts the current Tasks under the same Run id. It reuses the held Task ids in Plan order and removes folders for Tasks that the Plan no longer has. It starts no second plan Council. A parse error leaves the Run held.
 
 ## Worktrees
 
@@ -358,7 +358,11 @@ A Run uses Worktree mode when Worktrees are on, the repository has a commit, the
 
 Lanes never commit. Maestro commits a verified edit Task after the gate, or an unverified edit Task with a Report and changed files. In Worktree mode, Maestro merges each Task into the Run branch. The Plan's `commit: true` keeps those commits when the Run lands on the user's branch; `commit: false` leaves the changes uncommitted. In tree mode, Maestro commits only a Task with `commit: true`.
 
-Worktrees live under `~/.maestro/worktrees/<project-key>/<run>/<task>/`. The Run branch is `maestro/<run>/run`; each Task branch is `maestro/<run>/<task>`. Maestro links existing ignored dependency folders from the project: `node_modules`, `vendor`, `.venv`, `.bundle`, and `storage/framework`. Before it makes each link, Maestro adds the folder name to the exclusion file that `git rev-parse --git-path info/exclude` returns for the Worktree. This keeps a link ignored when the project rule has a trailing slash, such as `node_modules/`. A folder stays unlinked only when `touch` names the folder or a path inside it, such as `node_modules/**`. No `touch`, an empty list, or a general pattern such as `**` permits the link.
+Every read Task of a Worktree-mode Run starts in a detached Worktree at the current Run branch head. A read Task with `blocked_by` the edit Tasks sees their merged changes. It gets the dependency links and keeps read Access. Maestro removes the read Worktree when the Task ends, including after failure or cancellation. Read Tasks have no Task branch.
+
+If a commit fails after verification, the Dispatch record and Ledger keep `outcome.decision: blocked` and the error text. The Run report gives the Worktree path for both blocked and failed Tasks. `maestro wait <task>` follows the Task's Run, with the same Cause, Blocked items, and resume command as `maestro wait <run>`. After an answer, it waits for the Run and does not return the old Dispatch result.
+
+Worktrees live under `~/.maestro/worktrees/<project-key>/<run>/<task>/`. The Run branch is `maestro/<run>/run`; each edit Task branch is `maestro/<run>/<task>`. Maestro links existing ignored dependency folders from the project: `node_modules`, `vendor`, `.venv`, `.bundle`, and `storage/framework`. Before it makes each link, Maestro adds the folder name to the exclusion file that `git rev-parse --git-path info/exclude` returns for the Worktree. This keeps a link ignored when the project rule has a trailing slash, such as `node_modules/`. A folder stays unlinked only when `touch` names the folder or a path inside it, such as `node_modules/**`. No `touch`, an empty list, or a general pattern such as `**` permits the link.
 
 Each commit keeps the user as its git author. The commit message comes from `[commit] message` in `~/.maestro/config.toml`. A project `commit_message` in `.agents/maestro.toml` replaces it. The default is:
 

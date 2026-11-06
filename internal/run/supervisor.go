@@ -16,6 +16,7 @@ import (
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/council"
 	"github.com/jalendport/maestro/internal/dispatch"
+	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/ledger"
 	"github.com/jalendport/maestro/internal/proc"
 	"github.com/jalendport/maestro/internal/roster"
@@ -112,8 +113,15 @@ func routePlan(env *dispatch.Env, s *State, plan *brief.Plan) (bool, error) {
 	rt := env.NewRouter()
 	unclear := false
 	var approval []string
+	held := s.Tasks
+	s.Tasks = nil
 	for i, b := range plan.Tasks {
-		id := dispatch.NewTaskID(s.Folder)
+		var id string
+		if i < len(held) {
+			id = held[i].ID
+		} else {
+			id = dispatch.NewTaskID(s.Folder)
+		}
 		taskDir := filepath.Join(s.Folder, id)
 		if err := os.MkdirAll(taskDir, 0o755); err != nil {
 			return false, err
@@ -173,7 +181,7 @@ func Approve(env *dispatch.Env, s *State) error {
 		return err
 	}
 	next := *s
-	next.Title, next.Tasks = plan.Title, nil
+	next.Title = plan.Title
 	if _, err := routePlan(env, &next, plan); err != nil {
 		return err
 	}
@@ -182,6 +190,11 @@ func Approve(env *dispatch.Env, s *State) error {
 	chooseMode(env, &next)
 	if err := next.Save(); err != nil {
 		return err
+	}
+	for _, task := range s.Tasks[min(len(next.Tasks), len(s.Tasks)):] {
+		if err := os.RemoveAll(task.Folder); err != nil {
+			return err
+		}
 	}
 	*s = next
 	return nil
@@ -509,7 +522,15 @@ func (sup *Supervisor) machineRunning() int {
 }
 
 // start routes the Task at Dispatch time and runs it in a goroutine.
-func (sup *Supervisor) start(t *TaskState) bool {
+func (sup *Supervisor) start(t *TaskState) (started bool) {
+	defer func() {
+		if !started {
+			if err := sup.removeReadWorktree(t); err != nil {
+				sup.blockMerge(t, err)
+				_ = sup.State.Save()
+			}
+		}
+	}()
 	pending, routed := sup.pending[t]
 	route := t.Route
 	if routed {
@@ -598,6 +619,17 @@ func (sup *Supervisor) start(t *TaskState) bool {
 	task.FirstAttempt = t.Attempt + 1
 	task.LedgerByRun = true
 	task.Workdir = t.Workdir
+	if task.Route.Harness == "grok" && task.Workdir != "" {
+		if h, ok := sup.Env.Reg.Get("grok"); ok {
+			command, err := h.Build(harness.Launch{Access: task.Access, Root: task.Workdir, RunFolder: task.Folder, Dirs: task.Dirs})
+			if err != nil {
+				sup.blockMerge(t, err)
+				_ = sup.State.Save()
+				return false
+			}
+			task.Route.Enforcement = command.Enforcement
+		}
+	}
 	if len(t.Conflicts) > 0 {
 		task.Conflict = &brief.Conflict{Branch: sup.State.RunBranch, Paths: t.Conflicts}
 	}
@@ -654,6 +686,14 @@ func (sup *Supervisor) handle(r result) {
 	}
 	delete(sup.running, t.ID)
 	t.EndedAt = time.Now()
+	if err := sup.removeReadWorktree(t); err != nil {
+		sup.blockMerge(t, err)
+		if r.rec != nil {
+			r.rec.Outcome.Decision, r.rec.Outcome.ErrorText = "blocked", err.Error()
+		}
+		_ = sup.State.Save()
+		return
+	}
 	if t.Cancel {
 		t.State = TaskCancelled
 		t.Outcome = dispatch.OutcomeCancelled
@@ -690,6 +730,7 @@ func (sup *Supervisor) handle(r result) {
 		t.State = TaskDone
 		if err := sup.commitTask(t, rec); err != nil {
 			sup.blockMerge(t, err)
+			rec.Outcome.Decision, rec.Outcome.ErrorText = "blocked", err.Error()
 		}
 		sup.escalationsInARow = 0
 	case dispatch.OutcomeBlocked:
@@ -712,7 +753,7 @@ func (sup *Supervisor) handle(r result) {
 			t.Waiting = ""
 			t.Error = "same error twice: " + repeated
 			sup.pause(t.Error)
-		} else if rec.Outcome.FailureClass == dispatch.FailBad && (t.Cause == dispatch.CauseBrief || t.Cause == dispatch.CauseEnvironment) {
+		} else if rec.Outcome.FailureClass == dispatch.FailBad && t.Cause != dispatch.CauseCapability {
 			t.State = TaskBlocked
 			t.Waiting = ""
 			t.Error = rec.BlockedReason()

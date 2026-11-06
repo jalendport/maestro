@@ -74,9 +74,20 @@ func (g *Grok) Build(l Launch) (*Command, error) {
 	// sandbox backs the hook at the kernel level; it fits only when every
 	// writable directory is inside the project root.
 	var flags []string
-	writable := []string{l.RunFolder}
+	reportByText := l.Access == "read" || !within(l.RunFolder, l.Root)
+	writable := []string{}
+	if !reportByText {
+		writable = append(writable, l.RunFolder)
+	}
 	if l.Access == "edit" {
-		writable = append(writable, l.Dirs...)
+		for _, dir := range l.Dirs {
+			// Dispatch adds the Run folder for Worktrees. A message Report
+			// leaves that folder outside the Lane's writable directories.
+			if reportByText && dir == l.RunFolder {
+				continue
+			}
+			writable = append(writable, dir)
+		}
 	}
 	sandboxed := l.Root != ""
 	for _, dir := range writable {
@@ -101,7 +112,7 @@ func (g *Grok) Build(l Launch) (*Command, error) {
 	if !sandboxed {
 		enforcement = BestEffort
 	}
-	return &Command{Cmd: cmd, Enforcement: enforcement, Flags: flags, PromptStdin: false, ReportByText: l.Access == "read"}, nil
+	return &Command{Cmd: cmd, Enforcement: enforcement, Flags: flags, PromptStdin: false, ReportByText: reportByText}, nil
 }
 
 // within reports whether path sits inside root, by path text alone.

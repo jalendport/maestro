@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jalendport/maestro/internal/brief"
+	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/ui"
 	"github.com/jalendport/maestro/internal/verify"
@@ -150,7 +151,7 @@ func (sup *Supervisor) overlapReason(task *TaskState) string {
 }
 
 func (sup *Supervisor) taskWorkdir(task *TaskState, b *brief.Brief) error {
-	if sup.State.Mode != "worktree" || task.Access != brief.AccessEdit {
+	if sup.State.Mode != "worktree" {
 		return nil
 	}
 	if task.ConflictRebase && task.Workdir != "" && (worktree.Worktree{Root: sup.State.Project, Dir: task.Workdir}).Rebasing() {
@@ -162,11 +163,35 @@ func (sup *Supervisor) taskWorkdir(task *TaskState, b *brief.Brief) error {
 		return err
 	}
 	sup.State.RunBranch = r.Branch
+	if task.Access == brief.AccessRead {
+		control, err := config.ControlDirForFolder(sup.State.Folder)
+		if err != nil {
+			return err
+		}
+		dir := filepath.Join(config.Home(), "worktrees", filepath.Base(filepath.Dir(control)), sup.State.Run, task.ID)
+		if out, err := exec.Command("git", "-C", sup.State.Project, "worktree", "add", "--detach", dir, r.Branch).CombinedOutput(); err != nil {
+			return fmt.Errorf("read Worktree: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		task.Workdir = dir
+		_, err = worktree.Link(sup.State.Project, dir)
+		return err
+	}
 	w, err := r.Add(task.ID, b.Touch)
 	if err == nil {
 		task.Workdir = w.Dir
 	}
 	return err
+}
+
+func (sup *Supervisor) removeReadWorktree(task *TaskState) error {
+	if sup.State.Mode != "worktree" || task.Access != brief.AccessRead || task.Workdir == "" {
+		return nil
+	}
+	if out, err := exec.Command("git", "-C", sup.State.Project, "worktree", "remove", "--force", task.Workdir).CombinedOutput(); err != nil {
+		return fmt.Errorf("remove read Worktree: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	task.Workdir = ""
+	return nil
 }
 
 // prepareConflict starts the rebase for a conflict attempt. A Lane cannot

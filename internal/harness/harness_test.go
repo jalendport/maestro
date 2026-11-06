@@ -3,6 +3,7 @@ package harness
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -322,6 +323,29 @@ func TestGrokShapesRunAlwaysApproveUnderTheHook(t *testing.T) {
 	}
 	if flags := strings.Join(command.Flags, " "); flags != "--permission-mode bypassPermissions" || command.Enforcement != BestEffort {
 		t.Fatal(command.Flags, command.Enforcement)
+	}
+}
+
+func TestGrokOutsideRunFolderUsesMessageReportAndKeepsSandbox(t *testing.T) {
+	root, folder := t.TempDir(), t.TempDir()
+	for _, access := range []string{"read", "edit"} {
+		command, err := (&Grok{bin: "/fixture/grok"}).Build(Launch{
+			Access: access, Root: root, RunFolder: folder, Dirs: []string{folder, filepath.Join(root, "cache")},
+			Pointer: "Read the Brief at /project/run/brief.md.",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if flags := strings.Join(command.Flags, " "); !strings.Contains(flags, "--sandbox workspace") || command.Enforcement != Enforced || !command.ReportByText {
+			t.Fatalf("%s launch: %+v", access, command)
+		}
+		if text, err := os.ReadFile(filepath.Join(folder, "pointer.txt")); err != nil || !strings.Contains(string(text), "/project/run/brief.md") {
+			t.Fatalf("Pointer: %s, %v", text, err)
+		}
+	}
+	command, err := (&Grok{bin: "/fixture/grok"}).Build(Launch{Access: "edit", Root: root, RunFolder: folder, Dirs: []string{folder, t.TempDir()}})
+	if err != nil || command.Enforcement != BestEffort || strings.Contains(strings.Join(command.Flags, " "), "--sandbox") {
+		t.Fatalf("outside writable directory: %+v, %v", command, err)
 	}
 }
 

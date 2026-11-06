@@ -175,6 +175,9 @@ func (a *app) waitCmd() *cobra.Command {
 }
 
 func (a *app) waitTask(folder, id string) error {
+	if onRun, err := a.waitTaskRun(folder, id); onRun || err != nil {
+		return err
+	}
 	var stop func()
 	defer func() {
 		if stop != nil {

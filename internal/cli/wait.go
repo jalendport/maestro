@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,6 +18,23 @@ var (
 	waitProcessGrace = 5 * time.Second
 	waitSleep        = time.Sleep
 )
+
+// waitTaskRun follows the Run when the Task belongs to one. A Dispatch
+// result can be from an earlier attempt that the Orchestrator answered.
+func (a *app) waitTaskRun(folder, id string) (bool, error) {
+	s, err := run.Load(filepath.Dir(folder))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	_, ok := s.Task(id)
+	if !ok {
+		return false, nil
+	}
+	return true, a.waitRun(s.Folder)
+}
 
 // waitAwake loads only the sleep switch; it does not refresh discovery or Budget.
 func waitAwake() func() {
