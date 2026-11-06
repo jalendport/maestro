@@ -214,8 +214,8 @@ A read-only command cannot change the project tree, the user's files outside the
 |---|---|
 | Text and files | `cat`, `ls`, `head`, `tail`, `grep`, `rg`, `find`, `sed`, `wc`, `diff`, `stat`, `file`, `which`, `tree`, `du`, `df`, `basename`, `dirname`, `realpath`, `pwd`, `cut`, `sort`, `uniq`, `tr`, `jq`, `yq`, `test`, `[` |
 | Version control | `git log`, `git diff`, `git show`, `git status`, `git blame`, `git branch` in its current list forms, `git ls-files`, `git describe`, `git rev-parse`, `git tag` in list forms |
-| Toolchains: versions | `go version`, `node --version`, `npm --version`, `pnpm --version`, `yarn --version`, `php --version`, `composer --version`, `python3 --version`, `pip --version`, `cargo --version`, `rustc --version`, `docker --version` |
-| Toolchains: environment, packages, and docs | `go env`, `go list`, `go doc`, `npm ls`, `npm view`, `pnpm ls`, `composer show`, `pip list`, `pip show` |
+| Toolchains: versions | `go version`, `node --version`, `php --version`, `composer --version`, `python3 --version`, `pip --version`, `docker --version` |
+| Toolchains: environment, packages, and docs | `go env`, `go list`, `go doc`, `composer show --no-plugins`, `pip list`, `pip show` |
 | Containers | `docker version`, `docker info`, `docker ps`, `docker images`, `docker compose ps`, `docker compose config` |
 | Other | `echo`, `date` |
 
@@ -228,13 +228,17 @@ The following limits apply:
 - `jq` has no file write form. `yq` denies `-i`, `--inplace`, `--in-place`, `-s`, `--split-exp`, and `--split-exp-file`.
 - `git log`, `git diff`, and `git show` deny `--output`, `--ext-diff`, and `--textconv`. `git describe` denies `--dirty` and `--broken` because they can update the index. `git branch` keeps its current list forms. `git tag` accepts a bare command or list forms with `-l`, `--list`, `-n`, `--contains`, `--points-at`, and `--sort`. A tag name without a list form is denied. Creation, annotation, deletion, signing, force, and message options are denied.
 - `go env` denies `-w` and `-u`. `go list` denies module changes (`-mod=mod`, `-modfile`), output files (`-o`, `-debug-actiongraph`, `-pkgdir`), program execution (`-toolexec`), and flags passed to compilers or linkers (`-asmflags`, `-gccgoflags`, `-gcflags`, `-ldflags`). `go doc` denies the HTTP server form (`-http`). Go's double dash forms have the same limits.
-- A `--version` form accepts no extra arguments. `pip list` and `pip show` deny `--log`. `docker compose config` denies `-o`, `--output`, and `--lock-image-digests`.
+- `composer show` requires `--no-plugins` before `--`. `composer --no-plugins show` is also accepted. Without this option, Composer can load project plugins from `vendor/`. `--no-scripts` alone does not disable plugins. `composer --version` does not load those plugins.
+- `npm --version`, `npm ls`, `npm view`, `pnpm --version`, `pnpm ls`, and `yarn --version` are outside the list. Corepack can run a package manager that the project's `packageManager` field names. Yarn can also use `yarnPath`; pnpm can load `.pnpmfile.cjs` or `.pnpmfile.mjs` and select a package manager version from project settings. `cargo --version` and `rustc --version` are outside the list because rustup can run a local toolchain that `rust-toolchain.toml` names.
+- A `--version` form accepts no extra arguments. `pip list` and `pip show` deny `--log` and `--python`; `--python` can run a project file as an interpreter. `docker compose config` denies `-o`, `--output`, and `--lock-image-digests`.
 
 These checks use the command's documented forms: [sed](https://www.gnu.org/software/sed/manual/sed.html), [file](https://man.freebsd.org/cgi/man.cgi?query=file&sektion=1&format=html), [yq](https://mikefarah.gitbook.io/yq/usage/split-into-multiple-files), [Git tag](https://git-scm.com/docs/git-tag), [Go](https://pkg.go.dev/cmd/go), and [pip](https://pip.pypa.io/en/stable/cli/pip/).
 
+The toolchain limits follow the documented behavior of [Composer plugins](https://getcomposer.org/doc/articles/plugins.md), [Corepack's package manager selection](https://github.com/nodejs/corepack#when-authoring-packages), [pnpm hooks](https://pnpm.io/pnpmfile), and [rustup overrides](https://rust-lang.github.io/rustup/overrides.html).
+
 Tests, builds, formatters, and package installs stay outside this list. This includes `go test`, `npm test`, `composer test`, `pytest`, `cargo test`, and `cargo metadata`, which can write `Cargo.lock`. An edit Lane needs a project `checks` or `allow` entry to run these commands. A read Lane cannot run them. The deny reason names every accepted read-only command.
 
-This list does not grant shell loops, command substitution, redirects, or a pipe to a write command. The existing shell and path checks still apply. Quote shell patterns so the hook can judge their text.
+This list does not grant shell loops, command substitution, redirects, or a pipe to a write command. The existing shell and path checks still apply. The hook denies `$`, backquotes, and unquoted `(` in read-only commands, including zsh glob qualifiers that can run code. It permits globs and brace lists (`*`, `?`, `[`, `]`, `{`, `}`), such as `grep -r --include=*.go x .` and `ls *_test.go`.
 
 ### [router]
 
@@ -432,7 +436,7 @@ When several Node lockfiles exist, npm takes priority, then pnpm, then yarn. Cac
 
 The generated allow rules use the hook's `Bash(<prefix> *)` form. A trailing ` *` permits arguments; a bare rule permits only that command. The rules cover Go test, vet, build, and gofmt; the Node runner's test and run commands; Composer test, PHPUnit, Pint, and PHPStan; pytest and ruff; Cargo test, build, clippy, and fmt; and Docker compose and build. Node test, Composer test, and pytest also get a bare rule. `Bash(docker run *)` stays a commented suggestion because it permits host path mounts.
 
-For matching against `allow`, `checks`, and the read-only list, the hook removes leading environment words: `env`, its `-i` and `-u NAME` options, and `NAME=value` assignments. These can be combined. Thus `env -u MAESTRO_HOME go test ./...` matches `Bash(go test *)`, and `CGO_ENABLED=0 go build ./...` matches `Bash(go build *)`. The command runs as written. Write-flag and shell checks still apply. The hook does not remove other prefixes, such as `sudo`, `nohup`, or `time`.
+For matching against `allow`, `checks`, and the read-only list, the hook removes leading `env` words, including `env -i` and `env -u NAME`. It removes a leading `NAME=value` assignment only for these harmless names: `CI`, `NO_COLOR`, `FORCE_COLOR`, `TERM`, `COLUMNS`, `LINES`, `LANG`, `LC_ALL`, `TZ`, `CGO_ENABLED`, `GOOS`, `GOARCH`, and `MAESTRO_HOME`. These can be combined. Thus `env -u MAESTRO_HOME go test ./...` matches `Bash(go test *)`, and `CGO_ENABLED=0 go build ./...` matches `Bash(go build *)`. If any other assignment is present, the hook keeps the full command for matching. A read Lane is denied; an edit Lane uses Relay where its Harness supports Relay, or is denied, unless a check or `allow` entry permits that full command. The reason names the variable. This includes `GIT_EXTERNAL_DIFF`, `GIT_CONFIG_COUNT`, and `GOFLAGS`, whose values can make a read command run code. The command runs as written. Write-flag and shell checks still apply to matched read-only commands. The hook does not remove other prefixes, such as `sudo`, `nohup`, or `time`.
 
 If the Project file exists, `maestro init` shows the proposed file and changes nothing. `maestro init --write` merges the additions. It keeps every existing key, value, and comment, and appends only missing values to `dirs` and `allow`. A value in a comment also counts as present, so a value that you comment out stays inactive. It adds a commented `checks` line only when no active or commented `checks` key exists. A second `--write` with the same stack and cache paths adds nothing.
 

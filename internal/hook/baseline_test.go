@@ -24,10 +24,9 @@ func TestDecideLaneBaselineCommands(t *testing.T) {
 		"go list ./...", "go list -json ./...", "go list -m all", "go list -mod=readonly ./...", "go list -mod vendor ./...",
 		"go list -export ./...", "go list -compiled ./...", "go list -modcacherw ./...",
 		"go doc fmt.Println", "go doc -short fmt", "go doc -all fmt",
-		"node --version", "npm --version", "pnpm --version", "yarn --version", "php --version",
-		"npm ls", "npm ls --all", "npm view react version", "pnpm ls", "pnpm ls --depth 0",
-		"composer --version", "composer show", "composer show --format=json", "python3 --version",
-		"pip --version", "pip list", "pip list --format=json", "pip show requests", "cargo --version", "rustc --version",
+		"node --version", "php --version",
+		"composer --version", "composer show --no-plugins", "composer show --no-plugins --format=json", "composer --no-plugins show", "python3 --version",
+		"pip --version", "pip list", "pip list --format=json", "pip show requests",
 		"docker --version", "docker version", "docker info", "docker ps -a", "docker images",
 		"docker compose ps", "docker compose ps --all", "docker compose config", "docker compose config --services",
 	}

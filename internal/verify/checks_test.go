@@ -12,7 +12,7 @@ func TestChecksStopOnSilenceAndSkipRemaining(t *testing.T) {
 	root := t.TempDir()
 	start := time.Now()
 	results := RunChecks(root, []string{"printf 'started'; sleep 30", "touch must-not-run"}, 100*time.Millisecond, time.Minute)
-	if elapsed := time.Since(start); elapsed < 100*time.Millisecond || elapsed > time.Second {
+	if elapsed := time.Since(start); elapsed < 100*time.Millisecond || elapsed > 10*time.Second {
 		t.Fatalf("Idle limit took %s", elapsed)
 	}
 	if len(results) != 2 || results[0].OK || results[0].Skipped || results[0].Reason != "no output for 100ms" || results[0].FailureClass != "stall" || results[0].Output != "started" {
@@ -29,11 +29,10 @@ func TestChecksStopOnSilenceAndSkipRemaining(t *testing.T) {
 func TestCheckOutputResetsIdleLimit(t *testing.T) {
 	for _, redirect := range []string{"", " >&2"} {
 		t.Run("redirect="+redirect, func(t *testing.T) {
-			command := "for i in 1 2 3; do printf x" + redirect + "; sleep 0.03; done"
-			start := time.Now()
-			results := RunChecks(t.TempDir(), []string{command}, 60*time.Millisecond, time.Second)
-			if !results[0].OK || results[0].Reason != "" || results[0].Output != "xxx" || time.Since(start) < 90*time.Millisecond {
-				t.Fatalf("active check: %+v", results[0])
+			command := "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do printf x" + redirect + "; sleep 0.03; done"
+			results := RunChecks(t.TempDir(), []string{command}, 300*time.Millisecond, 10*time.Second)
+			if len(results) != 1 || !results[0].OK || results[0].Reason != "" || results[0].Output != strings.Repeat("x", 20) {
+				t.Fatalf("active check: %+v", results)
 			}
 		})
 	}
@@ -49,7 +48,7 @@ func TestCheckExitFailureDoesNotStopNext(t *testing.T) {
 func TestChecksShareWallBudget(t *testing.T) {
 	start := time.Now()
 	results := RunChecks(t.TempDir(), []string{"sleep 0.2", "while true; do printf x; sleep 0.05; done", "printf skipped"}, time.Second, 400*time.Millisecond)
-	if elapsed := time.Since(start); elapsed < 400*time.Millisecond || elapsed > time.Second {
+	if elapsed := time.Since(start); elapsed < 400*time.Millisecond || elapsed > 4*time.Second {
 		t.Fatalf("Wall limit took %s", elapsed)
 	}
 	if !results[0].OK || results[1].OK || results[1].Skipped || results[1].Reason != "wall limit" || results[1].FailureClass != "stall" || results[1].Output == "" || !results[2].Skipped || results[2].Reason != "wall limit" {

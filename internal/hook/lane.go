@@ -377,13 +377,18 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 			if commandAllowed(strings.TrimSpace(segment), lane) {
 				continue
 			}
+			_, variable := stripEnvironmentPrefix(strings.TrimSpace(segment))
+			environmentReason := ""
+			if variable != "" {
+				environmentReason = "environment variable is not on the harmless list: " + variable + "; "
+			}
 			if lane.Access == "read" {
-				return Verdict{Kind: "deny", Reason: "read Lane: command not on the read-only list; accepted commands: " + readOnlyCommandNames()}
+				return Verdict{Kind: "deny", Reason: environmentReason + "read Lane: command not on the read-only list; accepted commands: " + readOnlyCommandNames()}
 			}
 			if lane.Access == "edit" && (c.Harness == "claude" || c.Harness == "agy") && lane.Harness != "grok" && lane.Harness != "codex" {
-				return Verdict{Kind: "relay"}
+				return Verdict{Kind: "relay", Reason: strings.TrimSuffix(environmentReason, "; ")}
 			}
-			return Verdict{Kind: "deny", Reason: "outside the Lane's allow list; add it to `checks` or the project `allow` list; accepted read-only commands: " + readOnlyCommandNames()}
+			return Verdict{Kind: "deny", Reason: environmentReason + "outside the Lane's allow list; add it to `checks` or the project `allow` list; accepted read-only commands: " + readOnlyCommandNames()}
 		}
 		return Verdict{Kind: "auto_approve"}
 	default:
@@ -522,21 +527,24 @@ var readOnlyCommands = map[string][]string{
 	"git ls-files": nil, "git describe": {"--dirty", "--broken"}, "git rev-parse": nil,
 	"git tag":    {"-a", "-d", "-f", "-s", "-m", "-F", "--annotate", "--delete", "--force", "--sign", "--message", "--file", "--local-user", "--create-reflog"},
 	"go version": nil, "go env": {"-w", "-u"},
-	"go list":        {"-o", "-modfile", "-toolexec", "-debug-actiongraph", "-pkgdir", "-asmflags", "-gccgoflags", "-gcflags", "-ldflags"},
-	"go doc":         {"-http"},
-	"node --version": nil, "npm --version": nil,
-	"npm ls": nil, "npm view": nil, "pnpm ls": nil,
-	"pnpm --version": nil, "yarn --version": nil,
-	"php --version": nil, "composer --version": nil, "composer show": nil,
-	"python3 --version": nil, "pip --version": nil, "pip list": {"--log"}, "pip show": {"--log"},
-	"cargo --version": nil, "rustc --version": nil, "docker --version": nil,
-	"docker version": nil, "docker info": nil, "docker ps": nil, "docker images": nil,
+	"go list": {"-o", "-modfile", "-toolexec", "-debug-actiongraph", "-pkgdir", "-asmflags", "-gccgoflags", "-gcflags", "-ldflags"},
+	"go doc":  {"-http"},
+	// npm, pnpm, and Yarn are omitted: their launchers can select project code.
+	"node --version": nil,
+	"php --version":  nil, "composer --version": nil, "composer show": nil,
+	"python3 --version": nil, "pip --version": nil, "pip list": {"--log", "--python"}, "pip show": {"--log", "--python"},
+	// cargo and rustc are omitted: rustup can select a local toolchain.
+	"docker --version": nil,
+	"docker version":   nil, "docker info": nil, "docker ps": nil, "docker images": nil,
 	"docker compose ps": nil, "docker compose config": {"-o", "--output", "--lock-image-digests"},
 }
 
 func readOnlyCommandNames() string {
 	names := make([]string, 0, len(readOnlyCommands))
 	for name := range readOnlyCommands {
+		if name == "composer show" {
+			name += " --no-plugins"
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -546,6 +554,9 @@ func readOnlyCommandNames() string {
 func readCommand(words []string) (string, int) {
 	if len(words) == 0 {
 		return "", 0
+	}
+	if len(words) >= 3 && words[0] == "composer" && words[1] == "--no-plugins" && words[2] == "show" {
+		return "composer show", 3
 	}
 	for n := min(len(words), 3); n > 0; n-- {
 		name := strings.Join(words[:n], " ")
@@ -561,7 +572,10 @@ func readCommand(words []string) (string, int) {
 
 func unsafeReadFlag(command string) string {
 	command = strings.TrimSpace(command)
-	matched := stripEnvironmentPrefix(command)
+	matched, variable := stripEnvironmentPrefix(command)
+	if variable != "" {
+		return ""
+	}
 	words := commandWords(matched)
 	name, start := readCommand(words)
 	if _, ok := readOnlyCommands[name]; ok {
@@ -575,6 +589,20 @@ func unsafeReadFlag(command string) string {
 	}
 	if strings.HasSuffix(name, " --version") && len(words) != start {
 		return name + " with extra arguments"
+	}
+	if name == "composer show" {
+		noPlugins := false
+		for _, word := range words[1:] {
+			if word == "--" {
+				break
+			}
+			if word == "--no-plugins" {
+				noPlugins = true
+			}
+		}
+		if !noPlugins {
+			return "composer show requires --no-plugins"
+		}
 	}
 	for i, word := range words[start:] {
 		// `--` ends the options of every listed command except find, whose
@@ -711,7 +739,7 @@ func unsafeBranchForm(words []string) string {
 }
 
 func commandAllowed(command string, lane *Lane) bool {
-	command = stripEnvironmentPrefix(command)
+	command, _ = stripEnvironmentPrefix(command)
 	words := commandWords(command)
 	if len(words) == 0 {
 		return false
@@ -745,9 +773,8 @@ func commandAllowed(command string, lane *Lane) bool {
 }
 
 // shellExpansion names the first word of a read-only command the shell would
-// rewrite before the command runs: a parameter or ANSI-C form (`$`), a
-// backquote, a brace list, or a glob. The flag table judges the words as
-// written, so any of these could turn into a flag it denies.
+// execute or rewrite before the command runs: a parameter or ANSI-C form (`$`),
+// a backquote, or a parenthesis. Globs and brace lists are allowed.
 func shellExpansion(command string) string {
 	var quote byte
 	for i := 0; i < len(command); i++ {
@@ -767,7 +794,7 @@ func shellExpansion(command string) string {
 		switch ch {
 		case '\'', '"':
 			quote = ch
-		case '$', '`', '{', '}', '*', '?', '[', '(':
+		case '$', '`', '(':
 			// `(` covers zsh glob qualifiers such as `file(e:'cmd':)`.
 			return string(ch)
 		}
@@ -832,13 +859,20 @@ func unsafeShell(command string) string {
 
 var environmentAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
-// stripEnvironmentPrefix returns the command text after leading environment
-// words. Keep the remaining text as written for check and allow rule matching.
-func stripEnvironmentPrefix(command string) string {
+// stripEnvironmentPrefix removes env and harmless assignments. It returns the
+// first other variable name so the caller can deny or Relay the command.
+// Keep the remaining text as written for check and allow rule matching.
+func stripEnvironmentPrefix(command string) (string, string) {
 	words, ends := commandWordsWithEnds(command)
 	i := 0
 	for i < len(words) {
 		if environmentAssignment.MatchString(words[i]) {
+			name, _, _ := strings.Cut(words[i], "=")
+			switch name {
+			case "CI", "NO_COLOR", "FORCE_COLOR", "TERM", "COLUMNS", "LINES", "LANG", "LC_ALL", "TZ", "CGO_ENABLED", "GOOS", "GOARCH", "MAESTRO_HOME":
+			default:
+				return command, name
+			}
 			i++
 			continue
 		}
@@ -857,9 +891,9 @@ func stripEnvironmentPrefix(command string) string {
 		}
 	}
 	if i == 0 {
-		return command
+		return command, ""
 	}
-	return strings.TrimSpace(command[ends[i-1]:])
+	return strings.TrimSpace(command[ends[i-1]:]), ""
 }
 
 func commandWords(command string) []string {

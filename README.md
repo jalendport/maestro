@@ -116,9 +116,9 @@ Grok takes read and edit work. Headless Grok runs with full tool access. A Grok 
 - An edit Lane also runs the checks and the project `allow` list, and writes inside the project, the Run folder, and the extra `dirs`; the workspace sandbox also permits writes to temp directories and `~/.grok`
 - Grok never relays: a command outside the allow list is denied; add it to `checks` or the project `allow` list
 
-The hook's [read-only command list](docs/configuration.md#read-only-commands) is the baseline for every project. It includes text and file commands, version control reads, and version and listing forms for Go, Node, PHP, Python, Rust, and Docker. Tests, builds, formatters, and installs need project `checks` or `allow` entries.
+The hook's [read-only command list](docs/configuration.md#read-only-commands) is the baseline for every project. It includes text and file commands, version control reads, and version and listing forms for Go, Node, PHP, Python, and Docker. Tests, builds, formatters, and installs need project `checks` or `allow` entries.
 
-The hook judges a command as written. A read-only command that carries a shell expansion (`$`, a backquote, a brace list, or an unquoted glob) is denied, because the shell could turn the expansion into a flag the list forbids; quote the pattern (`find . -name '*.go'`) or name the file. The sandbox is the boundary that holds a shell; the hook is the second line that holds paths, tool names, and the command list.
+The hook judges a command as written. It denies shell expansion with `$`, a backquote, or an unquoted `(` in a read-only command. Globs and brace lists are allowed, including `grep -r --include=*.go x .` and `ls *_test.go`. It removes leading `env` words and assignments to a [short list of harmless environment names](docs/configuration.md#agentsmaestrotoml) before it matches a command. Other assignments are denied in a read Lane. An edit Lane needs a check or `allow` entry for the full command, or uses Relay where its Harness supports Relay. `composer show` requires `--no-plugins`; npm, pnpm, Yarn, cargo, and rustc forms that can select a project toolchain are outside the baseline list. The sandbox is the boundary that holds a shell; the hook is the second line that holds paths, tool names, and the command list.
 
 Grok Lanes run under `--sandbox workspace` when every writable directory is inside the project. For edit Lanes, this includes `dirs`. If a directory lies outside the project, as this repository's Go caches do, the Grok edit Lane runs without the sandbox and its Route is `best-effort`. A read Lane does not use the extra edit `dirs`.
 
@@ -158,7 +158,7 @@ Antigravity takes read and edit work, like the other harnesses. The Maestro hook
 - An edit Lane also runs commands on the checks and `allow` lists, and writes inside the project, the Run folder, and the extra `dirs`
 - An edit Lane relays other commands; a read Lane denies them
 
-Antigravity has no kernel sandbox, so the hook is the only boundary of an Antigravity Lane. It judges a command as written: a read-only command that carries a shell expansion (`$`, a backquote, a brace list, or an unquoted glob) is denied; quote the pattern or name the file.
+Antigravity has no kernel sandbox, so the hook is the only boundary of an Antigravity Lane. It judges a command as written: a read-only command with `$`, a backquote, or an unquoted `(` is denied. Globs and brace lists are allowed.
 
 The hook entry changed, so an existing install must run `maestro adapter install agy` again.
 

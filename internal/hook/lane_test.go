@@ -233,9 +233,9 @@ func TestDecideLaneCommandPermissions(t *testing.T) {
 
 func TestDecideLaneEnvironmentPrefixes(t *testing.T) {
 	for _, prefix := range []string{
-		"env ", "env -u MAESTRO_HOME ", "env -i ", "env FOO=1 ", "FOO=1 BAR=2 ",
-		"FOO=1 env -i -u MAESTRO_HOME -u OTHER BAR=2 env -u THIRD ",
-		`FOO="a b" env -u "MAESTRO_HOME" BAR='c d' `, "FOO=a\\ b\tenv\t-i\t",
+		"env ", "env -u MAESTRO_HOME ", "env -i ", "env CI=1 ", "CI=1 NO_COLOR=1 ",
+		"CI=1 env -i -u MAESTRO_HOME -u OTHER NO_COLOR=1 env -u THIRD ",
+		`TERM="a b" env -u "MAESTRO_HOME" LANG='c d' `, "TERM=a\\ b\tenv\t-i\t",
 	} {
 		for _, access := range []string{"read", "edit"} {
 			for _, tc := range []struct {
@@ -268,6 +268,62 @@ func TestDecideLaneEnvironmentPrefixes(t *testing.T) {
 	}
 }
 
+func TestDecideLaneHarmlessEnvironmentNames(t *testing.T) {
+	for _, name := range []string{"CI", "NO_COLOR", "FORCE_COLOR", "TERM", "COLUMNS", "LINES", "LANG", "LC_ALL", "TZ", "CGO_ENABLED", "GOOS", "GOARCH", "MAESTRO_HOME"} {
+		command := name + "=1 git status"
+		got := DecideLane(&Call{Tool: "Bash", Input: map[string]any{"command": command}}, &Lane{Access: "read", Root: "/project"})
+		if got.Kind != "auto_approve" {
+			t.Fatalf("%s: %+v", command, got)
+		}
+	}
+}
+
+func TestDecideLaneOtherEnvironmentNames(t *testing.T) {
+	for _, tc := range []struct{ command, variable string }{
+		{"GIT_EXTERNAL_DIFF=x git diff", "GIT_EXTERNAL_DIFF"},
+		{`GIT_EXTERNAL_DIFF='sh x.sh' git diff`, "GIT_EXTERNAL_DIFF"},
+		{"GIT_CONFIG_COUNT=1 git status", "GIT_CONFIG_COUNT"},
+		{`GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0='sh x.sh' git status`, "GIT_CONFIG_COUNT"},
+		{"GOFLAGS=-toolexec=x go list ./...", "GOFLAGS"},
+		{"env GOFLAGS=-toolexec=x go list ./...", "GOFLAGS"},
+		{"CI=1 env -i -u MAESTRO_HOME GOFLAGS=-toolexec=x go list ./...", "GOFLAGS"},
+		{"PATH=./bin git status", "PATH"},
+		{"NODE_OPTIONS=--require=./x.js node --version", "NODE_OPTIONS"},
+		{"FOO=1 git status", "FOO"},
+		{"ci=1 git status", "ci"},
+		{"env -u GOFLAGS CI=1 GOFLAGS= go list ./...", "GOFLAGS"},
+		{"pwd && GOFLAGS=-toolexec=x go list ./...", "GOFLAGS"},
+	} {
+		for _, harness := range []string{"claude", "agy", "grok", "codex"} {
+			for _, access := range []string{"read", "edit"} {
+				t.Run(harness+"/"+access+"/"+tc.command, func(t *testing.T) {
+					lane := &Lane{Harness: harness, Access: access, Root: "/project", Checks: []string{"go list ./..."}, Allow: []string{"Bash(git *)", "Bash(node *)"}}
+					got := DecideLane(&Call{Harness: harness, Tool: "Bash", Input: map[string]any{"command": tc.command}}, lane)
+					want := "deny"
+					if access == "edit" && (harness == "claude" || harness == "agy") {
+						want = "relay"
+					}
+					if got.Kind != want || !strings.Contains(got.Reason, "environment variable is not on the harmless list: "+tc.variable) {
+						t.Fatalf("verdict = %+v, want %s naming %s", got, want, tc.variable)
+					}
+				})
+			}
+		}
+	}
+	command := "GOFLAGS=-toolexec=x go list ./..."
+	for _, access := range []string{"read", "edit"} {
+		lane := &Lane{Access: access, Root: "/project", Checks: []string{command}}
+		got := DecideLane(&Call{Tool: "Bash", Input: map[string]any{"command": command}}, lane)
+		want := "deny"
+		if access == "edit" {
+			want = "auto_approve"
+		}
+		if got.Kind != want {
+			t.Fatalf("explicit environment check %s: %+v, want %s", access, got, want)
+		}
+	}
+}
+
 func TestDecideLaneEnvironmentPrefixLimits(t *testing.T) {
 	lane := &Lane{Access: "edit", Root: "/project", Allow: []string{"Bash(go test *)", "Bash(make build)"}}
 	for _, command := range []string{
@@ -296,10 +352,10 @@ func TestDecideLaneEnvironmentPrefixLimits(t *testing.T) {
 func TestDecideLaneEnvironmentPrefixWriteFlags(t *testing.T) {
 	for _, access := range []string{"read", "edit"} {
 		for _, command := range []string{
-			"env -u MAESTRO_HOME git diff --output=file", "FOO=1 sort '-o' file",
-			"env -i go env -w GOPROXY=off", "env FOO=1 find . -delete",
-			"FOO=1 env -i node --version --eval 'write()'", "env -i sed 'w output' file",
-			`FOO=1 cat "$FILE"`, `FOO=$VALUE cat file`, `FOO=$VALUE [ -f file ]`,
+			"env -u MAESTRO_HOME git diff --output=file", "CI=1 sort '-o' file",
+			"env -i go env -w GOPROXY=off", "env CI=1 find . -delete",
+			"CI=1 env -i node --version --eval 'write()'", "env -i sed 'w output' file",
+			`CI=1 cat "$FILE"`, `CI=$VALUE cat file`, `CI=$VALUE [ -f file ]`,
 		} {
 			t.Run(access+"/"+command, func(t *testing.T) {
 				lane := &Lane{Access: access, Root: "/project", Checks: []string{command}, Allow: []string{"Bash(" + command + ")"}}
@@ -874,22 +930,82 @@ func TestDecideLaneReadOnlyCommandForms(t *testing.T) {
 	}
 }
 
+func TestDecideLaneProjectToolchainCommands(t *testing.T) {
+	for _, command := range []string{
+		"yarn --version", "pnpm --version", "pnpm ls", "pnpm ls --depth 0",
+		"npm --version", "npm ls", "npm view react version", "cargo --version", "rustc --version",
+	} {
+		for _, access := range []string{"read", "edit"} {
+			lane := &Lane{Access: access, Root: "/project"}
+			call := &Call{Harness: "agy", Tool: "Bash", Input: map[string]any{"command": command}}
+			got := DecideLane(call, lane)
+			want := "deny"
+			if access == "edit" {
+				want = "relay"
+			}
+			if got.Kind != want {
+				t.Fatalf("%s %s: %+v, want %s", access, command, got, want)
+			}
+			lane.Checks = []string{command}
+			if access == "edit" {
+				want = "auto_approve"
+			}
+			if got := DecideLane(call, lane); got.Kind != want {
+				t.Fatalf("explicit check %s %s: %+v, want %s", access, command, got, want)
+			}
+		}
+	}
+	for _, access := range []string{"read", "edit"} {
+		for _, command := range []string{
+			"composer show", "composer show --format=json", "composer show -- --no-plugins",
+			"composer show --no-plugins=0", "composer show --no-scripts",
+		} {
+			lane := &Lane{Access: access, Root: "/project", Checks: []string{command}, Allow: []string{"Bash(composer *)"}}
+			got := DecideLane(&Call{Tool: "Bash", Input: map[string]any{"command": command}}, lane)
+			if got.Kind != "deny" || !strings.Contains(got.Reason, "composer show requires --no-plugins") {
+				t.Fatalf("%s %s: %+v", access, command, got)
+			}
+		}
+		for _, command := range []string{
+			"composer show --no-plugins", "composer show --no-plugins --format=json",
+			"composer --no-plugins show", "CI=1 env composer show --no-plugins",
+		} {
+			got := DecideLane(&Call{Tool: "Bash", Input: map[string]any{"command": command}}, &Lane{Access: access, Root: "/project"})
+			if got.Kind != "auto_approve" {
+				t.Fatalf("%s %s: %+v", access, command, got)
+			}
+		}
+		for _, command := range []string{"pip list --python=./x", "pip show --python ./x requests"} {
+			got := DecideLane(&Call{Tool: "Bash", Input: map[string]any{"command": command}}, &Lane{Access: access, Root: "/project", Checks: []string{command}})
+			if got.Kind != "deny" || !strings.Contains(got.Reason, "--python") {
+				t.Fatalf("%s %s: %+v", access, command, got)
+			}
+		}
+	}
+	got := readOnlyCommandNames()
+	if !strings.Contains(got, "composer show --no-plugins") {
+		t.Fatalf("accepted commands omit --no-plugins: %s", got)
+	}
+	for _, removed := range []string{"yarn", "pnpm", "npm", "cargo", "rustc"} {
+		if strings.Contains(got, removed) {
+			t.Fatalf("accepted commands include %s: %s", removed, got)
+		}
+	}
+}
+
 func TestDecideLaneReadOnlyShellExpansion(t *testing.T) {
 	for _, tc := range []struct{ command, reason string }{
 		{`find -- . -exec sh -c id \;`, "-exec"},
 		{"find -- .git -delete", "-delete"},
 		{`find . ${X:--exec} touch /tmp/x \;`, "$"},
 		{`find . $'-exec' sh -c id \;`, "$"},
-		{`find . -{print,exec} sh -c id \;`, "{"},
-		{"rg --pr{e,e}=sh x", "{"},
-		{"sort -{o,o} f", "{"},
 		{`cat "$HOME/x"`, "$"},
 		{"cat \"a`id`\"", "`"},
-		{"ls *.go", "*"},
-		{"cat ?.txt", "?"},
-		{"ls [ab].txt", "["},
+		{"echo $(id)", "shell construct is not allowed: $("},
+		{"echo `id`", "shell construct is not allowed: `"},
 		{"head -n 1 -- $FILE", "$"},
 		{"cat README.md(e:'touch x':)", "("},
+		{"cat file(e:'id':)", "read-only command carries a write flag or form: shell expansion ("},
 	} {
 		for _, access := range []string{"read", "edit"} {
 			got := DecideLane(&Call{Tool: "run_command", Input: map[string]any{"CommandLine": tc.command}}, &Lane{Access: access, Root: "/project"})
@@ -899,6 +1015,7 @@ func TestDecideLaneReadOnlyShellExpansion(t *testing.T) {
 		}
 	}
 	for _, command := range []string{
+		"grep -r --include=*.go x .", "ls *_test.go", "ls *.go", "cat ?.txt", "ls [ab].txt", "echo {a,b}", "echo ] }",
 		"find . -name '*.go'", "rg 'x*' -g '*.go' src", "echo '$HOME'", `echo \$HOME`, "git log -- '*.go'",
 		"find . -type f -print", `grep -r "a{2}" .`, "cat file 2>&1", `find . \( -name a -o -name b \)`, "grep 'f(x)' main.go",
 	} {

@@ -153,7 +153,7 @@ func TestHookCommandAntigravityRelay(t *testing.T) {
 }
 
 func TestHookCommandLaneFallback(t *testing.T) {
-	const acceptedCommands = "[, basename, cargo --version, cat, composer --version, composer show, cut, date, df, diff, dirname, docker --version, docker compose config, docker compose ps, docker images, docker info, docker ps, docker version, du, echo, file, find, git blame, git branch, git describe, git diff, git log, git ls-files, git rev-parse, git show, git status, git tag, go doc, go env, go list, go version, grep, head, jq, ls, node --version, npm --version, npm ls, npm view, php --version, pip --version, pip list, pip show, pnpm --version, pnpm ls, pwd, python3 --version, realpath, rg, rustc --version, sed, sort, stat, tail, test, tr, tree, uniq, wc, which, yarn --version, yq"
+	const acceptedCommands = "[, basename, cat, composer --version, composer show --no-plugins, cut, date, df, diff, dirname, docker --version, docker compose config, docker compose ps, docker images, docker info, docker ps, docker version, du, echo, file, find, git blame, git branch, git describe, git diff, git log, git ls-files, git rev-parse, git show, git status, git tag, go doc, go env, go list, go version, grep, head, jq, ls, node --version, php --version, pip --version, pip list, pip show, pwd, python3 --version, realpath, rg, sed, sort, stat, tail, test, tr, tree, uniq, wc, which, yq"
 	const readLaneReason = "read Lane: command not on the read-only list; accepted commands: " + acceptedCommands
 	for _, tc := range []struct {
 		name, lane, harness, payload, want string

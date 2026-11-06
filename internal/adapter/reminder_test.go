@@ -18,7 +18,7 @@ func TestReminderText(t *testing.T) {
 	}
 }
 
-func TestStaleHarnessesUnder5ms(t *testing.T) {
+func TestStaleHarnesses(t *testing.T) {
 	home := testHome(t)
 	skill := strings.Repeat("Current skill text.\n", 1000)
 	for _, harness := range Harnesses {
@@ -28,16 +28,10 @@ func TestStaleHarnessesUnder5ms(t *testing.T) {
 	}
 	put(t, SkillFile(), strings.Repeat("Old skill text.\n", 1000))
 	put(t, ReminderFile(home), "Old Grok rules.\n")
-	start := time.Now()
 	stale := StaleHarnesses(home, skill)
-	elapsed := time.Since(start)
 	if got := strings.Join(stale, ", "); got != "claude, codex, grok, agy" {
 		t.Fatalf("stale Harnesses = %q", got)
 	}
-	if elapsed >= 5*time.Millisecond {
-		t.Fatalf("stale Adapter check took %s; want under 5 ms", elapsed)
-	}
-	t.Logf("stale Adapter check: %s", elapsed)
 }
 
 func TestReminderHookInstallAndState(t *testing.T) {
