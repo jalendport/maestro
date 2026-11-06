@@ -8,97 +8,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Added
-- Added a Plan check before Runs with two or more edit Tasks: one quick read Dispatch checks paths, symbols, scope, and order against the tree; findings hold the Run for approval, a failed check lets it continue, and `[run] plan_check = false` or `--no-plan-check` turns it off
-- Added Worktrees for standalone edit Dispatches, with template commits, landing through a moved user branch, uncommitted landing for `commit: false`, and `maestro dispatch --finish <task>` to retry a blocked landing without a new Lane; `maestro clean` removes old Worktrees and keeps branches with commits that did not land
-- Added a landing check on the merged Run branch before a Worktree-mode Run or standalone edit Dispatch lands, with a pause on failure and a retry after a fix Task
-- Added the Worktree switches: `[run] worktrees` in `~/.maestro/config.toml` defaults to `true`, and project `worktrees = false` can turn it off; `maestro doctor` shows the setting, dependency links, and a warning for uncommitted changes
-- Added Worktree mode for a Run: when Worktrees are on, the repository has a commit, the tree has no uncommitted changes, and the Plan has more than one edit Task, each edit Task runs at the same time as the others in its own Worktree on its own Task branch; a read Task of such a Run reads a detached Worktree at the Run branch head, so a review Task sees the merged work; otherwise the Run uses tree mode with `tree busy`, as before, also when HEAD is not on a branch or when a Task's `touch` names a shared dependency folder (`task <n> touches <folder>`). The mode and the tree-mode reason go into `run.json` once, when the Run starts, and `maestro run`, `maestro status`, and the Run report show `worktrees: on` or `worktrees: off (<reason>: Tasks run one at a time)`
-- Added the overlap order for Worktree mode: an edit Task waits with `files overlap with <n>` while an earlier edit Task that is not its dependency and is not done shares a path with it, and the Routes, status, and report show `after <n> (files overlap)`
-- Added Maestro commits after the gate: a `verified` edit Task, or an `unverified` edit Task with a Report and changed files, gets one commit of its changed paths with the user as author; in Worktree mode Maestro then merges the Task branch into the Run branch, and a `blocked_by` Task starts from the merged Run branch. The message comes from `[commit] message` in `~/.maestro/config.toml` (default `{title}\n\nCo-Authored-By: {lane}`, with `{title}`, `{run}`, `{task}`, `{family}`, `{model}`, `{lane}`, and `{summary}`), or from `commit_message` in `.agents/maestro.toml`; `[commit.identities]` replaces the `{lane}` text per Family prefix
-- Added the end of a Worktree-mode Run: a `done` Run with the Plan's `commit: true` fast-forwards the user's branch and keeps the Task commits, and with `commit: false` lands the changes uncommitted and deletes the Run branch; when the user's branch moved, the Run pauses with the error and `maestro resume <run> --finish` continues from the step that is left. A cancelled Run removes its Worktrees and keeps the Run branch, which the report names; `maestro clean` removes the Worktrees of Runs that ended before `--older-than` and deletes their branches only when the Run branch landed on the user's branch, else it keeps and names them
-- Added the merge conflict rule: when a Task branch conflicts with the Run branch, Maestro starts the rebase in the Task's Worktree and gives the Task one more attempt with a conflict Brief; the Lane edits the conflicted files, and Maestro continues the rebase after the checks and the gate and merges again. A second conflict or a failed attempt blocks the Task with `merge conflict in <paths>` and keeps its Worktree, which `maestro wait` and the Reminder name; after a hand fix, `maestro resume <run> --task <n> --merge` retries the merge with no new Lane
-- Added two roots for a Dispatch: `Project` keeps the Run folder, Brief, Project file, allow rules, and Ledger; `Workdir` is the Worktree for Lane edits, checks, the baseline, and the gate diff, or `Project` when no Worktree is set
-- Added the Worktree package for Runs: Task branches from a Run branch, shared dependency folders (`node_modules`, `vendor`, `.venv`, `.bundle`, `storage/framework`) linked into the Worktree and excluded from its git status, commits of given paths with a filled message template, and merges through the Run branch
-- Added the Plan's introduction to the start of every Task's Context under `Shared context of the Plan:`, before the Task's own Context
-- Added a stale Adapter line to the Reminder in Claude Code, Codex, and Antigravity when the installed skill or Grok rules differ from the binary; run `maestro adapter install` to clear it
-- Added project warnings in `maestro doctor` for no active checks and for Docker checks without `~/.docker` in `dirs`
-- Added sleep protection for every verb that blocks on live work and for the Orchestrator's turn in Claude Code, Codex, and Antigravity, with a refreshed 30-minute lease and `Stop` hooks; run `maestro adapter install` again and trust the new Codex hook in `/hooks`
-- Added project live items to the Reminder in Claude Code, Codex, and Antigravity: open Relays with answer commands, paused Runs with resume commands, blocked and failed Tasks of live Runs, and running Lanes with their Tasks and elapsed times; Grok uses `maestro status`
-- Added Solo wake-ups for a paused Run and a single Dispatch that ends failed, blocked, timed out, or with an unshaped Report, with the same next command as `maestro wait`
-- Added `maestro doctor --canary [harness]` to check each Harness with a small read Dispatch and store version-specific launch, hook, and Report results; the hook part does not apply to Codex, and the Canary uses only its Wall limit
+- Added Worktree mode for Runs: each edit Task runs in parallel in its own Worktree and Task branch, and Maestro merges it into the Run branch; other Runs use tree mode, as before
+- Added Worktrees for standalone edit Dispatches, under the same conditions as a Run; `maestro dispatch --finish <task>` retries a blocked landing without a new Lane
+- Added read Worktrees: each read Task of a Worktree-mode Run reads a detached Worktree at the Run branch head, so a review Task sees the merged work
+- Added the mode line `worktrees: on` or `worktrees: off (<reason>)`, for example for a container-bound check, to `maestro run`, `maestro dispatch`, `maestro status`, and the Run report
+- Added `[run] worktrees` in `~/.maestro/config.toml` (default `true`) and the project key `worktrees = false` to turn Worktrees off
+- Added dependency links in Worktrees (`node_modules`, `vendor`, `.venv`, `.bundle`, `storage/framework`, `.env`, `.env.local`) and the project key `worktree_links` for more paths
+- Added the overlap order: in Worktree mode, an edit Task waits with `files overlap with <n>` while an earlier edit Task with an overlapping `Files` or `touch` path is not done
+- Added Maestro commits after the gate: Maestro commits a verified edit Task with the user as author; in tree mode it commits only when the Brief says `commit: true`
+- Added the commit message template: `[commit] message` in `~/.maestro/config.toml` or the project key `commit_message`, with placeholders such as `{title}` and `{lane}`, and `[commit.identities]`
+- Added landing for a Worktree-mode Run: with `commit: true` the Task commits land on the user's branch, and with `commit: false` the changes land uncommitted; `maestro resume <run> --finish` retries
+- Added landing on a busy checkout: Maestro rebases the Run branch onto a user branch that gained commits, and uncommitted changes block a landing only when their paths overlap the Run's
+- Added the landing check: the project's `checks` run on the merged Run branch before it lands; a failure pauses the Run for a fix Task from `maestro add`
+- Added the merge conflict rule: a Task that conflicts with the Run branch gets one more attempt to resolve it; after a hand fix, `maestro resume <run> --task <n> --merge` retries the merge
+- Added Worktree cleanup: a cancelled Run removes its Worktrees, and `maestro clean` removes old Worktrees and keeps and names each branch whose commits did not land
+- Added live Runs that share a project in Worktree mode; tree mode needs the checkout to itself, and `maestro add <brief> --run <id>` names the Run when more than one is live
+- Added the Plan check: one read Dispatch checks the Plan against the tree before a Run with two or more edit Tasks; findings hold the Run, and `--no-plan-check` or `[run] plan_check = false` skips it
+- Added the Plan's introduction to the start of every Task's Context under `Shared context of the Plan:`
+- Added the project's live items to the Reminder in Claude Code, Codex, and Antigravity: open Relays, paused Runs, blocked and failed Tasks of live Runs, and running Lanes
+- Added a stale Adapter line to the Reminder when the installed skill or Grok rules differ from the binary; run `maestro adapter install` to clear it
+- Added sleep protection for blocking verbs and for the Orchestrator's turn in Claude Code, Codex, and Antigravity; run `maestro adapter install` again and trust the new Codex hook in `/hooks`
+- Added Solo wake-ups for a paused Run and for a single Dispatch that ends failed, blocked, timed out, or with an unshaped Report
+- Added read-only Solo MCP tools for Claude Lanes with a Solo link, for process output and todo comments; other Solo tools are denied without a Relay
+- Added `maestro doctor --canary [harness]` to check each installed Harness with a small read Dispatch; Canary Dispatches do not count in Route statistics
+- Added `maestro doctor` warnings for no active project checks, Docker checks without `~/.docker` in `dirs`, and ignored `.env*` files that Worktrees do not link
 
 ### Changed
-- Changed Runs and standalone Dispatches to use tree mode for container-bound checks (`ddev`, `docker`, `docker-compose`, `lando`, `sail`); Worktrees link `.env` and `.env.local` and the project's `worktree_links`, `maestro init` proposes links per stack, and `maestro doctor` warns about ignored environment files that are not linked
-- Changed Lanes to never commit: every rendered Brief says `Do not commit`, Claude Lanes no longer get the `git add` and `git commit` tools, and the hook no longer approves these commands for a Lane. A Brief's `commit: true` now means that Maestro commits the Task's changed paths after the gate, on the user's branch in tree mode and for a single Dispatch
-- Changed slow tests to use short limits, poll intervals, and wake-up waits that each test sets, and to run independent cases in parallel; `go test ./...` takes about 15 seconds instead of 105, tests check that the production defaults stay the same, and a `wait` test no longer starts the installed Harnesses
-- Changed `maestro init` to detect project stacks, write cache directories and command allow rules, suggest checks in comments, and merge missing values with `--write` while it keeps existing values and comments
-- Changed the hook's read-only command list to a baseline for every project, with text and file commands, Git list forms, and Go, Node, PHP, Python, Rust, and Docker read forms; tool caches and logs are allowed, while project writes and test, build, format, and install runners need project rules
-- Changed passing Tasks under the gate's close threshold to get one nudge on the same Lane for missing Done items, with one extra attempt in the Dispatch and Run caps and a Ledger mark
-- Changed routing so Jev's Judgment level sets the Tier; the Brief's `level` is context for Jev and the level for the rules fallback, while explicit Tier bounds and the edit rule still apply
-- Changed the skill file and README to tell the Orchestrator to write the `level` it believes, with no raised level or named Lane to reach a stronger Lane, and to list in `touch:` every path the Task may change, including tests, fixtures, docs, and `CHANGELOG.md`; the skill file also says what a blocked Task's Cause means and what one nudge is
-- Changed Run escalation to use the Cause of each Bad result; Brief and environment blockers go to the Orchestrator with the Lane's Blocked items, while capability failures can re-Route one Tier up; the Ledger records the Cause, its source, and the decision
-- Changed checks to use the Idle limit and a separate shared Wall limit budget, with one Docker pre-flight per Task; a limit or failed pre-flight skips the remaining checks and records the reason and Failure class
-- Changed `maestro clean` to remove old or orphan control folders across all project keys and old cache folders; it keeps live Run controls and the latest Canary files per Harness, and never touches the Ledger or `budget.json`
-- Changed `maestro wait` to return with exit 2 and the next command for an open Relay, a paused Run, or a blocked or failed Task that needs the Orchestrator; while a Lane runs, each user reply opens with a table of the running Lanes (Lane, Task, Started, State) and one line for what waits for the user
-- Changed `close_tabs` to a key with no effect; old user files still load, and `maestro doctor` reports the key
-- Changed Canary evidence to name the hook record's folder, accept a Run folder record when the control write fails, and keep failed check files at the path shown by `maestro doctor` until the next Canary for that Harness
+- Changed every Lane to run as a headless child process, inside Solo and outside it
+- Changed Lanes to never commit: every Brief says `Do not commit` and has no push rules, and Claude Lanes no longer get `git add` and `git commit`; a Brief's `commit: true` now means Maestro commits
+- Changed Claude and Antigravity edit Lanes to relay commands outside the allow list in every launch, and Antigravity edit Lanes to have no vendor print timeout
+- Changed routing so Jev's Judgment level sets the Tier; the Brief's `level` and `--level` are the Orchestrator's estimate, and only `floor` and `ceiling` set hard Tier bounds
+- Changed Run escalation to use the Cause of a Bad result: only `capability` re-Routes one Tier up, and `brief`, `environment`, and `none` block the Task for the Orchestrator
+- Changed passing Tasks under the gate's close threshold to get one nudge on the same Lane for missing Done items, with one extra attempt in the Dispatch and Run caps
+- Changed the scope guard to accept test files outside `touch` and flag them as `tests outside touch` for the gate and the end-of-Run Council; a deleted test file outside `touch` stays a violation
+- Changed checks to use the Idle limit and a shared Wall limit budget, with one Docker pre-flight per Task; a limit or a failed pre-flight skips the remaining checks
+- Changed a failed check to run once more when the Wall limit budget permits; a pass records `flaky: true`, and failed output keeps the failure lines before its tail
+- Changed the hook's read-only command list to a baseline for every project, with text and file commands, Git list forms, and Go, Node, PHP, Python, and Docker read forms
+- Changed the hook to permit a glob after a fixed prefix in a read-only command, such as `ls ./*_test.go`; a bare glob and an unquoted brace stay denied, and the deny reason tells how to write them
+- Changed the hook to remove `env` words and assignments to harmless names such as `CI` and `CGO_ENABLED` before it matches a command; other assignments keep the full command
+- Changed `maestro init` to detect project stacks, write cache `dirs` and `allow` rules, suggest `checks` and `worktree_links` in comments, and merge missing values with `--write`
+- Changed `maestro wait` to return exit 2 for a blocked or failed Task (kind `task_failed`) and to give the `report.md` path of a paused Run; `maestro wait <task>` follows only that Task
+- Changed `maestro clean` to remove old or orphan control folders across all project keys and old cache folders; it never touches the Ledger or `budget.json`
 - Changed the default of `max_per_account` to no Account cap; `max_total` still applies across Runs
-- Changed `solo_tool` to a key with no effect; old user files still load, and `maestro doctor` reports the key
-- Changed every Lane to run as a headless child process inside Solo and outside it. Claude Lanes with a Solo link get a read-only Solo MCP set for process data and todo comments. The Brief gives the required `project_id`. Other Solo tools are denied without a Relay, and all `SOLO_` variables stay removed
-- Changed rendered Briefs and Brief format help to leave push rules to the user; a Lane that may commit must commit only the files it changed for that Task
 - Changed the default Frontier chain to try `codex-astra`, then `claude-fable`
-- Changed Claude and Antigravity edit Lanes to relay commands outside the allow list on the one-shot path; Antigravity edit Lanes use Maestro's limits with no vendor print timeout
+- Changed each Run notification to include the project folder name
+- Changed the Orchestrator skill to ask for the `level` it believes, a `touch:` list with every required path, and a table of the running Lanes at the start of each reply while a Lane runs
+- Changed the Orchestrator skill to add `Plans for Worktree mode`: precise `Files`, wide `touch`, no `CHANGELOG.md` or `README.md` edits by Lanes in a parallel Plan, and four to six Tasks
+
+### Deprecated
+- Deprecated the keys `close_tabs` and `solo_tool`: old user files still load, the keys have no effect, and `maestro doctor` reports them
 
 ### Removed
-- Removed the Lane tab path, its launch shapes, tab Budget Harvest, and Solo agent tool discovery; every Lane uses the one-shot path
-- Removed `maestro tell` and `maestro roster solo`, which used Lane tabs and Solo agent tool discovery
+- Removed Lane tabs in Solo, tab Budget Harvest, and Solo agent tool discovery
+- Removed `maestro tell` and `maestro roster solo`
 
 ### Fixed
-- Fixed checks that a failed check's rerun left no budget for: they are recorded as `skipped (wall limit after a rerun)` and the first failure stays the Task's outcome
-- Fixed the Plan check's start grace to count from the moment the check detaches, `maestro cancel` during a check to report `cancel requested` and be honoured, standalone Dispatches saved under the old Worktree identity to land and clean, and a hand fix after a failed cleanup to land with its commit
-- Fixed the overlap order to use the Brief's own `touch`, so a test file in `Files` no longer serializes independent Tasks; `maestro add` queues a fix Task on a paused Run after a landing check failure; the Plan check reads bulleted findings, `maestro run` names `maestro wait` as the next command while the check runs, `maestro cancel` ends a running check, and a dead check supervisor gives `no result` instead of a held Run
-- Fixed standalone Dispatch Worktrees to use `d-<run>-<task>` as their identity, so two Dispatches never share a Worktree, and a hand fix in the kept Worktree lands through `maestro dispatch --finish`
-- Fixed a stalled check rerun that replaced the first failure and skipped later checks; a rerun does not start when the budget cannot hold it, and the hook and Relay timing tests keep a loose regression guard
-- Fixed two live Runs on one project: the checkout is guarded when either Run uses tree mode, `maestro approve` chooses the mode again from the corrected Plan, and `maestro add --run <id>` and `maestro cancel` find the right live Run
-- Fixed `Finish` retries after a crash that left untracked Run files or a landing Worktree
-- Fixed Task waits on paused and held Runs to return the Run's item with exit 2, Gate records from before `scored` to print their score line, the doctor line for uncommitted changes to be information, and the brace deny reason to say how to quote `@{u}`
-- Fixed the Plan check's Route to ignore Council and approval triggers, so the check runs as one Lane
-- Fixed the scope guard to keep test files in scope, flagged as `tests outside touch` for the gate and the end-of-Run Council when they are outside the Brief's own `touch`, while a deleted test file outside `touch` stays a violation; the read-only command check denies a glob in a word that starts with `-` unless it follows `=`
-- Fixed checks that failed by chance under concurrent Lanes: a failed check runs once more and records `flaky: true` when it passes, and the recorded output keeps the failure lines before its tail; four timing tests lost their tight bounds
-- Fixed the read-only command check to deny unquoted brace lists and globs that can match a file name that starts with `-`; globs after a fixed prefix stay permitted, and the deny reason tells the Lane to write `./` before the glob
-- Fixed Run landing on busy checkouts: Worktree mode no longer needs a clean tree or more than one edit Task, a user branch that gained commits is rebased onto, uncommitted changes block a landing only when their paths overlap the Run's, a saved Run keeps its mode on resume, a read Worktree left by a stopped supervisor is reused, and a squash retry continues after a failed marker write
-- Fixed `maestro clean` to remove expired Runs with a blocked Task or `finish_pending` again while Worktree cleanup keeps the branches that did not land; `maestro wait <task>` follows only that Task and returns its result when the Task ends, even while other Tasks of the Run continue
-- Fixed zero Gate scores to stay recorded and printed as scores with `scored: true`, and failed Docker pre-flight checks to set the error text for partial Reports with Blocked items
-- Fixed the awake worker to verify the Orchestrator's process start time and to walk past a shell wrapper, so a wrapper that exits first no longer loses the Reminder lease or the Stop event
-- Added the section `Plans for Worktree mode` to the skill file: precise `Files`, wide `touch`, no `CHANGELOG.md` or `README.md` edits by Lanes in a parallel Plan, callers in the same Task as a removed export, and the Task shape that ends a Run in 20 to 40 minutes
-- Fixed command matching for environment prefixes: the hook strips `env`, `env -i`, and `env -u NAME`, and strips a `NAME=value` word only for a short list of harmless names (`CI`, `TERM`, `CGO_ENABLED`, and others); any other variable keeps the full command, so a read Lane is denied and an edit Lane relays, with the variable named
-- Fixed the read-only command check to permit globs and brace lists (`*`, `?`, `[`, `]`, `{`, `}`) while `$`, backquotes, and `(` stay denied; `composer show` requires `--no-plugins`, `pip list` and `pip show` deny `--python`, and the npm, pnpm, Yarn, cargo, and rustc forms leave the baseline list because their launchers can run project-selected code
-- Fixed timing tests to use wide limits or result assertions instead of tight elapsed-time bounds
-- Fixed the Cause rules: a failed Docker pre-flight is `environment` under the rule, a `partial` Report with Blocked items keeps its Cause over a later check Stall, a Bad result with Cause `none` blocks for the Orchestrator instead of a re-Route, and a Gate that holds only a Cause records no `satisfies` and prints `cause <value> (<source>)`
-- Fixed the nudge to run in a project with no checks and to tell the Lane that the previous attempt's work passed and stays; a prior path that no longer differs from the earliest baseline leaves the touch guard; `maestro dispatch --level` and `maestro run --level` reach Jev as the Orchestrator's estimate and the Reason line
-- Fixed the `Stop` hook to do nothing for a Lane, outside hook scope, or with `keep_awake = false`; the process walk runs in the detached worker so the Reminder never waits for it; dead lease records are pruned; Solo wake-ups pass a positive delay again
-- Fixed Grok Lanes in a Worktree to keep the workspace sandbox and return the Report by message, with the launch's Enforcement in the Route
-- Fixed `maestro approve` to reuse the held Task ids and leave no orphan Task folders; a commit failure after a `verified` result records `decision: blocked` in the Dispatch record and the Ledger, and a failed Task shows its Worktree path
-- Fixed `maestro wait <task>` for a Task of a Run to follow the Run state: it exits 2 with the Cause, the Blocked items, and the resume command, and waits after a resume answer instead of returning the old result
-- Fixed resumed Tasks judged on files from other Tasks and stopped by an earlier answer's Dispatch cap; the Run report now lists the files judged
-- Fixed Run Tasks shown as stale while their supervisor runs the checks and the gate; status, the Reminder, and wait now use the Run supervisor, and status and the Reminder name the checks phase
-- Fixed Run notifications during tests and added the project folder name to each Run notification
-- Fixed Mac idle sleep during live work: every Maestro `caffeinate` now uses `-i -s -w <pid>` to protect work on battery and AC power
-- Fixed blank Ledger rows from tests with an empty-`kind` check and a required temporary `MAESTRO_HOME` in tests; Budget saves now drop Accounts that are absent from the loaded Roster
-- Fixed resume answers that appeared again before a slow Task start; the Run state is saved before the answer marker is removed, and a second answer cannot restart a running Task
-- Fixed Run ownership during a pause; the supervisor and CLI make one decision about which process takes a resume answer, and a second supervisor cannot take a live Run
-- Fixed stale Lanes in the Reminder and status; the Reminder leaves out processes that are gone, and status marks them `stale (process gone)`
+- Fixed Lanes stopped at the Idle limit while a tool call was in progress; the Wall limit still applies
+- Fixed Grok Lanes that stopped at the Idle limit during work
+- Fixed Antigravity read Lanes that could not write `result.md`; they now return the Report in their final message
+- Fixed resumed Tasks judged on files from other Tasks or stopped by an earlier answer's Dispatch cap; the Run report now lists the files judged
+- Fixed Run Tasks shown as stale while their supervisor runs the checks and the gate; `maestro status` now names the checks phase
+- Fixed `maestro status` to mark a Lane whose process is gone as `stale (process gone)`
 - Fixed the Reminder's project root in a nested git folder to match the CLI
-- Fixed the label for a failed Task in `maestro wait` to be `task_failed`, limited Relay input in the Reminder and wait reason to 300 characters, and added the paused Run report path in text and JSON
-- Fixed the temp path symlink test to use the per-user temp folder and skip with a reason when it cannot make a symlink
-- Fixed Runs that started one caffeinate for each Dispatch; each Maestro process now shares one until the last caller stops
-- Fixed Lanes stopped at the Idle limit while a tool call was in progress; that time no longer counts toward the Idle limit, and the Wall limit still applies
-- Fixed Antigravity read Lanes that could not write `result.md` in headless mode; they now return the Report in their final message
-- Fixed Tasks that wait for an Account slot so they do no Budget refresh, Router call, or snapshot while they wait; a lost slot keeps its Route for the next claim
-- Fixed Route statistics to leave out Canary Ledger rows
-- Fixed the stated Grok transcript limit
+- Fixed resume answers that appeared again before a slow Task start; a second answer cannot restart a running Task
+- Fixed Run ownership during a pause, so only one process takes a resume answer and a second supervisor cannot take a live Run
+- Fixed `maestro approve` to reuse the held Task ids and leave no orphan Task folders
+- Fixed Gate scores of zero to stay recorded and printed as scores
+- Fixed Tasks that wait for an Account slot to make no Budget refresh or Router call while they wait; a lost slot keeps its Route
 - Fixed a race between Run supervisors that could start more Dispatches than `max_total` or a set `max_per_account` permits
-- Fixed one-shot Grok Lanes that stopped at the Idle limit during work: Maestro now reads `streaming-json` output line by line
+- Fixed Mac idle sleep during live work on battery power: every Maestro `caffeinate` now uses `-i -s -w <pid>`
+- Fixed Runs that started one `caffeinate` for each Dispatch; each Maestro process now shares one
+- Fixed `budget.json` to drop Accounts that are absent from the loaded Roster
 
 ## 1.2.0 - 2026-10-14
 

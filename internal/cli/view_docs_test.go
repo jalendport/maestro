@@ -28,7 +28,7 @@ func TestSoloAndEnforcementDocumentation(t *testing.T) {
 		}
 	}
 	changelog := strings.SplitN(read("CHANGELOG.md"), "## 1.2.0", 2)[0]
-	if !strings.Contains(changelog, "Claude Lanes with a Solo link get a read-only Solo MCP set") || !strings.Contains(changelog, "all `SOLO_` variables stay removed") || !strings.Contains(changelog, "Other Solo tools are denied without a Relay") {
+	if !strings.Contains(changelog, "read-only Solo MCP tools for Claude Lanes with a Solo link") || !strings.Contains(changelog, "other Solo tools are denied without a Relay") {
 		t.Fatal("the one-shot changelog omits the Claude Solo tool set or its limits")
 	}
 }
