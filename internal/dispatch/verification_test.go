@@ -143,6 +143,64 @@ func TestCheckStopReasonAndClassReachLedger(t *testing.T) {
 	}
 }
 
+func TestRerunWallLimitKeepsBadResultAndSkippedChecksInLedger(t *testing.T) {
+	root, folder := causeRoot(t), t.TempDir()
+	env := &Env{Roster: &roster.Roster{Router: config.Router{Backend: "rules"}}}
+	task := &Task{Project: root, Access: brief.AccessEdit, IdleLimit: "1m", WallLimit: "1s"}
+	rec := &Record{Kind: "dispatch", Path: folder, StartedAt: time.Now()}
+	command := "printf 'call\\n' >> calls; if [ ! -f first ]; then touch first; printf 'first failure\\nmore detail'; exit 3; fi; printf 'rerun output'; sleep 30"
+	commands := []string{command, "touch must-not-run", "docker compose test"}
+	judge(env, task, rec, brief.ParseReport("STATUS: done\n"), commands, &brief.Brief{}, attemptBaseline{})
+	want := "check failed: " + command + ": first failure"
+	if rec.Outcome.Outcome != OutcomeFailed || rec.Outcome.FailureClass != FailBad || rec.Outcome.ErrorText != want {
+		t.Fatalf("outcome: %+v", rec.Outcome)
+	}
+	checks := rec.Verification.Checks
+	if len(checks) != 3 || checks[0].Command != command || checks[0].OK || checks[0].Skipped || checks[0].FailureClass != FailBad || checks[0].Output != "first failure\nmore detail" || checks[0].Reason != "" {
+		t.Fatalf("checks: %+v", checks)
+	}
+	for i, check := range checks[1:] {
+		if check.Command != commands[i+1] || !check.Skipped || check.OK || check.Reason != "wall limit after a rerun" || check.FailureClass != FailBad || check.Output != "" || check.Duration != "0s" {
+			t.Fatalf("remaining check: %+v", check)
+		}
+		found := false
+		for _, event := range rec.Events {
+			found = found || (event.Kind == "check" && strings.Contains(event.Text, check.Command+": skipped: wall limit after a rerun"))
+		}
+		if !found {
+			t.Fatalf("skipped check absent from events: %+v", rec.Events)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "must-not-run")); !os.IsNotExist(err) {
+		t.Fatalf("skipped check ran: %v", err)
+	}
+	calls, err := os.ReadFile(filepath.Join(root, "calls"))
+	if err != nil || string(calls) != "call\ncall\n" {
+		t.Fatalf("calls: %q, %v", calls, err)
+	}
+	if err := ledger.Append(rec); err != nil {
+		t.Fatal(err)
+	}
+	rows := 0
+	if err := ledger.Each(func(raw json.RawMessage) error {
+		rows++
+		var stored Record
+		if err := json.Unmarshal(raw, &stored); err != nil {
+			return err
+		}
+		if stored.Outcome != rec.Outcome || !reflect.DeepEqual(stored.Verification.Checks, checks) {
+			t.Fatalf("Ledger row: %+v", stored)
+		}
+		return nil
+	}); err != nil || rows != 1 {
+		t.Fatalf("Ledger rows=%d: %v", rows, err)
+	}
+	stored, err := LoadRecord(folder)
+	if err != nil || stored.Outcome != rec.Outcome || !reflect.DeepEqual(stored.Verification.Checks, checks) {
+		t.Fatalf("saved record: %+v, %v", stored, err)
+	}
+}
+
 func TestPartialBlockedReportKeepsBadResultAfterCheckStall(t *testing.T) {
 	for _, limit := range []string{"idle", "wall"} {
 		for _, blocked := range []bool{false, true} {

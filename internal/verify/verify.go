@@ -70,6 +70,9 @@ func RunChecks(root string, cmds []string, idle, budget time.Duration) []CheckRe
 			result, _ = runCheck(root, c, idle, deadline)
 			if result.FailureClass == "stall" {
 				result = first
+				if !deadline.IsZero() && !time.Now().Before(deadline) {
+					stopped = CheckResult{Reason: "wall limit after a rerun", FailureClass: first.FailureClass}
+				}
 			}
 			result.Duration = time.Since(start).Round(time.Millisecond).String()
 			if result.OK {

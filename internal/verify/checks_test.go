@@ -117,24 +117,31 @@ func TestCheckKeepsFirstFailureWhenRerunStalls(t *testing.T) {
 	}{
 		{"idle", 100 * time.Millisecond, 10 * time.Second, ""},
 		{"idle without Wall limit", 100 * time.Millisecond, 0, ""},
-		{"wall", time.Minute, 400 * time.Millisecond, "wall limit"},
+		{"wall", time.Minute, 400 * time.Millisecond, "wall limit after a rerun"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			command := "printf 'call\\n' >> calls; if [ ! -f first ]; then touch first; printf 'first failure'; exit 3; fi; printf 'rerun output'; sleep 30"
-			results := RunChecks(root, []string{command, "printf next"}, tt.idle, tt.budget)
-			if len(results) != 2 || results[0].OK || results[0].Flaky || results[0].Skipped || results[0].Reason != "" || results[0].FailureClass != "bad result" || results[0].Output != "first failure" {
+			results := RunChecks(root, []string{command, "printf next", "touch next-check"}, tt.idle, tt.budget)
+			if len(results) != 3 || results[0].OK || results[0].Flaky || results[0].Skipped || results[0].Reason != "" || results[0].FailureClass != "bad result" || results[0].Output != "first failure" {
 				t.Fatalf("first failure: %+v", results)
 			}
-			if results[1].Skipped || results[1].Reason != tt.nextReason {
+			if results[1].Skipped != (tt.nextReason != "") || results[1].Reason != tt.nextReason {
 				t.Fatalf("next check: %+v", results[1])
 			}
 			if tt.nextReason == "" {
 				if !results[1].OK || results[1].Output != "next" {
 					t.Fatalf("next check did not run: %+v", results[1])
 				}
-			} else if results[1].OK || results[1].FailureClass != "stall" {
-				t.Fatalf("next check did not use the shared Wall limit: %+v", results[1])
+			} else {
+				for _, result := range results[1:] {
+					if !result.Skipped || result.OK || result.Reason != tt.nextReason || result.FailureClass != "bad result" || result.Output != "" || result.Duration != "0s" {
+						t.Fatalf("remaining check: %+v", result)
+					}
+				}
+				if _, err := os.Stat(filepath.Join(root, "next-check")); !os.IsNotExist(err) {
+					t.Fatalf("skipped check ran: %v", err)
+				}
 			}
 			calls, err := os.ReadFile(filepath.Join(root, "calls"))
 			if err != nil || string(calls) != "call\ncall\n" {

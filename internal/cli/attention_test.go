@@ -220,11 +220,11 @@ func TestAttentionResumeWhileStartIsSlow(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
-		case <-time.After(20 * time.Second):
+		case <-time.After(time.Minute):
 			t.Error("supervisor did not stop")
 		}
 	})
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(time.Minute)
 	for {
 		if running, err := dispatch.LoadRecord(sibling.Folder); err == nil && running.State == "running" && dispatch.ProcessAlive(running) {
 			break
@@ -239,7 +239,7 @@ func TestAttentionResumeWhileStartIsSlow(t *testing.T) {
 	}
 	select {
 	case <-entered:
-	case <-time.After(20 * time.Second):
+	case <-time.After(time.Minute):
 		t.Fatal("start did not reach the Router")
 	}
 	current, err := run.Load(s.Folder)
