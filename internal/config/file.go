@@ -155,6 +155,7 @@ func (d Duration) MarshalText() ([]byte, error) { return []byte(d.String()), nil
 type Project struct {
 	CommitMessage *string  `toml:"commit_message"`
 	Worktrees     *bool    `toml:"worktrees"`
+	WorktreeLinks []string `toml:"worktree_links"`
 	Unknown       []string `toml:"-"`
 	Forbid        []string `toml:"forbid"`
 	Checks        []string `toml:"checks"`

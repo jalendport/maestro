@@ -159,6 +159,39 @@ func TestWorktreeModeReasons(t *testing.T) {
 	}
 }
 
+func TestContainerCheckMode(t *testing.T) {
+	for _, check := range []string{"ddev exec vendor/bin/phpunit", "docker compose run --rm app test", "./vendor/bin/sail test", "go test ./..."} {
+		for _, source := range []string{"project", "Task"} {
+			t.Run(source+"/"+check, func(t *testing.T) {
+				sup := worktreeSupervisor(t)
+				if source == "project" {
+					sup.Env.Project = &config.Project{Checks: []string{check}}
+				} else {
+					b, err := brief.Parse(sup.State.Tasks[1].BriefPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					b.Checks = []string{check}
+					if err := brief.Write(b, b.Path); err != nil {
+						t.Fatal(err)
+					}
+				}
+				chooseMode(sup.Env, sup.State)
+				if check == "go test ./..." {
+					if sup.State.Mode != "worktree" || sup.State.ModeReason != "" {
+						t.Fatalf("Go mode: %s, %s", sup.State.Mode, sup.State.ModeReason)
+					}
+					return
+				}
+				want := "checks run in a container bound to the project folder (" + strings.Fields(check)[0] + ")"
+				if sup.State.Mode != "tree" || sup.State.ModeReason != want || !strings.Contains(ModeLine(sup.State), want) {
+					t.Fatalf("container mode: %s, %s", sup.State.Mode, sup.State.ModeReason)
+				}
+			})
+		}
+	}
+}
+
 func TestDependencyFolderMode(t *testing.T) {
 	for _, tc := range []struct {
 		name, access, reason string

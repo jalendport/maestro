@@ -1,7 +1,6 @@
 package run
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,30 +24,31 @@ func chooseMode(env *dispatch.Env, s *State) {
 	case !enabled:
 		s.ModeReason = "worktrees off"
 	default:
-		if err := exec.Command("git", "-C", s.Project, "rev-parse", "--verify", "HEAD").Run(); err != nil {
-			s.ModeReason = "tree has no git history"
-		} else if err := exec.Command("git", "-C", s.Project, "symbolic-ref", "--quiet", "HEAD").Run(); err != nil {
-			s.ModeReason = "HEAD is not on a branch"
-		} else {
-			for _, task := range s.Tasks {
-				links, err := worktree.Link(s.Project, "", task.Touch)
+		var touch [][]string
+		var checks, links []string
+		if env.Project != nil {
+			checks = append(checks, env.Project.Checks...)
+			links = env.Project.WorktreeLinks
+		}
+		for _, task := range s.Tasks {
+			touch = append(touch, task.Touch)
+			if task.BriefPath != "" {
+				b, err := brief.Parse(task.BriefPath)
 				if err != nil {
-					s.ModeReason = "cannot read dependencies: " + err.Error()
+					s.ModeReason = "cannot read Task checks: " + err.Error()
 					break
 				}
-				if len(links.Refused) > 0 {
-					s.ModeReason = fmt.Sprintf("task %d touches %s", task.Number, links.Refused[0])
-					break
-				}
+				checks = append(checks, b.Checks...)
 			}
-			if s.ModeReason == "" {
+		}
+		if s.ModeReason == "" {
+			ok, reason := worktree.Eligible(s.Project, touch, checks, links)
+			s.ModeReason = reason
+			if ok {
 				r, err := worktree.Open(s.Project, s.Run)
-				switch {
-				case errors.Is(err, worktree.ErrNoBranch):
-					s.ModeReason = "HEAD is not on a branch"
-				case err != nil:
+				if err != nil {
 					s.ModeReason = "cannot open Worktrees: " + err.Error()
-				default:
+				} else {
 					s.Mode, s.RunBranch = "worktree", r.Branch
 				}
 			}

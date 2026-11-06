@@ -3,7 +3,6 @@ package dispatch
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/jalendport/maestro/internal/brief"
@@ -23,20 +22,14 @@ func standaloneReason(env *Env, t *Task) string {
 	if !env.Roster.Worktrees() || (env.Project != nil && env.Project.Worktrees != nil && !*env.Project.Worktrees) {
 		return "worktrees off"
 	}
-	if err := exec.Command("git", "-C", t.Project, "rev-parse", "--verify", "HEAD").Run(); err != nil {
-		return "tree has no git history"
+	checks := append([]string{}, t.Checks...)
+	var links []string
+	if env.Project != nil {
+		checks = append(checks, env.Project.Checks...)
+		links = env.Project.WorktreeLinks
 	}
-	if err := exec.Command("git", "-C", t.Project, "symbolic-ref", "--quiet", "HEAD").Run(); err != nil {
-		return "HEAD is not on a branch"
-	}
-	links, err := worktree.Link(t.Project, "", t.Touch)
-	if err != nil {
-		return "cannot read dependencies: " + err.Error()
-	}
-	if len(links.Refused) > 0 {
-		return "Task touches " + strings.Join(links.Refused, ", ")
-	}
-	return ""
+	_, reason := worktree.Eligible(t.Project, [][]string{t.Touch}, checks, links)
+	return reason
 }
 
 // StandaloneModeLine reports why an edit Dispatch will use the project tree.

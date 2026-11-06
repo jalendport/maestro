@@ -23,7 +23,8 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Run branch** — the branch `maestro/<run>/run` that holds the commits of a Run, made from the user's HEAD when the Run starts. A standalone edit Dispatch uses its Task id in place of `<run>`.
 - **Task branch** — the branch `maestro/<run>/<task>` that holds one Task's commits, made from the Run branch when the Task starts. A standalone edit Dispatch uses its Task id in place of `<run>`.
 - **Worktree mode** — a Run or standalone edit Dispatch mode in which edit Tasks use separate Worktrees and Maestro merges their commits into the Run branch. The main checkout is never changed except at landing.
-- **Tree mode** — a Run mode in which edit Tasks use the project tree one at a time.
+- **Tree mode** — a Run or standalone edit Dispatch mode that uses the project tree. In a Run, edit Tasks run one at a time.
+- **Container-bound check** — a check whose command runs in a container bound to the project folder. A Run or standalone Dispatch with such a check uses tree mode.
 - **Brief** — the text a Lane receives for one Task: the goal, the definition of done, the files, the checks, and the permission mode.
 - **Scope guard** — the check that limits an edit Task's changed paths to its `touch` patterns and project test files. Test files are always in scope. An empty `touch` sets no path limit.
 - **Tier** — a rung on the strength ladder that Lane families sit on: Light, Daily, Heavy, Frontier. "One Tier up" means the next rung.

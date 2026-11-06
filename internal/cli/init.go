@@ -19,6 +19,7 @@ const projectTemplate = `# Maestro project file. Its presence puts this project 
 # councils = ""   # When it is always, every Run in this project ends with a Council, except a Run in which every Task is read-only and no file changed; that Run ends without a Council.
 # claude_auto = false   # Lets Maestro use the Claude Code auto permission mode for Dispatches in this project.
 # worktrees = false   # Turns Worktrees off for this project.
+# worktree_links = []   # Adds existing ignored files and folders to Worktree links.
 # commit_message = "{title}\n\nCo-Authored-By: {lane}"   # Replaces the commit message template for this project.
 # dirs = []   # Lists extra writable directories for every edit Dispatch in this project, for example a toolchain cache; a leading ~ is the home directory, and a Brief's dirs: adds to the list. The key exists because a Harness sandbox can deny a build cache outside the project, which fails every check until the cache folder is writable.
 `
@@ -60,12 +61,16 @@ func (a *app) initCmd() *cobra.Command {
 			}
 			defaults := detectProjectStack(root)
 			if !existing {
+				if len(defaults.links) > 0 {
+					source = strings.Replace(source, "# worktree_links = []   # Adds existing ignored files and folders to Worktree links.\n", "", 1)
+				}
 				// The empty checks example must not hide the stack's suggestions.
 				if len(defaults.checks) > 0 {
 					source = strings.Replace(source, "# checks = []", "# checks = "+projectArray(defaults.checks), 1)
 				}
 			}
-			merged, err := mergeProjectDefaults(source, defaults)
+			proposed := proposeWorktreeLinks(root, source, defaults.links)
+			merged, err := mergeProjectDefaults(proposed, defaults)
 			if err != nil {
 				return fmt.Errorf("%s: %w", path, err)
 			}

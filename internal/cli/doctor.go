@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -203,12 +204,18 @@ func projectDoctorWarnings(root string, project *config.Project) []doctorRow {
 
 func worktreeDoctorRows(env *dispatch.Env) ([]doctorRow, error) {
 	mode := "on"
+	var checks, names []string
+	if env.Project != nil {
+		checks, names = env.Project.Checks, env.Project.WorktreeLinks
+	}
 	if !env.Roster.Worktrees() {
 		where := config.UserFile()
 		if env.Roster.Run.Worktrees == nil || *env.Roster.Run.Worktrees {
 			where = config.ProjectFile(env.Root)
 		}
 		mode = "off (" + where + ")"
+	} else if ok, reason := worktree.Eligible(env.Root, nil, checks, names); !ok {
+		mode = "off (" + reason + ")"
 	}
 	rows := []doctorRow{{Name: "worktrees", Detail: mode, State: "info"}}
 	dirty, err := worktree.Dirty(env.Root)
@@ -217,8 +224,12 @@ func worktreeDoctorRows(env *dispatch.Env) ([]doctorRow, error) {
 		return rows, nil
 	}
 	if len(dirty) > 0 {
+		warning := "Runs use the tree one Task at a time until you commit or stash"
+		if mode == "on" {
+			warning = "Tasks start from HEAD; uncommitted changes are not in Worktrees"
+		}
 		rows = append(rows, doctorRow{Name: "project", Detail: env.Root,
-			State: "warning: Runs use the tree one Task at a time until you commit or stash"})
+			State: "warning: " + warning})
 	}
 	preview, err := os.MkdirTemp("", "maestro-links-")
 	if err != nil {
@@ -234,6 +245,28 @@ func worktreeDoctorRows(env *dispatch.Env) ([]doctorRow, error) {
 		detail = strings.Join(links.Linked, ", ")
 	}
 	rows = append(rows, doctorRow{Name: "dependency links", Detail: detail, State: "info"})
+	entries, err := os.ReadDir(env.Root)
+	if err != nil {
+		return nil, err
+	}
+	var unlinked []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, ".env") {
+			continue
+		}
+		linked := false
+		for _, path := range links.Linked {
+			linked = linked || path == name
+		}
+		if !linked && exec.Command("git", "-C", env.Root, "check-ignore", "--quiet", "--", name).Run() == nil {
+			unlinked = append(unlinked, name)
+		}
+	}
+	if len(unlinked) > 0 {
+		rows = append(rows, doctorRow{Name: "project", Detail: env.Root,
+			State: "warning: not linked into Worktrees: " + strings.Join(unlinked, ", ")})
+	}
 	return rows, nil
 }
 

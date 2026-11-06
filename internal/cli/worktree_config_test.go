@@ -134,3 +134,28 @@ func TestDoctorWorktrees(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorContainerAndEnvironmentLinks(t *testing.T) {
+	root, git := worktreeConfigFixture(t)
+	writeWorktreeConfig(t, filepath.Join(root, ".gitignore"), ".agents/\n.env*\nstorage/\n")
+	git("add", ".gitignore")
+	git("commit", "-m", "Ignore local files")
+	for _, name := range []string{".env", ".env.local", ".env.testing", ".env.production", "storage/cache/file"} {
+		writeWorktreeConfig(t, filepath.Join(root, name), "local data\n")
+	}
+	writeWorktreeConfig(t, config.ProjectFile(root), "checks = ['ddev exec vendor/bin/phpunit']\nworktree_links = ['storage', '.env.testing']\n")
+	output, err := doctorOutput(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output = strings.Join(strings.Fields(output), " ")
+	for _, want := range []string{
+		"worktrees off (checks run in a container bound to the project folder (ddev))",
+		"dependency links .env, .env.local, storage, .env.testing",
+		"not linked into Worktrees: .env.production",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("missing %q: %s", want, output)
+		}
+	}
+}

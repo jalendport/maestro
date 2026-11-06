@@ -248,16 +248,33 @@ func (r Run) Read(task string) (Worktree, error) {
 	return w, err
 }
 
-var dependencies = []string{"node_modules", "vendor", ".venv", ".bundle", "storage/framework"}
+var dependencies = []string{"node_modules", "vendor", ".venv", ".bundle", "storage/framework", ".env", ".env.local"}
 
 // Link leaves a dependency folder unlinked when a touch pattern can write it.
 func Link(root, dir string, touch ...[]string) (Links, error) {
+	project, err := config.LoadProject(root)
+	if err != nil {
+		return Links{}, err
+	}
+	return link(root, dir, project.WorktreeLinks, touch...)
+}
+
+func link(root, dir string, extra []string, touch ...[]string) (Links, error) {
 	var links Links
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return links, err
 	}
-	for _, name := range dependencies {
+	names := append(append([]string{}, dependencies...), extra...)
+	// Link parents first so a nested name never creates a folder in a link.
+	sort.SliceStable(names, func(i, j int) bool {
+		return strings.Count(names[i], "/") < strings.Count(names[j], "/")
+	})
+	for _, name := range names {
+		if !filepath.IsLocal(name) || filepath.Clean(name) == "." {
+			return links, fmt.Errorf("invalid Worktree link %q", name)
+		}
+		name = filepath.ToSlash(filepath.Clean(name))
 		writable := false
 		for _, list := range touch {
 			for _, pattern := range list {
@@ -274,7 +291,7 @@ func Link(root, dir string, touch ...[]string) (Links, error) {
 		if err != nil {
 			return links, err
 		}
-		if !info.IsDir() {
+		if !info.IsDir() && !info.Mode().IsRegular() {
 			continue
 		}
 		if _, err := git(root, "", "check-ignore", "--quiet", "--", name); err != nil {

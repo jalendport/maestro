@@ -176,7 +176,7 @@ func TestInitTemplateIncludesEveryProjectKey(t *testing.T) {
 	message := "{title}\n\nCo-Authored-By: {lane}"
 	if err != nil || !reflect.DeepEqual(project, config.Project{
 		Forbid: []string{}, Checks: []string{}, Allow: []string{}, Redact: []string{}, Dirs: []string{},
-		Worktrees: &off, CommitMessage: &message,
+		Worktrees: &off, WorktreeLinks: []string{}, CommitMessage: &message,
 	}) {
 		t.Fatalf("Project = %+v, error = %v", project, err)
 	}

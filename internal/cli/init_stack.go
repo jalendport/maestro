@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 type projectDefaults struct {
 	dirs, allow, checks []string
 	docker              bool
+	links               []string
 }
 
 func detectProjectStack(root string) projectDefaults {
@@ -72,6 +74,17 @@ func detectProjectStack(root string) projectDefaults {
 		add(dirs, []string{"Bash(" + runner + " test)", "Bash(" + runner + " test *)", "Bash(" + runner + " run *)"}, []string{runner + " test"})
 	}
 	if has("composer.json") {
+		var composer struct {
+			Require map[string]json.RawMessage `json:"require"`
+		}
+		data, _ := os.ReadFile(filepath.Join(root, "composer.json"))
+		_ = json.Unmarshal(data, &composer)
+		if _, ok := composer.Require["craftcms/cms"]; ok {
+			d.links = append(d.links, "storage", "web/cpresources", "config/license.key")
+		}
+		if _, ok := composer.Require["laravel/framework"]; ok {
+			d.links = append(d.links, "storage", "bootstrap/cache")
+		}
 		dirs := []string{"~/.composer/cache", "~/.cache/composer"}
 		if paths := toolchainCache(root, "composer", "config", "--global", "cache-dir"); len(paths) == 1 {
 			dirs = paths
@@ -99,6 +112,49 @@ func detectProjectStack(root string) projectDefaults {
 		add(dirs, []string{"Bash(docker compose *)", "Bash(docker build *)"}, []string{"docker compose config --quiet"})
 	}
 	return d
+}
+
+// proposeWorktreeLinks keeps an existing choice, including a commented key.
+func proposeWorktreeLinks(root, source string, links []string) string {
+	if len(links) == 0 {
+		return source
+	}
+	tokens, comments := projectTokens(source)
+	for _, comment := range comments {
+		parts, _ := projectTokens(comment)
+		if len(parts) > 1 && projectKey(parts[0].text) == "worktree_links" && parts[1].text == "=" {
+			return source
+		}
+	}
+	end := len(source)
+	depth := 0
+	for i, token := range tokens {
+		if depth == 0 && token.text == "[" && (i == 0 || tokens[i-1].text != "=") {
+			end = strings.LastIndex(source[:token.start], "\n") + 1
+			break
+		}
+		if depth == 0 && projectKey(token.text) == "worktree_links" && i+1 < len(tokens) && tokens[i+1].text == "=" {
+			return source
+		}
+		switch token.text {
+		case "[", "{":
+			depth++
+		case "]", "}":
+			depth--
+		}
+	}
+	prefix := ""
+	for _, name := range links {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			prefix = "# "
+			break
+		}
+	}
+	line := prefix + "worktree_links = " + projectArray(links) + "\n"
+	if end > 0 && source[end-1] != '\n' {
+		line = "\n" + line
+	}
+	return source[:end] + line + source[end:]
 }
 
 func toolchainCache(root, name string, args ...string) []string {

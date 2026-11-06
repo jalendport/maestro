@@ -246,7 +246,7 @@ func TestStandaloneTreeFallbacks(t *testing.T) {
 					t.Fatal(err)
 				}
 				task.Touch = []string{"work.txt", "vendor/**"}
-				want = "Task touches vendor"
+				want = "task 1 touches vendor"
 			}
 			if got := StandaloneModeLine(env, task); got != "worktrees: off ("+want+")" {
 				t.Fatalf("mode: %s", got)
@@ -259,6 +259,37 @@ func TestStandaloneTreeFallbacks(t *testing.T) {
 				t.Fatalf("tree work: %q", data)
 			}
 		})
+	}
+}
+
+func TestStandaloneContainerChecks(t *testing.T) {
+	for _, check := range []string{"ddev exec vendor/bin/phpunit", "docker compose run --rm app test", "./vendor/bin/sail test", "go test ./..."} {
+		for _, source := range []string{"project", "Task"} {
+			t.Run(source+"/"+check, func(t *testing.T) {
+				env, task, _ := standaloneFixture(t, false, standaloneChange)
+				if source == "project" {
+					env.Project = &config.Project{Checks: []string{check}}
+				} else {
+					task.Checks = []string{check}
+				}
+				want := ""
+				if check != "go test ./..." {
+					want = "checks run in a container bound to the project folder (" + strings.Fields(check)[0] + ")"
+				}
+				if reason := standaloneReason(env, task); reason != want {
+					t.Fatalf("reason = %q, want %q", reason, want)
+				}
+				if err := openStandalone(env, task); err != nil {
+					t.Fatal(err)
+				}
+				if (task.Workdir != "") != (want == "") || task.Standalone.ModeReason != want {
+					t.Fatalf("mode: %+v", task)
+				}
+				if want != "" && !strings.Contains(StandaloneModeLine(env, task), want) {
+					t.Fatal("mode line lost the reason")
+				}
+			})
+		}
 	}
 }
 

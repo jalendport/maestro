@@ -165,6 +165,50 @@ func initTestFile(t *testing.T, path, source string) {
 	}
 }
 
+func TestInitWorktreeLinks(t *testing.T) {
+	for _, stack := range []struct {
+		name, dependency string
+		links            []string
+	}{
+		{"Craft", "craftcms/cms", []string{"storage", "web/cpresources", "config/license.key"}},
+		{"Laravel", "laravel/framework", []string{"storage", "bootstrap/cache"}},
+	} {
+		for _, present := range []bool{false, true} {
+			t.Run(stack.name+map[bool]string{false: "/missing", true: "/present"}[present], func(t *testing.T) {
+				t.Setenv("HOME", t.TempDir())
+				t.Setenv("MAESTRO_HOME", t.TempDir())
+				t.Setenv("PATH", "")
+				root := t.TempDir()
+				t.Chdir(root)
+				initTestFile(t, filepath.Join(root, "composer.json"), `{"require":{"`+stack.dependency+`":"*"}}`)
+				if present {
+					for _, name := range stack.links {
+						initTestFile(t, filepath.Join(root, name), "local data")
+					}
+				}
+				command := (&app{}).build()
+				command.SetArgs([]string{"init"})
+				captureStdout(t, command.Execute)
+				data, err := os.ReadFile(config.ProjectFile(root))
+				prefix := "# "
+				if present {
+					prefix = ""
+				}
+				if err != nil || !strings.Contains(string(data), "\n"+prefix+"worktree_links = "+projectArray(stack.links)+"\n") {
+					t.Fatalf("Project file: %s, %v", data, err)
+				}
+				loaded, err := config.LoadProject(root)
+				if err != nil || len(loaded.Unknown) > 0 || (len(loaded.WorktreeLinks) > 0) != present {
+					t.Fatalf("parsed links: %+v, %v", loaded, err)
+				}
+				if got := proposeWorktreeLinks(root, string(data), stack.links); got != string(data) {
+					t.Fatal("second proposal changed the file")
+				}
+			})
+		}
+	}
+}
+
 func TestInitPreviewsAndMergesExistingProject(t *testing.T) {
 	for _, machine := range []bool{false, true} {
 		t.Run(map[bool]string{false: "text", true: "JSON"}[machine], func(t *testing.T) {
