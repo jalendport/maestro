@@ -725,7 +725,7 @@ func (r Run) finishReset(stagePath string) error {
 		return err
 	}
 	if len(paths) > 0 {
-		args := append([]string{"restore", "--staged", "--"}, literalPaths(paths)...)
+		args := append([]string{"reset", "-q", "--"}, literalPaths(paths)...)
 		if _, err := git(r.Root, "", args...); err != nil {
 			return fmt.Errorf("Finish reset: %w", err)
 		}
@@ -771,6 +771,15 @@ func (r Run) rebaseLanding(current string) (rebaseErr error) {
 		return fmt.Errorf("Finish read landing base: %w", err)
 	}
 	dir := filepath.Join(r.dir, "landing")
+	if _, statErr := os.Stat(filepath.Join(dir, ".git")); statErr == nil {
+		w := Worktree{Root: r.Root, Dir: dir}
+		if err := w.Abort(); err != nil {
+			return fmt.Errorf("Finish abort landing: %w", err)
+		}
+		if _, err := git(r.Root, "", "worktree", "remove", "--force", dir); err != nil {
+			return fmt.Errorf("Finish remove landing: %w", err)
+		}
+	}
 	if _, err := git(r.Root, "", "worktree", "add", dir, r.Branch); err != nil {
 		return fmt.Errorf("Finish prepare landing: %w", err)
 	}

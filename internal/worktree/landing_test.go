@@ -251,6 +251,100 @@ func TestTwoRunsLandTheirOwnCommits(t *testing.T) {
 	}
 }
 
+func TestFinishResumesResetAfterPathsWereUnstaged(t *testing.T) {
+	root := repository(t)
+	r := openRun(t, root)
+	w := addTask(t, r, "a")
+	commitTask(t, w, "change[1].txt", "Run addition\n")
+	commitTask(t, w, "base.txt", "Run change\n")
+	mergeTask(t, r, "a")
+	write(t, root, "delete.txt", "staged user work\n")
+	tgit(t, root, "add", "delete.txt")
+	index := tgit(t, root, "diff", "--cached", "--binary")
+	tgit(t, root, "merge", "--squash", r.Branch)
+	write(t, r.dir, "finish", "reset")
+	tgit(t, root, "restore", "--staged", "--", ":(literal)change[1].txt", "base.txt")
+	if got := tgit(t, root, "ls-files", "--", ":(literal)change[1].txt"); got != "" {
+		t.Fatalf("Run addition is still tracked: %s", got)
+	}
+	saved, err := Open(root, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saved.Finish(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := saved.Finish(false); err != nil {
+		t.Fatal(err)
+	}
+	if got := tgit(t, root, "diff", "--cached", "--binary"); got != index {
+		t.Fatalf("user index changed: %s", got)
+	}
+	for path, want := range map[string]string{"change[1].txt": "Run addition\n", "base.txt": "Run change\n", "delete.txt": "staged user work\n"} {
+		data, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil || string(data) != want {
+			t.Fatalf("%s: %q, %v", path, data, err)
+		}
+	}
+	if got := tgit(t, root, "rev-parse", "HEAD"); got != r.Base {
+		t.Fatalf("squash made a commit: %s", got)
+	}
+	if _, err := os.Stat(r.dir); !os.IsNotExist(err) {
+		t.Fatalf("Run folder remains: %v", err)
+	}
+	if _, err := head(root, r.Branch); err == nil {
+		t.Fatal("Run branch remains")
+	}
+}
+
+func TestFinishRemovesLeftoverLandingWorktree(t *testing.T) {
+	for _, rebasing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "before rebase", true: "during rebase"}[rebasing], func(t *testing.T) {
+			root := repository(t)
+			r := openRun(t, root)
+			w := addTask(t, r, "a")
+			commitTask(t, w, "base.txt", "Run change\n")
+			mergeTask(t, r, "a")
+			write(t, root, "base.txt", "user change\n")
+			tgit(t, root, "add", "base.txt")
+			tgit(t, root, "commit", "-m", "Change user file")
+			dir := filepath.Join(r.dir, "landing")
+			tgit(t, root, "worktree", "add", dir, r.Branch)
+			if rebasing {
+				if _, err := git(root, dir, "rebase", "--onto", "master", r.Base); err == nil {
+					t.Fatal("landing rebase did not stop at a conflict")
+				}
+				if !(Worktree{Root: root, Dir: dir}).Rebasing() {
+					t.Fatal("landing rebase is not in progress")
+				}
+			}
+			write(t, root, "base.txt", "base\n")
+			tgit(t, root, "add", "base.txt")
+			tgit(t, root, "commit", "-m", "Restore user file")
+			current := tgit(t, root, "rev-parse", "HEAD")
+			saved, err := Open(root, r.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := saved.Finish(true); err != nil {
+				t.Fatal(err)
+			}
+			if got := tgit(t, root, "rev-list", "--count", current+"..HEAD"); got != "1" {
+				t.Fatalf("landed commits: %s", got)
+			}
+			if data, err := os.ReadFile(filepath.Join(root, "base.txt")); err != nil || string(data) != "Run change\n" {
+				t.Fatalf("Run change did not land: %q, %v", data, err)
+			}
+			if list := tgit(t, root, "worktree", "list", "--porcelain"); strings.Contains(list, "landing") {
+				t.Fatalf("landing Worktree remains: %s", list)
+			}
+			if paths, err := Dirty(root); err != nil || len(paths) != 0 {
+				t.Fatalf("user tree: %v, %v", paths, err)
+			}
+		})
+	}
+}
+
 func TestLandingRetryRebasesOnlyRunCommits(t *testing.T) {
 	root := repository(t)
 	r := openRun(t, root)
