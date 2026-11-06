@@ -78,6 +78,9 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 	}
 	s.Commit = plan.Defaults.Commit != nil && *plan.Defaults.Commit
 	chooseMode(env, s)
+	if err := guardTreeMode(s); err != nil {
+		return nil, err
+	}
 	if err := s.Save(); err != nil {
 		return nil, err
 	}
@@ -192,7 +195,10 @@ func Approve(env *dispatch.Env, s *State) error {
 	}
 	next.State, next.Approval = StateLive, nil
 	next.Commit = plan.Defaults.Commit != nil && *plan.Defaults.Commit
-	setOrder(&next)
+	chooseMode(env, &next)
+	if err := guardTreeMode(&next); err != nil {
+		return err
+	}
 	if err := next.Save(); err != nil {
 		return err
 	}
@@ -202,6 +208,23 @@ func Approve(env *dispatch.Env, s *State) error {
 		}
 	}
 	*s = next
+	return nil
+}
+
+// guardTreeMode keeps the project checkout for one Run when either Run uses it.
+func guardTreeMode(s *State) error {
+	for _, idx := range LiveRuns() {
+		if idx.Project != s.Project || idx.Run == s.Run {
+			continue
+		}
+		other, err := Load(idx.Folder)
+		if err != nil {
+			return err
+		}
+		if s.Mode != "worktree" || other.Mode != "worktree" {
+			return fmt.Errorf("Run %s is live in tree mode; wait for it or use maestro add", idx.Run)
+		}
+	}
 	return nil
 }
 

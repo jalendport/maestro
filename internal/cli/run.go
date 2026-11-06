@@ -307,8 +307,9 @@ func (a *app) resumeCmd() *cobra.Command {
 }
 
 func (a *app) addCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "add <brief.md>",
+	var runID string
+	c := &cobra.Command{
+		Use:   "add <brief.md> [--run <id>]",
 		Short: "Add a Task to the live Run",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -319,10 +320,22 @@ func (a *app) addCmd() *cobra.Command {
 			if _, err := brief.Parse(args[0]); err != nil {
 				return err
 			}
-			idx, live := run.LiveRunFor(env.Root)
-			if !live {
+			var live []run.Index
+			for _, idx := range run.LiveRuns() {
+				if idx.Project == env.Root && (runID == "" || idx.Run == runID) {
+					live = append(live, idx)
+				}
+			}
+			if len(live) == 0 {
+				if runID != "" {
+					return fmt.Errorf("Run %s is not live in %s", runID, env.Root)
+				}
 				return fmt.Errorf("no live run in %s; use maestro run or maestro dispatch", env.Root)
 			}
+			if len(live) > 1 {
+				return fmt.Errorf("more than one Run is live; use maestro add %s --run <id>", args[0])
+			}
+			idx := live[0]
 			src, err := os.ReadFile(args[0])
 			if err != nil {
 				return err
@@ -334,6 +347,8 @@ func (a *app) addCmd() *cobra.Command {
 			return a.result(map[string]any{"run": idx.Run, "state": "queued", "brief": args[0]}, "task queued on run %s", idx.Run)
 		},
 	}
+	c.Flags().StringVar(&runID, "run", "", "id of the live Run")
+	return c
 }
 
 func (a *app) cancelCmd() *cobra.Command {
@@ -346,8 +361,11 @@ func (a *app) cancelCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			idx, live := run.LiveRunFor(env.Root)
-			if live {
+			live := run.LiveRuns()
+			for _, idx := range live {
+				if idx.Project != env.Root {
+					continue
+				}
 				s, err := run.Load(idx.Folder)
 				if err != nil {
 					return err
@@ -383,8 +401,10 @@ func (a *app) cancelCmd() *cobra.Command {
 			if err := os.WriteFile(filepath.Join(folder, "control", "cancel"), nil, 0o644); err != nil {
 				return err
 			}
-			if live && idx.Run == s.Run {
-				return a.result(map[string]any{"run": s.Run, "state": "cancel_requested"}, "run %s cancel requested", s.Run)
+			for _, idx := range live {
+				if idx.Project == env.Root && idx.Run == s.Run {
+					return a.result(map[string]any{"run": s.Run, "state": "cancel_requested"}, "run %s cancel requested", s.Run)
+				}
 			}
 			if err := run.Start(env, folder); err != nil {
 				return err

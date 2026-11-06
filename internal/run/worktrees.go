@@ -58,6 +58,7 @@ func (sup *Supervisor) checkLanding(r worktree.Run) error {
 
 func chooseMode(env *dispatch.Env, s *State) {
 	s.Mode, s.ModeReason = "tree", ""
+	s.RunBranch = ""
 	enabled := env.Roster.Worktrees()
 	if env.Project != nil && env.Project.Worktrees != nil {
 		enabled = enabled && *env.Project.Worktrees
