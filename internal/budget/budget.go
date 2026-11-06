@@ -220,7 +220,7 @@ func copyAccounts(accounts map[string]*Account) map[string]*Account {
 	return copies
 }
 
-// Credits records the reset credits and plan of an Account.
+// SetCredits records the reset credits and plan of an Account.
 func (f *File) SetCredits(id string, credits int, plan string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

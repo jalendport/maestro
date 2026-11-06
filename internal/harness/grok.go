@@ -12,7 +12,6 @@ import (
 	"github.com/jalendport/maestro/internal/ui"
 )
 
-// Grok is the Grok CLI adapter. Its read shape uses a tool allowlist.
 type Grok struct{ bin string }
 
 func (g *Grok) Name() string { return "grok" }

@@ -15,7 +15,6 @@ var Harnesses = []string{"claude", "codex", "grok", "agy"}
 const Command = "maestro hook"
 
 // HarnessSpec holds paths relative to the Harness home and its hook facts.
-// Go cannot give both this type and the Spec function the same name.
 type HarnessSpec struct {
 	Link     string
 	HookFile string

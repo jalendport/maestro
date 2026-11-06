@@ -122,7 +122,6 @@ func TestInheritCarriesEarlierAttemptsIntoTheBaseline(t *testing.T) {
 	git("commit", "-q", "-m", "start")
 	write("d.txt", "d0\n") // dirty before the Task starts
 
-	// Attempt 1 changes a tracked file, a dirty file, and adds a file, then fails.
 	first, err := takeBaseline(root, folder)
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +140,6 @@ func TestInheritCarriesEarlierAttemptsIntoTheBaseline(t *testing.T) {
 	}
 	archiveAttempt(folder, 1)
 
-	// Attempt 2 starts on the tree attempt 1 left and touches nothing itself.
 	second, err := takeBaseline(root, folder)
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +166,6 @@ func TestInheritCarriesEarlierAttemptsIntoTheBaseline(t *testing.T) {
 			t.Fatalf("diff lacks %q:\n%s", line, diff)
 		}
 	}
-	// The saved baseline carries the same view for DiffFor.
 	if got := DiffFor(root, &Record{Path: folder, Verification: Verification{Changed: changed}}); got != diff {
 		t.Fatalf("DiffFor = %q, want %q", got, diff)
 	}
@@ -233,7 +230,6 @@ func TestInheritKeepsTheEmptyCommitOfAnUncommittedStart(t *testing.T) {
 	}
 	git("init", "-q")
 
-	// Attempt 1 starts before the first commit, makes it, and fails.
 	first, err := takeBaseline(root, folder)
 	if err != nil {
 		t.Fatal(err)
@@ -256,7 +252,6 @@ func TestInheritKeepsTheEmptyCommitOfAnUncommittedStart(t *testing.T) {
 	}
 	archiveAttempt(folder, 1)
 
-	// Attempt 2 starts at the new HEAD and must still see the committed file.
 	second, err := takeBaseline(root, folder)
 	if err != nil {
 		t.Fatal(err)

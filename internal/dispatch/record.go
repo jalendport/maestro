@@ -142,7 +142,6 @@ type Reading struct {
 	State  string    `json:"state"`
 }
 
-// Permission is the Permission group.
 type Permission struct {
 	Enforcement string            `json:"enforcement"`
 	Flags       []string          `json:"flags"`
@@ -151,7 +150,6 @@ type Permission struct {
 	Relays      []json.RawMessage `json:"relays"`
 }
 
-// Outcome is the Outcome group.
 type Outcome struct {
 	Status            string  `json:"status"` // done | partial | blocked | unshaped
 	Outcome           string  `json:"outcome"`
@@ -167,7 +165,6 @@ type Outcome struct {
 	ReportByText      bool    `json:"report_by_text,omitempty"`
 }
 
-// Verification is the Verification group.
 type Verification struct {
 	StartCommit       string               `json:"start_commit,omitempty"`
 	CommitRange       string               `json:"commit_range,omitempty"`
@@ -220,7 +217,7 @@ func LoadRecord(folder string) (*Record, error) {
 	return &r, nil
 }
 
-// SaveTask writes task.json.
+// Save writes task.json.
 func (t *Task) Save() error {
 	b, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {

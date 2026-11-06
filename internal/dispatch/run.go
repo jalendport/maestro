@@ -641,7 +641,6 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		return fail(FailLane, err.Error())
 	}
 
-	// Launch.
 	cmd := command.Cmd
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -673,7 +672,6 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		}()
 	}
 
-	// Pump the stream to output.jsonl and the parser; track the last output time.
 	parser := h.NewParser()
 	outFile, _ := os.Create(filepath.Join(t.Folder, FileOutput))
 	var mu sync.Mutex
@@ -691,7 +689,6 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 		})
 	}()
 
-	// Timers: Idle and Wall, Maestro-owned.
 	idle, _ := time.ParseDuration(t.IdleLimit)
 	wall, _ := time.ParseDuration(t.WallLimit)
 	waitDone := make(chan error, 1)
@@ -956,7 +953,6 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 		rec.Outcome.FailureClass = FailBad
 	}
 
-	// Verification: changed files, scope guard, commit range, checks.
 	// A read Lane's Enforcement keeps it from writing; tree changes seen during a
 	// read Dispatch belong to the edit Dispatch beside it, so they are recorded
 	// but never counted as violations.

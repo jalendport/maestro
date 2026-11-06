@@ -36,7 +36,7 @@ func Errorf(format string, a ...any) {
 }
 
 // Eventf prints one progress event line to stderr: a fixed-width label and a
-// message. These are the lines Maestro's Solo tab shows while it works.
+// message.
 func Eventf(label, format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "%s %s\n", labelStyle.Render(fmt.Sprintf("%-8s", label)), fmt.Sprintf(format, a...))
 }
