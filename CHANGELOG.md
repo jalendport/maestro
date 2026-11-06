@@ -8,11 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Added
+- Added the Plan's introduction to the start of every Task's Context under `Shared context of the Plan:`, before the Task's own Context
+- Added a stale Adapter line to the Reminder in Claude Code, Codex, and Antigravity when the installed skill or Grok rules differ from the binary; run `maestro adapter install` to clear it
+- Added project warnings in `maestro doctor` for no active checks and for Docker checks without `~/.docker` in `dirs`
+- Added sleep protection for every verb that blocks on live work and for the Orchestrator's turn in Claude Code, Codex, and Antigravity, with a refreshed 30-minute lease and `Stop` hooks; run `maestro adapter install` again and trust the new Codex hook in `/hooks`
 - Added project live items to the Reminder in Claude Code, Codex, and Antigravity: open Relays with answer commands, paused Runs with resume commands, blocked and failed Tasks of live Runs, and running Lanes with their Tasks and elapsed times; Grok uses `maestro status`
 - Added Solo wake-ups for a paused Run and a single Dispatch that ends failed, blocked, timed out, or with an unshaped Report, with the same next command as `maestro wait`
 - Added `maestro doctor --canary [harness]` to check each Harness with a small read Dispatch and store version-specific launch, hook, and Report results; the hook part does not apply to Codex, and the Canary uses only its Wall limit
 
 ### Changed
+- Changed slow tests to use short limits, poll intervals, and wake-up waits that each test sets, and to run independent cases in parallel; `go test ./...` takes about 15 seconds instead of 105, tests check that the production defaults stay the same, and a `wait` test no longer starts the installed Harnesses
+- Changed `maestro init` to detect project stacks, write cache directories and command allow rules, suggest checks in comments, and merge missing values with `--write` while it keeps existing values and comments
+- Changed the hook's read-only command list to a baseline for every project, with text and file commands, Git list forms, and Go, Node, PHP, Python, Rust, and Docker read forms; tool caches and logs are allowed, while project writes and test, build, format, and install runners need project rules
+- Changed passing Tasks under the gate's close threshold to get one nudge on the same Lane for missing Done items, with one extra attempt in the Dispatch and Run caps and a Ledger mark
+- Changed routing so Jev's Judgment level sets the Tier; the Brief's `level` is context for Jev and the level for the rules fallback, while explicit Tier bounds and the edit rule still apply
+- Changed the skill file and README to tell the Orchestrator to write the `level` it believes, with no raised level or named Lane to reach a stronger Lane, and to list in `touch:` every path the Task may change, including tests, fixtures, docs, and `CHANGELOG.md`; the skill file also says what a blocked Task's Cause means and what one nudge is
+- Changed Run escalation to use the Cause of each Bad result; Brief and environment blockers go to the Orchestrator with the Lane's Blocked items, while capability failures can re-Route one Tier up; the Ledger records the Cause, its source, and the decision
+- Changed checks to use the Idle limit and a separate shared Wall limit budget, with one Docker pre-flight per Task; a limit or failed pre-flight skips the remaining checks and records the reason and Failure class
+- Changed `maestro clean` to remove old or orphan control folders across all project keys and old cache folders; it keeps live Run controls and the latest Canary files per Harness, and never touches the Ledger or `budget.json`
 - Changed `maestro wait` to return with exit 2 and the next command for an open Relay, a paused Run, or a blocked or failed Task that needs the Orchestrator; while a Lane runs, each user reply opens with a table of the running Lanes (Lane, Task, Started, State) and one line for what waits for the user
 - Changed `close_tabs` to a key with no effect; old user files still load, and `maestro doctor` reports the key
 - Changed Canary evidence to name the hook record's folder, accept a Run folder record when the control write fails, and keep failed check files at the path shown by `maestro doctor` until the next Canary for that Harness
@@ -28,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Removed `maestro tell` and `maestro roster solo`, which used Lane tabs and Solo agent tool discovery
 
 ### Fixed
+- Fixed resumed Tasks judged on files from other Tasks and stopped by an earlier answer's Dispatch cap; the Run report now lists the files judged
+- Fixed Run Tasks shown as stale while their supervisor runs the checks and the gate; status, the Reminder, and wait now use the Run supervisor, and status and the Reminder name the checks phase
+- Fixed Run notifications during tests and added the project folder name to each Run notification
+- Fixed Mac idle sleep during live work: every Maestro `caffeinate` now uses `-i -s -w <pid>` to protect work on battery and AC power
+- Fixed blank Ledger rows from tests with an empty-`kind` check and a required temporary `MAESTRO_HOME` in tests; Budget saves now drop Accounts that are absent from the loaded Roster
 - Fixed resume answers that appeared again before a slow Task start; the Run state is saved before the answer marker is removed, and a second answer cannot restart a running Task
 - Fixed Run ownership during a pause; the supervisor and CLI make one decision about which process takes a resume answer, and a second supervisor cannot take a live Run
 - Fixed stale Lanes in the Reminder and status; the Reminder leaves out processes that are gone, and status marks them `stale (process gone)`

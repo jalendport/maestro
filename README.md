@@ -14,8 +14,8 @@ Maestro is a small command-line tool that takes over once you and your coding ag
 - **Budgets that bind** — usage windows are read from every dispatch (and probed when stale), with a block point, a warning, and a reserve kept back for the session you are in
 - **A permission contract** — a Lane gets `read` or `edit` Access through a sandbox, a tool allowlist, or the Maestro hook; Maestro passes no bypass flag to Claude, Codex, or Antigravity, and a Grok Lane runs in always-approve only because the hook and the sandbox decide before Grok does
 - **Solo integration** — inside [Solo](https://soloterm.com), Tasks are todos, results are comments, and your session wakes when a Run ends
-- **Keeps the Mac awake** — `caffeinate` runs for as long as a dispatch or a run is live, so the machine does not go to sleep under a lane that is still working, and a notice tells you when the run ends; set `[failure] keep_awake = false` to turn it off
-- **Single static binary** — Go, no runtime dependencies, and each harness needs only a skill file, a hook entry or two, and for Grok one rules file
+- **Keeps the Mac awake** — `caffeinate -i -s` protects every Lane, Run, Council, and verb that waits on live work, on battery and AC power. In Claude Code, Codex, and Antigravity, the Orchestrator's turn holds a 30-minute lease that ends on `Stop` or when its process ends. Grok has no turn protection. Set `[failure] keep_awake = false` to turn it off
+- **Single static binary** — Go, no runtime dependencies, and each Harness needs only a skill file, hook entries, and for Grok one rules file
 
 ## Installation
 
@@ -52,7 +52,9 @@ maestro init             # in each project: write .agents/maestro.toml
 
 `maestro adapter` prints the steps for each harness and writes nothing. `maestro adapter install` does the steps. Maestro touches nothing else in the configuration of a harness. To connect one harness only, give its name: `maestro adapter install claude`.
 
-`maestro init` writes the Project file `.agents/maestro.toml`. That file puts the project in hook scope.
+After a rebuild, the Reminder in Claude Code, Codex, and Antigravity reports a stale Adapter when the installed skill or Grok rules differ from the text in the binary. It names each stale Harness on one line, for example `Adapter stale (claude, grok): run maestro adapter install`. Run `maestro adapter install` to update the files and clear the line. Grok has no Reminder event; use `maestro doctor` there.
+
+`maestro init` writes the Project file `.agents/maestro.toml`. That file puts the project in hook scope. It detects Go, Node (npm, pnpm, or yarn), PHP, Python, Rust, and Docker from files at the project root, and adds active cache `dirs` and command `allow` rules for each match. It writes `checks` as commented suggestions for you to review. If the Project file exists, it shows the proposed additions. Use `maestro init --write` to merge them; it keeps existing values and comments, skips values that are present in comments, and adds nothing on a second call. See [Project file configuration](docs/configuration.md#agentsmaestrotoml) for the detection rules. `maestro doctor` warns when the Project file has no active checks, or a Docker check needs `~/.docker` in `dirs`.
 
 An install from before this version reports `partial` in `maestro doctor` until `maestro adapter install` runs again.
 
@@ -65,7 +67,7 @@ maestro adapter install claude
 It writes two paths:
 
 - `~/.claude/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
-- `~/.claude/settings.json` gets one `PreToolUse` hook entry and one `UserPromptSubmit` hook entry for `maestro hook`; Maestro adds or replaces only its own entries and keeps all other settings.
+- `~/.claude/settings.json` gets `PreToolUse`, `UserPromptSubmit`, and `Stop` hook entries for `maestro hook`; Maestro adds or replaces only its own entries and keeps all other settings.
 
 Manual step: start a new Claude Code session. It loads the hook.
 
@@ -92,9 +94,9 @@ maestro adapter install codex
 It writes two paths:
 
 - `~/.agents/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
-- `~/.codex/hooks.json` gets one `PreToolUse` hook entry and one `UserPromptSubmit` hook entry for `maestro hook codex`; Maestro adds or replaces only its own entries and keeps all other hooks.
+- `~/.codex/hooks.json` gets `PreToolUse`, `UserPromptSubmit`, and `Stop` hook entries for `maestro hook codex`; Maestro adds or replaces only its own entries and keeps all other hooks.
 
-Manual step: start Codex, open `/hooks`, and trust both the Maestro `PreToolUse` hook and the Maestro `UserPromptSubmit` hook. This review is a security boundary. Only you cross it. An agent must not trust the hooks for you.
+Manual step: start Codex, open `/hooks`, and trust the Maestro `PreToolUse`, `UserPromptSubmit`, and `Stop` hooks. This review is a security boundary. Only you cross it. An agent must not trust the hooks for you.
 
 Verify: `maestro doctor` shows `adapter codex` as `ok`.
 
@@ -113,6 +115,8 @@ Grok takes read and edit work. Headless Grok runs with full tool access. A Grok 
 - A read Lane runs the built-in read-only commands and writes only its Report in the Run folder
 - An edit Lane also runs the checks and the project `allow` list, and writes inside the project, the Run folder, and the extra `dirs`; the workspace sandbox also permits writes to temp directories and `~/.grok`
 - Grok never relays: a command outside the allow list is denied; add it to `checks` or the project `allow` list
+
+The hook's [read-only command list](docs/configuration.md#read-only-commands) is the baseline for every project. It includes text and file commands, version control reads, and version and listing forms for Go, Node, PHP, Python, Rust, and Docker. Tests, builds, formatters, and installs need project `checks` or `allow` entries.
 
 The hook judges a command as written. A read-only command that carries a shell expansion (`$`, a backquote, a brace list, or an unquoted glob) is denied, because the shell could turn the expansion into a flag the list forbids; quote the pattern (`find . -name '*.go'`) or name the file. The sandbox is the boundary that holds a shell; the hook is the second line that holds paths, tool names, and the command list.
 
@@ -165,7 +169,7 @@ maestro adapter install agy
 It writes two paths:
 
 - `~/.gemini/antigravity-cli/skills/maestro` is a link to the shared skill file in `~/.maestro/skills/maestro`.
-- `~/.gemini/config/hooks.json` gets one `maestro` key that holds a `PreToolUse` entry and a `PreInvocation` entry; Maestro sets only that key and keeps all other keys.
+- `~/.gemini/config/hooks.json` gets one `maestro` key that holds `PreToolUse`, `PreInvocation`, and `Stop` entries; Maestro sets only that key and keeps all other keys.
 
 Manual step: start a new Antigravity session. It loads the hook.
 
@@ -189,7 +193,7 @@ You install once and plan with your agent. The agent hands finished plans to Mae
 4. Inside Solo, each task is a todo and each result is a comment, and a finished run wakes the agent. Outside Solo, the agent reports from `maestro wait`.
 5. Maestro needs you when a verb exits with code 2: an open Relay, a held breakdown, a paused Run, a blocked or failed Task, or a single-opinion Council. The agent reads the item or report and either answers or asks you one question.
 
-Inside hook scope, the Orchestrator gets a Reminder on every prompt in Claude Code and Codex, and before every model call in Antigravity. Its fixed text comes first. Each live item of the project follows on its own line: an open Relay with its Task, tool, input, and answer command; a paused Run with its reason and resume command; a blocked or failed Task of a live Run; or a running Lane with its Task, Family, effort, and elapsed time. Relay input is limited to 300 characters. The hook reads local Run and control folders, with no Solo or network call. It uses the same project root as the CLI, including from a nested git folder. It leaves out a live Run or running Dispatch whose process is gone; `maestro status` marks it `stale (process gone)`. With no live items, it sends only the fixed text.
+Inside hook scope, the Orchestrator gets a Reminder on every prompt in Claude Code and Codex, and before every model call in Antigravity. Its fixed text comes first, then the stale Adapter line when needed. Each live item of the project follows on its own line: an open Relay with its Task, tool, input, and answer command; a paused Run with its reason and resume command; a blocked or failed Task of a live Run; or a running Lane with its Task, Family, effort, and elapsed time. Relay input is limited to 300 characters. The hook reads local Run and control folders, with no Solo or network call. It uses the same project root as the CLI, including from a nested git folder. It leaves out a live Run or running Dispatch whose process is gone; `maestro status` marks it `stale (process gone)`. With no live items or stale Adapter, it sends only the fixed text.
 
 In Grok, the rules file loads at the start of each session and states the scope condition in words, so there the scope is best-effort. A Grok Orchestrator does not get the live items through the Reminder; use `maestro status` to read them.
 
@@ -223,6 +227,11 @@ The Brief gives the Solo project id. Each Solo tool call needs this id in `proje
 
 These are the commands the agent runs. A person can run them by hand too.
 
+Jev's Judgment level sets the Task's Tier. The Brief's `level` is the Orchestrator's estimate. Jev sees it as context; it does not raise Jev's score or limit its pick. The rules table uses the estimate when Jev is absent or below the confidence floor. Set `floor:` and `ceiling:` in a Brief, or `maestro run --floor` and `--ceiling`, for hard Tier bounds. An edit never goes Light. The Reason line names both levels when Jev's score is below the estimate, for example `jev some, orchestrator estimated expert`.
+
+The Orchestrator writes the `level` it believes and does not raise it or name a Lane to reach a stronger Lane, because Maestro uses a Frontier Lane when the work calls for it.
+The `touch:` list names every path the Task may change, including the tests, fixtures, and docs the Done names and `CHANGELOG.md` when the Done asks for an entry; a Lane that must change a file outside `touch` stops blocked, and Maestro sends the Task back to the Orchestrator with Cause `brief`.
+
 Write a brief file (`maestro help brief` prints the format), then dispatch it:
 
 ```sh
@@ -231,7 +240,7 @@ maestro wait 7f3a                                   # prints the status, changes
 maestro dispatch .agents/briefs/add-probe.md --wait # or block
 ```
 
-Several ordered tasks go in a plan file (`maestro help plan`):
+Several ordered Tasks go in a Plan file (`maestro help plan`). Text after the front matter or optional `# title` and before the first `## <task title>` is the Plan's introduction. Maestro adds it to the start of every Task's Context under `Shared context of the Plan:`, before the Task's own `### Context` text. An empty introduction adds nothing.
 
 ```sh
 maestro run .agents/plans/probe-feature.md   # provisional routes; holds for approval when a trigger fires
@@ -265,6 +274,12 @@ maestro router stats    # Jev vs rules agreement, verified rates
 Exit codes: `0` ok, `1` failed, `2` needs the Orchestrator (an open Relay, a held breakdown, a paused Run, a blocked or failed Task, or a single-opinion Council). `--json` prints one object per verb.
 
 Claude and Antigravity edit Lanes relay commands outside the allow list. Read Lanes, Grok Lanes, and Codex Lanes do not relay. An open Relay pauses the Idle limit and the Wall limit; an unanswered Relay is denied after 10 minutes and the Lane continues. Antigravity edit Lanes use Maestro's limits with no vendor print timeout.
+
+Checks use the same Idle limit as the Lane and share a separate Wall limit budget, counted from the first check. A silent check or an expired budget fails with Failure class Stall. Before the first check that starts with `docker`, Maestro runs `docker info` once per Task; a failure or no answer within 10 seconds fails the check with `Docker does not respond` and Failure class Bad result. These failures skip the remaining checks with the same reason. A check that fails on its own exit code does not stop the next check. The Ledger and `maestro wait` show the reason and Failure class. See [configuration](docs/configuration.md#failure) for the limits.
+
+Every Bad result has a Cause: `brief`, `environment`, `capability`, or `none`. A touch violation is `brief`; otherwise Jev classifies the Cause with the gate, or alone when the Report is blocked or the checks fail. In a Run, Lane error, Transient error, Limit hit, Stall, and Bad result with Cause `capability` re-Route one Tier up, within the Dispatch cap and Tier ceiling. Bad result with Cause `brief` or `environment` blocks the Task for the Orchestrator. A blocked Report stays blocked. If Jev is absent, a touch violation or blocked Report is `brief`, a partial Report with Blocked items is `environment`, and other failures are `capability`. The same error twice still blocks the Task. The Ledger records the Cause, its source, and the decision. The Run report, `maestro wait`, the Reminder, and the Solo wake-up show the Cause and the Lane's Blocked items.
+
+When checks pass and the gate returns `pass` with risk at most `medium` but `satisfies` is under the close threshold, Maestro gives the same Lane one nudge for Done items scored under `0.5`. With no such items, the Task ends `unverified` at once. Each Task gets at most one nudge, with one extra attempt in the Dispatch and Run caps. The result follows the normal checks and gate rules. The Ledger marks that the nudge ran, and `maestro wait` prints the last attempt's Report. See [the `satisfies` rule](docs/configuration.md#routerthresholdsjev).
 
 Answer a Relay with `maestro answer <task> allow|deny --relay <id>`. Use the id from the `relay` event printed by `maestro wait` or `maestro status`.
 
@@ -309,7 +324,9 @@ redact   = ["ACME"]                                              # strings repla
 councils = "always"                                              # an end-of-run council on every run
 ```
 
-Generated state lives in `~/.maestro/`: `ledger.jsonl` (append only), `budget.json`, `cache/discovery.json`, and the live-run index. Per-project run folders live under `.agents/maestro/runs/` and council folders under `.agents/maestro/councils/`; `maestro clean` removes old ones and never touches the ledger. Maestro writes a `.gitignore` into each run and council folder it creates, so nothing under them reaches git.
+Generated state lives in `~/.maestro/`: `ledger.jsonl` (append only), `budget.json`, `cache/discovery.json`, and the live-run index. Maestro rejects a Ledger row with no `kind`. It drops Accounts absent from the Roster from the Budget before the next save. Tests must set `MAESTRO_HOME` to a temporary folder; a test that calls `config.Home()` without it stops with a panic.
+
+Per-project Run folders live under `.agents/maestro/runs/` and Council folders under `.agents/maestro/councils/`. `maestro clean --older-than 30d` removes old Run and Council folders in the current project. Across all project keys in `~/.maestro/control`, it also removes control folders whose Dispatch or Run ended before the threshold, or whose record is gone. It keeps live Run controls. It removes old folders under `~/.maestro/cache`, but keeps the latest Canary files per Harness at the path shown by `maestro doctor`. It never touches the Ledger or `budget.json`. Maestro writes a `.gitignore` into each Run and Council folder it creates, so nothing under them reaches git.
 
 Keep-awake and the end-of-run notice are macOS only; on Linux they do nothing.
 

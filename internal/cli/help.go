@@ -14,7 +14,7 @@ Required: title, ## Goal, ## Done. Everything else is optional.
 ---
 title: Add the probe command
 category: implement          # implement | fix | refactor | spec | research | review | prose | triage | second opinion | large input
-level: some                  # your Judgment estimate: none | some | significant | expert
+level: some                  # Orchestrator's estimate: none | some | significant | expert
 access: edit                 # read | edit; category default when absent (code categories edit, the rest read)
 dirs: [../shared-fixtures]   # extra writable directories
 touch: [internal/probe/**]   # scope guard; a diff outside it is a Bad result
@@ -26,6 +26,13 @@ wall_limit: 45m              # raise the Tier's Wall limit for this Task
 facts: {input: very large log}   # short named facts for the Router
 todo: 247                    # adopt this Solo todo for the Task instead of creating one
 ---
+
+Jev's Judgment level sets the Tier. The Brief's level is context for Jev and
+the level for the rules fallback when Jev is absent or below the confidence
+floor. It does not raise Jev's score or limit its pick. Only floor: and
+ceiling:, or maestro run --floor and --ceiling, set hard Tier bounds.
+An edit never goes Light. The Reason line shows when Jev's score is below
+the estimate, for example: jev some, orchestrator estimated expert.
 
 ## Goal
 What to do, as definitions, not commands.
@@ -46,11 +53,18 @@ section per Task. Each section may start with a "- key: value" list of the
 same fields as a Brief plus blocked_by (plan numbers or titles), then
 "### Goal", "### Done", "### Context", "### Files".
 
+The text after the front matter or optional "# title" and before the first
+"## <task title>" is the Plan's introduction. Maestro adds it to the start
+of every Task's Context under "Shared context of the Plan:", before the
+Task's own "### Context" text. An empty introduction adds nothing.
+
 ---
 access: edit
 commit: false
 ---
 # Probe feature
+
+The probe uses the existing output format.
 
 ## Add the probe command
 - category: implement

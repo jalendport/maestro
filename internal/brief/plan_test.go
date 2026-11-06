@@ -69,6 +69,80 @@ func TestParsePlan(t *testing.T) {
 	}
 }
 
+func TestPlanContext(t *testing.T) {
+	const introduction = "All Tasks use the same data.\n\n### Shared facts\n- The data is read-only."
+	const tasks = `
+## First Task
+### Goal
+Read the data.
+### Done
+The data is read.
+### Context
+Read the first row.
+
+## Second Task
+### Goal
+Read the data.
+### Done
+The data is read.
+`
+	for _, tt := range []struct {
+		name         string
+		prefix       string
+		introduction string
+	}{
+		{"title and introduction", "# Plan\n\n" + introduction + "\n", introduction},
+		{"front matter and introduction", "---\naccess: read\n---\n\n" + introduction + "\n", introduction},
+		{"front matter and title and introduction", "---\naccess: read\n---\n# Plan\n\n" + introduction + "\n", introduction},
+		{"introduction only", introduction + "\n", introduction},
+		{"title only", "# Plan\n\n", ""},
+		{"front matter only", "---\naccess: read\n---\n", ""},
+		{"front matter and title only", "---\naccess: read\n---\n# Plan\n\n \t\n", ""},
+		{"no introduction", "", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := ParsePlanText(tt.prefix + tasks)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(p.Tasks) != 2 {
+				t.Fatalf("Tasks = %d, want 2", len(p.Tasks))
+			}
+			for i, task := range p.Tasks {
+				want := ""
+				if tt.introduction != "" {
+					want = "Shared context of the Plan:\n\n" + tt.introduction
+				}
+				if i == 0 {
+					if want != "" {
+						want += "\n\n"
+					}
+					want += "Read the first row."
+				}
+				if task.Context != want {
+					t.Fatalf("Task %d Context = %q, want %q", i+1, task.Context, want)
+				}
+				path := filepath.Join(t.TempDir(), "brief.md")
+				if err := Write(task, path); err != nil {
+					t.Fatal(err)
+				}
+				b, err := Parse(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rendered := Render(b, RenderOpts{Access: AccessRead})
+				sections := SplitSections(rendered)
+				if got := sections["Context"]; got != want {
+					t.Errorf("Task %d rendered Context = %q, want %q", i+1, got, want)
+				}
+				if _, ok := sections["Context"]; ok && want == "" {
+					t.Errorf("Task %d has an empty Context section", i+1)
+				}
+			}
+		})
+	}
+}
+
 func TestPlanRejectsUnknownBlocker(t *testing.T) {
 	if _, err := ParsePlanText("## A\n- blocked_by: [9]\n### Goal\ng\n### Done\nd\n"); err == nil {
 		t.Fatal("expected an error")

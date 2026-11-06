@@ -25,10 +25,16 @@ Ask the user only when a verb exits 2, or when a Task touches a human gate: push
 
 `maestro help brief` and `maestro help plan` print the formats. Four rules the formats cannot enforce:
 
-- Write the Goal as definitions, not commands.
-- Write the Done as what must be true when the Lane stops.
-- `touch:` lists every path the Done names, or the Lane stops blocked.
+- Write the Goal as definitions, not commands, and the Done as what must be true when the Lane stops.
+- `level:` is your estimate. Jev sets the Tier. Write the level you believe; do not raise it to reach a stronger Lane, and do not name a Lane to reach one. Maestro uses a Frontier Lane when the work calls for it.
+- `touch:` lists every path the Task may change, including the tests, fixtures, and docs the Done names, and `CHANGELOG.md` when the Done asks for an entry. A Lane that must change a file outside `touch` stops blocked, and Maestro sends the Task back to you with Cause `brief`.
 - A token-billed Lane takes edit work only when `lane:` names it, so name one only when no subscription Lane fits.
+
+A blocked Task comes back to you with its Cause: for `brief`, correct the Brief; for `environment`, resolve the blocker; for `capability`, a stronger Lane can help.
+
+One nudge is one more attempt on the same Lane for the Done items that the gate scored under `0.5`; it runs when the checks pass, the verdict is `pass`, the risk is at most `medium`, and the score is under the close threshold.
+
+Jev sees the `level` as context. The rules fallback uses it when Jev is absent or below the confidence floor. Set `floor:` and `ceiling:` in the Brief, or `maestro run --floor` and `--ceiling`, for hard Tier bounds. An edit never goes Light. The Reason line shows when Jev's score is below the estimate.
 
 ## Results
 
@@ -46,15 +52,19 @@ A Lane is a headless process, so the user has no tab, screen, or log for it. You
 
 When the work ends, `maestro wait` prints the status line, the changed files, the checks, the blocked list, and the Report, with the outcome's exit code. The Report is `result.md` in the Run folder (`.agents/maestro/runs/<run>/<task>/`); Council folders are `.agents/maestro/councils/<slug>/`. In Solo, every Task is a todo and its Report is a comment.
 
-A Task is accepted when you have read its diff. Outcome `unverified` means Maestro did not close the Task on its own: the gate did not run, had no checks to run, or did not reach its close threshold. The diff decides.
+A Task is accepted when you have read its diff. Outcome `unverified` means Maestro did not close the Task on its own: the gate did not run, had no checks to run, had critical risk, or did not reach its close threshold. With passing checks, verdict `pass`, risk at most `medium`, and a score under the close threshold, Maestro gives the same Lane one nudge for Done items scored under `0.5`. With no such items, it ends `unverified` at once. Each Task gets at most one nudge. The nudge adds one attempt to the Dispatch and Run caps; its result follows the normal outcome rules. The Ledger marks that the nudge ran, and `maestro wait` prints the last attempt's Report. The diff decides.
 
 ## When a Run pauses or a Task is blocked
+
+Read the Cause and the Lane's Blocked items. Cause `brief` means the Brief excludes required work or contradicts itself; correct the Brief. Cause `environment` means a tool or service was denied, down, or missing; resolve that blocker before you resume. Maestro does not re-Route these Tasks automatically. Cause `capability` can use a stronger Lane. A blocked Report still needs your answer, regardless of its Cause. If Jev is absent, a rule classifies a touch violation or blocked Report as `brief`, a partial Report with Blocked items as `environment`, and other failures as `capability`. The Run report, `maestro wait`, the Reminder, and the Solo wake-up give the Cause and the Blocked items.
 
 Read the item from `maestro wait` and `report.md` when present, then answer once: `maestro resume <run> --task <n> --lane <family[:effort]>`, `--brief <corrected file>`, or `--skip`. A Relay is a Lane's permission prompt: in Solo it wakes you; `maestro wait` returns it and `maestro status` prints the `relay` event. Answer with `maestro answer <task> allow|deny --relay <id>`, with the id from the item or event.
 
 Claude and Antigravity edit Lanes relay commands outside the allow list. Read Lanes, Grok Lanes, and Codex Lanes do not relay. An open Relay pauses the Idle limit and the Wall limit. An unanswered Relay is denied after 10 minutes and the Lane continues.
 
 ## Facts
+
+With `[failure] keep_awake = true` (the default), Maestro keeps the Mac awake for every Lane, Run, Council, and blocking verb. In hook scope, Reminder events in Claude Code, Codex, and Antigravity also protect the Orchestrator's turn. Each event refreshes one 30-minute lease per Harness process; `Stop`, process exit, or the lease limit ends it. An idle session holds no protection after that. Grok has no Reminder event, so it has no Orchestrator turn protection. Run `maestro adapter install` again to add `Stop`; `maestro doctor` checks it. The user must review and trust the new Codex hook in `/hooks`.
 
 `maestro roster`, `maestro budget`, and `maestro doctor` print the Lanes, the usage per Account, and the Harnesses. Maestro passes no bypass flag to a Claude, Codex, or Antigravity Lane (a Grok Lane runs in always-approve because the Maestro hook and the sandbox decide before Grok does), never pushes, and commits only when a Brief says `commit: true`.
 

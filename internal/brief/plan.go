@@ -22,6 +22,7 @@ type Plan struct {
 
 var taskHeadingRe = regexp.MustCompile(`(?m)^## +(.+?)[ \t]*$`)
 var subHeadingRe = regexp.MustCompile(`(?m)^### +(.+?)[ \t]*$`)
+var planTitleRe = regexp.MustCompile(`(?m)^# +(.+?)[ \t]*$`)
 
 // ParsePlan reads a Plan file.
 func ParsePlan(path string) (*Plan, error) {
@@ -43,7 +44,8 @@ func ParsePlan(path string) (*Plan, error) {
 
 // ParsePlanText parses Plan file text. A Task section holds an optional
 // "- key: value" list of fields, then "### Goal", "### Done", "### Context",
-// "### Files". blocked_by names Tasks by plan number (1-based) or title.
+// "### Files". The introduction starts every Task's Context.
+// blocked_by names Tasks by plan number (1-based) or title.
 func ParsePlanText(src string) (*Plan, error) {
 	front, body := SplitFrontMatter(src)
 	p := &Plan{}
@@ -57,6 +59,11 @@ func ParsePlanText(src string) (*Plan, error) {
 	if len(locs) == 0 {
 		return nil, fmt.Errorf("plan has no \"## <task>\" sections")
 	}
+	introduction := body[:locs[0][0]]
+	if title := planTitleRe.FindStringIndex(introduction); title != nil {
+		introduction = introduction[title[1]:]
+	}
+	introduction = strings.TrimSpace(introduction)
 	for i, loc := range locs {
 		title := body[loc[2]:loc[3]]
 		end := len(body)
@@ -67,6 +74,13 @@ func ParsePlanText(src string) (*Plan, error) {
 		b, err := parseTaskSection(title, section, p.Defaults)
 		if err != nil {
 			return nil, fmt.Errorf("task %q: %w", title, err)
+		}
+		if introduction != "" {
+			context := "Shared context of the Plan:\n\n" + introduction
+			if b.Context != "" {
+				context += "\n\n" + b.Context
+			}
+			b.Context = context
 		}
 		p.Tasks = append(p.Tasks, b)
 	}

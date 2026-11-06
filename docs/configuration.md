@@ -202,9 +202,45 @@ The hook is the set of `maestro hook` entries that each Adapter installs in a Ha
 |---|---|---|---|
 | `scope` | string | `"projects"` | Sets where the hook applies, for both the deny rule and the Reminder: `projects` applies them only inside a project that holds `.agents/maestro.toml` (any folder under it), and `all` applies them everywhere. The Grok rules file states the condition in words instead. |
 
+For a Reminder in scope, the hook compares the installed skill and Grok rules with the text in the binary. If either differs, it adds `Adapter stale (<harnesses>): run maestro adapter install` with each stale Harness's name. Claude Code, Codex, and Antigravity all receive this line, including when only Grok's rules are stale. The check reads local files and makes no network call. Run `maestro adapter install` to update the files and clear the line. Grok has no Reminder event; use `maestro doctor` there. Missing or unreadable files remain checks for `maestro doctor`.
+
+#### Read-only commands
+
+The hook's read-only command list is the baseline for every project. It serves Go, Node, PHP, Python, Rust, and Docker projects. These commands need no project `allow` entry. A command's write or execution forms are denied even when a check or `allow` entry names the command.
+
+A read-only command cannot change the project tree, the user's files outside the tool's own folders, or the system. Writes to a tool's own cache, log, telemetry, or module download folders under the user's home, such as `~/.npm/_logs`, `~/Library/Caches/go-build`, `~/go/pkg/mod`, Go telemetry counters, `~/.composer/cache`, pip's cache, and Docker's own state, do not count as changes under this rule.
+
+| Group | Commands |
+|---|---|
+| Text and files | `cat`, `ls`, `head`, `tail`, `grep`, `rg`, `find`, `sed`, `wc`, `diff`, `stat`, `file`, `which`, `tree`, `du`, `df`, `basename`, `dirname`, `realpath`, `pwd`, `cut`, `sort`, `uniq`, `tr`, `jq`, `yq`, `test`, `[` |
+| Version control | `git log`, `git diff`, `git show`, `git status`, `git blame`, `git branch` in its current list forms, `git ls-files`, `git describe`, `git rev-parse`, `git tag` in list forms |
+| Toolchains: versions | `go version`, `node --version`, `npm --version`, `pnpm --version`, `yarn --version`, `php --version`, `composer --version`, `python3 --version`, `pip --version`, `cargo --version`, `rustc --version`, `docker --version` |
+| Toolchains: environment, packages, and docs | `go env`, `go list`, `go doc`, `npm ls`, `npm view`, `pnpm ls`, `composer show`, `pip list`, `pip show` |
+| Containers | `docker version`, `docker info`, `docker ps`, `docker images`, `docker compose ps`, `docker compose config` |
+| Other | `echo`, `date` |
+
+The following limits apply:
+
+- `sed` denies `-i`, BSD `-I`, `--in-place`, script files (`-f`, `--file`), and scripts that the hook cannot judge. The hook accepts simple numeric or regular expression addresses, groups, read commands, and substitutions. It denies `w`, `W`, `e`, and substitution flags that write or execute. This also applies with `-s`. Bracket expressions, control escapes, and other unsupported script syntax are denied.
+- `file` denies `-C`, `--compile`, timestamp changes (`-p`, `--preserve-date`), and decompression forms that can run an external program (`-z`, `-Z`, `--uncompress`, `--uncompress-noreport`).
+- `tree` denies `-o`, `-R`, and `-H`. `sort` denies `-o`, `--output`, and `--compress-program`. `uniq` denies two operands because its second operand is an output file.
+- `rg` denies `--pre`, `--pre-glob`, and `--hostname-bin`. `find` denies `-exec`, `-execdir`, `-delete`, `-fprint`, `-fprint0`, `-fprintf`, `-fls`, `-ok`, and `-okdir`.
+- `jq` has no file write form. `yq` denies `-i`, `--inplace`, `--in-place`, `-s`, `--split-exp`, and `--split-exp-file`.
+- `git log`, `git diff`, and `git show` deny `--output`, `--ext-diff`, and `--textconv`. `git describe` denies `--dirty` and `--broken` because they can update the index. `git branch` keeps its current list forms. `git tag` accepts a bare command or list forms with `-l`, `--list`, `-n`, `--contains`, `--points-at`, and `--sort`. A tag name without a list form is denied. Creation, annotation, deletion, signing, force, and message options are denied.
+- `go env` denies `-w` and `-u`. `go list` denies module changes (`-mod=mod`, `-modfile`), output files (`-o`, `-debug-actiongraph`, `-pkgdir`), program execution (`-toolexec`), and flags passed to compilers or linkers (`-asmflags`, `-gccgoflags`, `-gcflags`, `-ldflags`). `go doc` denies the HTTP server form (`-http`). Go's double dash forms have the same limits.
+- A `--version` form accepts no extra arguments. `pip list` and `pip show` deny `--log`. `docker compose config` denies `-o`, `--output`, and `--lock-image-digests`.
+
+These checks use the command's documented forms: [sed](https://www.gnu.org/software/sed/manual/sed.html), [file](https://man.freebsd.org/cgi/man.cgi?query=file&sektion=1&format=html), [yq](https://mikefarah.gitbook.io/yq/usage/split-into-multiple-files), [Git tag](https://git-scm.com/docs/git-tag), [Go](https://pkg.go.dev/cmd/go), and [pip](https://pip.pypa.io/en/stable/cli/pip/).
+
+Tests, builds, formatters, and package installs stay outside this list. This includes `go test`, `npm test`, `composer test`, `pytest`, `cargo test`, and `cargo metadata`, which can write `Cargo.lock`. An edit Lane needs a project `checks` or `allow` entry to run these commands. A read Lane cannot run them. The deny reason names every accepted read-only command.
+
+This list does not grant shell loops, command substitution, redirects, or a pipe to a write command. The existing shell and path checks still apply. Quote shell patterns so the hook can judge their text.
+
 ### [router]
 
 The Router makes the Routes. The backend is Jev or the rules table, and Maestro uses the rules table when Jev is absent or sure of nothing.
+
+Jev's Judgment level sets the Task's Tier. The Brief's `level` is the Orchestrator's estimate. It goes to Jev as context and never raises Jev's score or limits its pick. The rules table uses the estimate when Jev is absent or below the confidence floor. Only a Brief's `floor:` and `ceiling:`, or `maestro run --floor` and `--ceiling`, set hard Tier bounds. An edit never goes Light. When Jev's score is below the estimate, the Reason line says, for example, `jev some, orchestrator estimated expert`. The Route record keeps both values.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -229,7 +265,11 @@ Maestro compares these numbers with the scores that Jev returns. Only the table 
 | `council_write` | float | `0.30` | Sets the score of "needs to write" under which Maestro suggests a Council. |
 | `ask` | float | `0.50` | Sets the confidence at which an "ask the Orchestrator" pick stops the Route. |
 | `timeout_s` | float | `1.5` | Sets the number of seconds that Maestro waits for Jev before it uses the rules table. |
-| `satisfies` | float | `0.65` | Sets the score at or above which the gate closes a Task as satisfying its Brief. A `pass` verdict under this score ends the Task `unverified` rather than failed, so correct work is kept and the Orchestrator reads the diff; tune the score from `maestro router stats` once the ledger has rows. |
+| `satisfies` | float | `0.65` | Sets the score at or above which the gate closes a Task as satisfying its Brief. A `pass` verdict under this score can get one nudge before the Task ends `unverified`; see the rule below. Tune the score from `maestro router stats` once the Ledger has rows. |
+
+The gate asks one `noul` question for each Done item, keyed as `done_1`, `done_2`, and so on, with the `cause`, `satisfies`, `verdict`, and `risk` questions. It records the item scores under `verification.gate.done_items`. If the checks pass, the verdict is `pass`, the risk is `none`, `low`, or `medium`, and `satisfies` is under the close threshold, Maestro gives the same Lane one nudge. The retry Brief lists each Done item with a score under `0.5`. An absent item score does not count as a missing item. With no missing items, the Task ends `unverified` at once.
+
+Each Task gets at most one nudge, including across re-Routes. The nudge adds one attempt to the Dispatch cap and the Run's Dispatch cap, so the existing retry after a Lane error or Transient error still fits. The nudge attempt uses the normal checks and gate: a passing result at the close threshold is verified; another result follows the normal outcome rules. There is no second nudge. The Ledger marks the nudge attempt and later attempts with `nudged: true`. Earlier Reports stay under `attempts/<n>/`; `maestro wait` prints the last attempt's Report.
 
 ### [budget]
 
@@ -246,14 +286,33 @@ These keys are the global Budget rules. An Account can override `block_at`.
 
 These keys set when Maestro stops a Dispatch and when it stops a Run. A duration is a string such as `"10m"` or `"1h"`.
 
+For a Task of a Run, Lane error, Transient error, Limit hit, and Stall re-Route one Tier up. A Bad result re-Routes when its Cause is `capability`: the Lane's work is wrong or incomplete with no blocker. Cause `brief` means the Brief excludes a required file, forbids required work, or contradicts itself. Cause `environment` means a tool or service was denied, down, or missing. These two Causes block the Task for the Orchestrator. A blocked Report stays blocked. The Dispatch cap, Tier ceiling, and same-error-twice rule still apply.
+
+A touch violation has Cause `brief` without a Jev call. Otherwise Jev answers the `cause` choice question with the gate's `satisfies`, `verdict`, and `risk` questions, or answers `cause` alone for a blocked or partial Report or failed checks. The choices are `brief`, `environment`, `capability`, and `none` (nothing went wrong). The state includes the Brief's title, Goal, and Done, the Report's Blocked section and Status, failed check output, and the diff when present. Each text field is limited to 60 KiB. If `router = "rules"`, no key is available, or Jev fails, a rule supplies the Cause: a touch violation or blocked Report is `brief`; a partial Report with Blocked items is `environment`; other failures are `capability`.
+
+The Ledger stores `cause` and `cause_source` (`jev` or `rule`) under `verification.gate`, and `decision` under `outcome`. A re-Route names the Cause in its Reason line. A Task blocked by its Cause reaches the Orchestrator through the Run report, `maestro wait`, the Reminder, and the Solo wake-up with the Cause and the Lane's Blocked items.
+
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `idle_limit` | duration | `"10m"` | Sets the longest time that a Dispatch may run with no new output before Maestro stops it. Time with a tool call in progress does not count; the Wall limit still applies. |
-| `wall_limit` | table of durations | see below | Sets the longest total time of a Dispatch for each Tier. |
+| `idle_limit` | duration | `"10m"` | Sets the longest time that a Dispatch or a check may run with no new output before Maestro stops it. A Lane tool call in progress pauses the Lane's Idle limit; the Wall limit still applies. For checks, output on stdout or stderr resets the Idle limit. |
+| `wall_limit` | table of durations | see below | Sets the longest total time of a Dispatch for each Tier. The checks share a separate budget of the same length, counted from the start of the first check. |
 | `max_dispatches` | integer | `6` | Sets how many Dispatches a Task may use before Maestro fails it instead of re-routing it. |
-| `keep_awake` | boolean | `true` | Keeps the Mac awake with `caffeinate` while a Dispatch or a Run is live. |
+| `keep_awake` | boolean | `true` | Keeps the Mac awake during every Lane, Run, Council, and verb that blocks on live work, and during the Orchestrator's turn in Claude Code, Codex, and Antigravity. See below. |
 | `run_pause_after_escalations` | integer | `3` | Sets the number of consecutive Task hand-offs to the Orchestrator that pauses a Run; a completed Task resets the count. Maestro prints the count and Task number; running Dispatches finish, and no new Dispatch starts. |
 | `run_pause_after_same_error` | integer | `2` | Sets the number of Task hand-offs with the same first error line that pauses a Run; the count accumulates until the Run resumes. Maestro prints the count, Task number, and error; running Dispatches finish, and no new Dispatch starts. |
+
+With `keep_awake = true`, each Maestro process shares one `caffeinate -i -s -w <pid>` while it works or waits on live work. This includes `maestro wait` for a Dispatch, Run, or Council, the `--wait` paths, the Relay verb, and a hook that waits for a Relay answer. `-i` prevents idle sleep on battery and AC power; `-s` also prevents system sleep on AC power. The process releases its assertion when the work or wait ends. This does not prevent display sleep.
+
+In hook scope, a Reminder event also starts a detached `caffeinate -i -s -w <orchestrator pid> -t 1800`. Maestro finds the nearest ancestor whose executable matches a configured Harness binary. It does nothing when no ancestor matches or when the prompt belongs to a Lane. Each later Reminder event replaces the same process's caffeinate and refreshes its 30-minute lease. The record is `~/.maestro/control/awake/<pid>`. The hook writes the Reminder before it starts the background work.
+
+| Harness | Starts or refreshes the lease | Ends the lease |
+|---|---|---|
+| Claude Code | `UserPromptSubmit` | `Stop`, process exit, or 30 minutes after the last Reminder event, whichever comes first |
+| Codex | `UserPromptSubmit` | `Stop`, process exit, or 30 minutes after the last Reminder event, whichever comes first |
+| Antigravity | `PreInvocation` | `Stop`, process exit, or 30 minutes after the last Reminder event, whichever comes first |
+| Grok | None: its Carrier is a rules file, with no Reminder event | No Orchestrator turn protection; its Lanes and blocking Maestro verbs still have protection |
+
+The lease protects a turn, not an idle Harness session. If `Stop` does not reach Maestro, the lease releases the Mac within 30 minutes of the last Reminder event. Run `maestro adapter install` again to add the `Stop` entries; `maestro doctor` reports a missing entry as a partial Adapter. In Codex, review and trust the new `Stop` hook in `/hooks`. The current [Codex hooks](https://learn.chatgpt.com/docs/hooks) and [Antigravity hooks](https://antigravity.google/docs/hooks) both provide `Stop`.
 
 Default `wall_limit`:
 
@@ -266,7 +325,15 @@ Default `wall_limit`:
 
 A Brief can raise the Wall limit for one Task. It cannot lower it.
 
+A check has no fixed time cap. When stdout and stderr stay silent for the Idle limit, Maestro kills the process group and fails the check with `no output for <idle limit>` and Failure class Stall. When the checks' budget ends, Maestro kills the process group and fails the check with `wall limit` and Failure class Stall.
+
+Before the first check whose command starts with `docker` (including `docker compose`), Maestro runs `docker info` once per Task. If it fails or does not answer within 10 seconds, the check fails with `Docker does not respond` and Failure class Bad result. The checks' budget also applies to this pre-flight.
+
+After an Idle limit, a Wall limit, or a failed Docker pre-flight, Maestro skips the remaining checks and records the same reason. A check that fails on its own exit code does not stop the next check. The Ledger and `maestro wait` show the reason and Failure class.
+
 ### [run]
+
+In a Plan file, text after the front matter or optional `# title` and before the first `## <task title>` is the introduction. Maestro adds it to the start of every Task's Context under `Shared context of the Plan:`, before the Task's own `### Context` text. An empty introduction adds nothing. `maestro help plan` prints the format.
 
 These keys control the plan Council for a held Run. The approval hold rules are separate: more than four Tasks, a medium or fallback Route, a Judgment level two steps from the Router's, a Router question, or a Router Council signal.
 
@@ -293,6 +360,27 @@ These keys set how many Lanes run at the same time.
 
 This file is in the root of a project, and it applies to that project only. `maestro init` writes the file. A missing file is empty. The keys `forbid`, `checks`, `router`, `redact`, and `councils` tighten what the user file allows. The keys `allow`, `dirs`, and `claude_auto` widen it: they give edit Dispatches more permission rules, more writable directories, or the Claude Code auto permission mode.
 
+`maestro init` detects each stack from files at the project root. A project can match more than one stack. It writes active `dirs` and `allow` arrays for all matches. It writes `checks` as commented suggestions, such as `# checks = ["go test ./..."]`. Review the suggestions before you activate them: an incorrect check fails every edit Task. With no match, all keys stay commented.
+
+| Stack | Root files | Cache directories |
+|---|---|---|
+| Go | `go.mod` | Uses `go env GOCACHE GOMODCACHE`; falls back to `~/Library/Caches/go-build` on macOS or `~/.cache/go-build` on Linux, plus `~/go/pkg/mod`. |
+| npm | `package.json`, with `package-lock.json` or no runner lockfile | Uses `npm config get cache`; falls back to `~/.npm`. |
+| pnpm | `package.json` and `pnpm-lock.yaml` | Uses `pnpm store path`; falls back to `~/.cache/pnpm`. |
+| yarn | `package.json` and `yarn.lock` | Uses `yarn cache dir` and `~/.yarn`; falls back to `~/.yarn` and `~/.cache/yarn`. |
+| PHP | `composer.json` | Uses `composer config --global cache-dir`; falls back to `~/.composer/cache` and `~/.cache/composer`. |
+| Python | `pyproject.toml` or `requirements.txt` | Uses `pip cache dir`; falls back to `~/.cache/pip`. |
+| Rust | `Cargo.toml` | Uses `~/.cargo`. |
+| Docker | `Dockerfile`, `compose.yaml`, `compose.yml`, or `docker-compose.yml` | Uses `~/.docker`, plus `~/.orbstack/run` when that folder exists. |
+
+When several Node lockfiles exist, npm takes priority, then pnpm, then yarn. Cache queries run from the project root when the command is on `PATH`. If a query fails, times out, or returns an invalid path, Maestro uses the fallback paths.
+
+The generated allow rules use the hook's `Bash(<prefix> *)` form. A trailing ` *` permits arguments; a bare rule permits only that command. The rules cover Go test, vet, build, and gofmt; the Node runner's test and run commands; Composer test, PHPUnit, Pint, and PHPStan; pytest and ruff; Cargo test, build, clippy, and fmt; and Docker compose and build. Node test, Composer test, and pytest also get a bare rule. `Bash(docker run *)` stays a commented suggestion because it permits host path mounts.
+
+If the Project file exists, `maestro init` shows the proposed file and changes nothing. `maestro init --write` merges the additions. It keeps every existing key, value, and comment, and appends only missing values to `dirs` and `allow`. A value in a comment also counts as present, so a value that you comment out stays inactive. It adds a commented `checks` line only when no active or commented `checks` key exists. A second `--write` with the same stack and cache paths adds nothing.
+
+`maestro doctor` warns when a Project file has no active checks. It also warns when a project check starts with `docker` and `dirs` does not include `~/.docker` or its absolute path. These warnings do not fail the doctor command.
+
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `forbid` | array of strings | none | Lists the Families that Maestro never routes to in this project. |
@@ -306,7 +394,9 @@ This file is in the root of a project, and it applies to that project only. `mae
 
 ## Generated state
 
-Maestro writes these paths itself. Do not edit them by hand. `maestro clean` removes old Run and Council folders. It never touches the ledger.
+Maestro writes these paths itself. Do not edit them by hand. `maestro clean --older-than 30d` removes old Run and Council folders in the current project. It removes control folders across all project keys when their Dispatch or Run ended before the threshold, or their record is gone. It keeps live Run controls. It also removes old cache folders, but keeps the latest Canary files per Harness at the path shown by `maestro doctor`. It never touches the Ledger or `budget.json`.
+
+Maestro rejects a Ledger row with no `kind`. It drops Budget Accounts that are absent from the loaded Roster before the next save. Tests must set `MAESTRO_HOME` to a temporary folder. A call to `config.Home()` in a test without that variable stops with a panic.
 
 | Path | Written by |
 |---|---|
@@ -314,6 +404,9 @@ Maestro writes these paths itself. Do not edit them by hand. `maestro clean` rem
 | `~/.maestro/ledger.jsonl` | Every finished Dispatch, Council, and Run appends one row. |
 | `~/.maestro/budget.json` | Dispatches (Harvest) and `maestro budget` (Probe) store Readings. |
 | `~/.maestro/cache/discovery.json` | `maestro roster refresh` rewrites it, and any verb rewrites it when it is stale. |
+| `~/.maestro/control/<project-key>/` | Dispatches store Lane policy and Relay files. |
+| `~/.maestro/canaries/` | `maestro doctor --canary` stores the latest check per Harness. |
+| `~/.maestro/cache/maestro-canary-<harness>/` | A failed Canary keeps its check files until the next Canary for that Harness. |
 | `~/.maestro/runs/` | `maestro run` writes one index file for each live Run. |
 | `.agents/maestro/runs/` | `maestro dispatch` and `maestro run` write one Run folder for each Run. |
 | `.agents/maestro/councils/` | `maestro council` writes one folder for each Council. |
