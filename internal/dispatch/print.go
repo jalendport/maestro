@@ -57,6 +57,9 @@ func Print(rec *Record, asJSON bool) int {
 	} else if rec.TaskInfo.Access == brief.AccessEdit && rec.Outcome.Status != "" {
 		fmt.Fprintln(os.Stdout, "changed  (nothing)")
 	}
+	if len(rec.Verification.TestsOutsideTouch) > 0 {
+		fmt.Fprintf(os.Stdout, "tests outside touch: %s\n", strings.Join(rec.Verification.TestsOutsideTouch, "  "))
+	}
 	if len(rec.Verification.TouchViolations) > 0 {
 		fmt.Fprintf(os.Stdout, "scope    outside touch: %s\n", strings.Join(rec.Verification.TouchViolations, "  "))
 	}

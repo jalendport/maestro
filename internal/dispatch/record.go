@@ -168,12 +168,13 @@ type Outcome struct {
 
 // Verification is the Verification group.
 type Verification struct {
-	StartCommit     string               `json:"start_commit,omitempty"`
-	CommitRange     string               `json:"commit_range,omitempty"`
-	Changed         []string             `json:"changed"`
-	TouchViolations []string             `json:"touch_violations"`
-	Checks          []verify.CheckResult `json:"checks"`
-	Gate            json.RawMessage      `json:"gate,omitempty"`
+	StartCommit       string               `json:"start_commit,omitempty"`
+	CommitRange       string               `json:"commit_range,omitempty"`
+	Changed           []string             `json:"changed"`
+	TouchViolations   []string             `json:"touch_violations"`
+	TestsOutsideTouch []string             `json:"tests_outside_touch,omitempty"`
+	Checks            []verify.CheckResult `json:"checks"`
+	Gate              json.RawMessage      `json:"gate,omitempty"`
 }
 
 // Event is one timeline entry inside a Dispatch (never a ledger row).

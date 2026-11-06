@@ -1191,7 +1191,7 @@ func (sup *Supervisor) endOfRunCouncil() *council.Council {
 		return nil
 	}
 	c, err := council.Create(sup.Env, council.Opts{
-		Question: fmt.Sprintf("Review the changes of run %s (%s) as one diff: is the work correct, complete, and safe to keep? The files changed are listed under Files; read them in full.", s.Run, s.Title),
+		Question: endOfRunQuestion(s),
 		Files:    changed, Tier: top, Trigger: council.TriggerEndOfRun, Run: s.Run, Authors: authors, Slug: s.Run + "-review",
 	})
 	if err != nil {
@@ -1202,6 +1202,23 @@ func (sup *Supervisor) endOfRunCouncil() *council.Council {
 	s.Councils = append(s.Councils, c.Slug)
 	ui.Eventf("council", "end-of-run council %s  %s  %d seats", c.Slug, c.Tier, len(c.Seats))
 	return c
+}
+
+func endOfRunQuestion(s *State) string {
+	question := fmt.Sprintf("Review the changes of run %s (%s) as one diff: is the work correct, complete, and safe to keep? The files changed are listed under Files; read them in full.", s.Run, s.Title)
+	for _, task := range sortedTasks(s) {
+		if task.State != TaskDone {
+			continue
+		}
+		folder := task.Folder
+		if folder == "" {
+			folder = filepath.Join(s.Folder, task.ID)
+		}
+		if rec, err := dispatch.LoadRecord(folder); err == nil && len(rec.Verification.TestsOutsideTouch) > 0 {
+			question += fmt.Sprintf("\nTask %d (%s, %s), tests outside touch: %s. Check these tests for weakened or removed assertions that the Brief does not ask for.", task.Number, task.ID, task.Title, strings.Join(rec.Verification.TestsOutsideTouch, ", "))
+		}
+	}
+	return question
 }
 
 func ledgerRow(s *State) map[string]any {

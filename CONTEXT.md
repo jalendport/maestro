@@ -27,7 +27,7 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Tree mode** — a Run or standalone edit Dispatch mode that uses the project tree. In a Run, edit Tasks run one at a time.
 - **Container-bound check** — a check whose command runs in a container bound to the project folder. A Run or standalone Dispatch with such a check uses tree mode.
 - **Brief** — the text a Lane receives for one Task: the goal, the definition of done, the files, the checks, and the permission mode.
-- **Scope guard** — the check that limits an edit Task's changed paths to its `touch` patterns and project test files. Test files are always in scope. An empty `touch` sets no path limit.
+- **Scope guard** — the check that limits an edit Task's changed paths to its `touch` patterns and project test files. Test files can be added or edited outside `touch`; Maestro records them for review. A deleted test file must match `touch`. An empty `touch` sets no path limit.
 - **Tier** — a rung on the strength ladder that Lane families sit on: Light, Daily, Heavy, Frontier. "One Tier up" means the next rung.
 - **Judgment level** — how much a Lane must decide on its own to finish a Task: none, some, significant, or expert. The level Jev scores sets the Tier. The Brief's `level` is the Orchestrator's estimate: context for Jev and the level for the rules fallback. Only `floor` and `ceiling` set hard Tier bounds; an edit never goes Light.
 - **Account** — one login that Lanes bill against, with its billing kind and plan price. Several Lanes can share one Account.

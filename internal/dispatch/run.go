@@ -926,7 +926,16 @@ func recordChanges(t *Task, rec *Record, snap attemptBaseline) {
 	rec.Verification.Changed = without(snap.Changed(t.workdir()), runRel)
 	rec.judged = true
 	if t.Access == brief.AccessEdit {
-		rec.Verification.TouchViolations = verify.ScopeViolations(rec.Verification.Changed, t.Touch, runRel)
+		var deleted []string
+		rec.Verification.TestsOutsideTouch = nil
+		for _, path := range rec.Verification.Changed {
+			if _, err := os.Lstat(filepath.Join(t.workdir(), path)); os.IsNotExist(err) {
+				deleted = append(deleted, path)
+			} else if verify.InScope(path, t.Touch) && !verify.InTouch(path, t.Touch) {
+				rec.Verification.TestsOutsideTouch = append(rec.Verification.TestsOutsideTouch, path)
+			}
+		}
+		rec.Verification.TouchViolations = verify.ScopeViolations(rec.Verification.Changed, t.Touch, runRel, deleted...)
 	}
 }
 

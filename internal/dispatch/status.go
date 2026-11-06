@@ -126,6 +126,9 @@ func Status(rec *Record) string {
 		text += fmt.Sprintf("workdir %s\n", rec.Workdir)
 	}
 	var gate Gate
+	if len(rec.Verification.TestsOutsideTouch) > 0 {
+		text += fmt.Sprintf("changed  %s\ntests outside touch: %s\n", strings.Join(rec.Verification.Changed, "  "), strings.Join(rec.Verification.TestsOutsideTouch, "  "))
+	}
 	if json.Unmarshal(rec.Verification.Gate, &gate) == nil {
 		if gate.Scored {
 			text += fmt.Sprintf("gate     satisfies %.2f  verdict %s  risk %s\n", gate.Satisfies, gate.Verdict, gate.Risk)

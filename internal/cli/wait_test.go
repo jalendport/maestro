@@ -582,6 +582,37 @@ func TestWaitKeepsFinalDispatchOutcome(t *testing.T) {
 	}
 }
 
+func TestWaitNamesTestsOutsideTouch(t *testing.T) {
+	for _, inRun := range []bool{false, true} {
+		t.Run(fmt.Sprintf("Run=%t", inRun), func(t *testing.T) {
+			rec, s := waitFixture(t)
+			path := "internal/other/x_test.go"
+			rec.State = "ended"
+			rec.Outcome = dispatch.Outcome{Status: "done", Outcome: dispatch.OutcomeVerified}
+			rec.Verification.Changed = []string{path}
+			rec.Verification.TestsOutsideTouch = []string{path}
+			if err := rec.Save(); err != nil {
+				t.Fatal(err)
+			}
+			id := rec.Task
+			if inRun {
+				s.State, s.Tasks[0].State = run.StateFinished, run.TaskDone
+				if err := s.Save(); err != nil {
+					t.Fatal(err)
+				}
+				id = s.Run
+			}
+			output, err := waitCommand(t, "wait", id)
+			if err != nil || !strings.Contains(output, "tests outside touch: "+path) {
+				t.Fatalf("wait: %s, %v", output, err)
+			}
+			if strings.Index(output, "changed") > strings.Index(output, "tests outside touch:") {
+				t.Fatalf("wait output order: %s", output)
+			}
+		})
+	}
+}
+
 func TestWaitShowsCheckStopReasonAndClass(t *testing.T) {
 	for _, tc := range []struct{ reason, class string }{
 		{"no output for 10m0s", dispatch.FailStall},

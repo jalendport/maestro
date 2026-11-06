@@ -86,6 +86,17 @@ func askGate(env *Env, t *Task, rec *Record, b *brief.Brief, report *brief.Repor
 		"failed_checks": cut(failedChecks.String(), maxDiffBytes), "error": cut(rec.Outcome.ErrorText, maxDiffBytes),
 		"diff": cut(diff, maxDiffBytes),
 	}
+	if len(rec.Verification.TestsOutsideTouch) > 0 {
+		testsDiff, err := snap.diff(t.workdir(), rec.Verification.TestsOutsideTouch)
+		if err != nil {
+			return fallback(err.Error())
+		}
+		state["tests_outside_touch"] = map[string]any{
+			"note":  "These test files are outside the Task's scope. A weakened or removed assertion that the Brief does not ask for is a Bad result.",
+			"paths": rec.Verification.TestsOutsideTouch,
+			"diff":  cut(testsDiff, maxDiffBytes),
+		}
+	}
 	if env.Project != nil {
 		client.Redact = env.Project.Redact
 	}

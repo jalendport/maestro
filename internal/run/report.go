@@ -76,6 +76,16 @@ func Report(s *State) string {
 				fmt.Fprintf(&w, "    judged files: %s\n", files)
 			}
 		}
+		folder := t.Folder
+		if folder == "" {
+			folder = filepath.Join(s.Folder, t.ID)
+		}
+		if rec, err := dispatch.LoadRecord(folder); err == nil && len(rec.Verification.TestsOutsideTouch) > 0 {
+			if t.Attempt <= 1 {
+				fmt.Fprintf(&w, "    changed: %s\n", strings.Join(rec.Verification.Changed, ", "))
+			}
+			fmt.Fprintf(&w, "    tests outside touch: %s\n", strings.Join(rec.Verification.TestsOutsideTouch, ", "))
+		}
 	}
 	var needs []string
 	for _, t := range sortedTasks(s) {
@@ -149,13 +159,22 @@ func reportPath(s *State, t *TaskState) string {
 }
 
 func blockedText(t *TaskState) string {
+	text := ui.FirstLine(t.Error, 80)
 	if len(t.Conflicts) > 0 {
-		return "merge conflict in " + strings.Join(t.Conflicts, ", ") + "; Worktree: " + t.Workdir
+		text = "merge conflict in " + strings.Join(t.Conflicts, ", ") + "; Worktree: " + t.Workdir
 	}
-	if rec, err := dispatch.LoadRecord(t.Folder); err == nil && rec.BlockedReason() != "" {
-		return rec.BlockedReason()
+	if rec, err := dispatch.LoadRecord(t.Folder); err == nil {
+		if len(t.Conflicts) == 0 && rec.BlockedReason() != "" {
+			text = rec.BlockedReason()
+		}
+		if len(rec.Verification.TestsOutsideTouch) > 0 {
+			if text != "" {
+				text += "; "
+			}
+			text += "tests outside touch: " + strings.Join(rec.Verification.TestsOutsideTouch, ", ")
+		}
 	}
-	return ui.FirstLine(t.Error, 80)
+	return text
 }
 
 // Status renders the live view of maestro status.
@@ -225,6 +244,9 @@ func Status(s *State) string {
 			fmt.Fprintf(&w, "    %s\n", order)
 		}
 		if rec, err := dispatch.LoadRecord(filepath.Join(s.Folder, t.ID)); err == nil {
+			if len(rec.Verification.TestsOutsideTouch) > 0 {
+				fmt.Fprintf(&w, "    changed: %s\n    tests outside touch: %s\n", strings.Join(rec.Verification.Changed, ", "), strings.Join(rec.Verification.TestsOutsideTouch, ", "))
+			}
 			w.WriteString(dispatch.RelayEvents(rec))
 		}
 	}

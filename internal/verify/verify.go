@@ -218,9 +218,9 @@ func CommitRange(root, start string) string {
 	return start[:12] + ".." + head[:12]
 }
 
-// ScopeViolations returns changed paths outside InScope. Paths under ignore
-// (the Run folder) never count.
-func ScopeViolations(changed, touch []string, ignore string) []string {
+// ScopeViolations returns changed paths outside InScope. Deleted paths must
+// match touch itself. Paths under ignore (the Run folder) never count.
+func ScopeViolations(changed, touch []string, ignore string, deleted ...string) []string {
 	if len(touch) == 0 {
 		return nil
 	}
@@ -229,7 +229,11 @@ func ScopeViolations(changed, touch []string, ignore string) []string {
 		if ignore != "" && (p == ignore || strings.HasPrefix(p, ignore+"/")) {
 			continue
 		}
-		if !InScope(p, touch) {
+		removed := false
+		for _, path := range deleted {
+			removed = removed || path == p
+		}
+		if !InScope(p, touch) || (removed && !InTouch(p, touch)) {
 			out = append(out, p)
 		}
 	}
@@ -240,7 +244,7 @@ func ScopeViolations(changed, touch []string, ignore string) []string {
 // An empty touch permits every path. Test files stay in scope even when a
 // negation excludes them; other paths use the last matching touch pattern.
 func InScope(path string, touch []string) bool {
-	if len(touch) == 0 {
+	if InTouch(path, touch) {
 		return true
 	}
 	for _, pattern := range []string{
@@ -250,6 +254,14 @@ func InScope(path string, touch []string) bool {
 		if Match(pattern, path) {
 			return true
 		}
+	}
+	return false
+}
+
+// InTouch reports whether the Brief's own patterns permit the path.
+func InTouch(path string, touch []string) bool {
+	if len(touch) == 0 {
+		return true
 	}
 	ok := false
 	for _, pattern := range touch {
