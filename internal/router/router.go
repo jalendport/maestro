@@ -216,7 +216,7 @@ func (rt *Router) Route(req Request) (route *Route, err error) {
 		useRules = err != nil || key == ""
 	}
 	if !useRules {
-		r, jr, err := rt.jevRoute(req, cands, level, category, defaults)
+		r, jr, err := rt.jevRoute(req, cands, category, defaults)
 		if err != nil {
 			if ask, ok := err.(*AskOrchestrator); ok {
 				ask.Excluded = excluded
@@ -230,11 +230,6 @@ func (rt *Router) Route(req Request) (route *Route, err error) {
 				r.RulesPick = rulesFamily.ID
 			}
 			r.Agreed = r.RulesPick == r.FamilyID
-			tail := fmt.Sprintf("jev %.2f", r.Confidence)
-			if r.Band == "medium" {
-				tail += " medium confidence"
-			}
-			r.ReasonLine = reason(r, tail)
 			if !r.Agreed && r.RulesPick != "" {
 				r.ReasonLine += "  rules table: " + r.RulesPick
 			}

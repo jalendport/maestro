@@ -419,7 +419,7 @@ func TestRouteRedactsAllOutboundStrings(t *testing.T) {
 	f.GoodFor = "MARKED"
 	b := &brief.Brief{Goal: "MARKED", Done: "MARKED", Facts: map[string]string{"fact": "MARKED"}}
 	b.Title = "MARKED"
-	_, jr, _ := rt.jevRoute(Request{Brief: b, Project: &config.Project{Redact: []string{"MARKED"}}}, []*roster.Family{f}, roster.LevelSome, "implement", nil)
+	_, jr, _ := rt.jevRoute(Request{Brief: b, Project: &config.Project{Redact: []string{"MARKED"}}}, []*roster.Family{f}, "implement", nil)
 	if jr.Error != "" {
 		t.Fatal(jr.Error)
 	}

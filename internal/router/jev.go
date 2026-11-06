@@ -41,7 +41,7 @@ func (c *CouncilSignal) Error() string { return c.Reason }
 // jevRoute runs one Route call and applies the thresholds in order. It
 // returns (nil, nil) when Jev is absent: error, timeout, or no key; the
 // caller then falls back to the rules table.
-func (rt *Router) jevRoute(req Request, cands []*roster.Family, level roster.Level, category string, defaults []string) (*Route, *JevRoute, error) {
+func (rt *Router) jevRoute(req Request, cands []*roster.Family, category string, defaults []string) (*Route, *JevRoute, error) {
 	th := func(k string) float64 { return rt.Roster.Threshold(k) }
 	timeout := time.Duration(th("timeout_s") * float64(time.Second))
 	client, err := jev.New(rt.Roster.Router.BaseURL, rt.Roster.Router.Model, timeout)
@@ -136,12 +136,8 @@ func (rt *Router) jevRoute(req Request, cands []*roster.Family, level roster.Lev
 		// 6. Below the floor: the rules table decides.
 		return nil, jr, nil
 	}
-	// Apply the computed level and all hard bounds again after Jev's choice.
-	useLevel := scoreLevel
-	if useLevel.Rank() < level.Rank() {
-		useLevel = level
-	}
-	useLevel = constrainedLevel(req, useLevel)
+	// Jev's score sets the level. Only hard bounds can change it.
+	useLevel := constrainedLevel(req, scoreLevel)
 	clamped := useLevel != scoreLevel
 	if pick == nil || !pick.Serves(useLevel) || !allowedTier(req, pick.TierFor(useLevel)) || roster.FanOut(pick.Levels[useLevel]) {
 		pick, _ = rt.rulesPick(cands, useLevel, category, req.Floor)
@@ -159,13 +155,24 @@ func (rt *Router) jevRoute(req Request, cands []*roster.Family, level roster.Lev
 	r.Confidence = conf
 	r.Band = band
 	r.TieBreak = tieBreak
+	source := fmt.Sprintf("jev %.2f", conf)
+	if band == "medium" {
+		source += " medium confidence"
+	}
+	if estimate != "" && scoreLevel.Rank() < estimate.Rank() {
+		source += fmt.Sprintf("; jev %s, orchestrator estimated %s", scoreLevel, estimate)
+	}
+	r.ReasonLine = reason(r, source)
 	return r, jr, nil
 }
 
-// routeState is the Brief as Jev sees it: title, goal, done, facts. Never
-// diffs, file lists, or numbers.
+// routeState is the Brief as Jev sees it: title, goal, done, the
+// Orchestrator's estimate, category, and facts. Never diffs or file lists.
 func routeState(req Request) map[string]any {
 	s := map[string]any{"title": req.Brief.Title, "goal": req.Brief.Goal, "done": req.Brief.Done}
+	if req.Brief.Level != "" {
+		s["orchestrator_estimate"] = req.Brief.Level
+	}
 	if req.Brief.Category != "" {
 		s["category"] = req.Brief.Category
 	}
