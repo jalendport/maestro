@@ -1,6 +1,6 @@
 # Maestro — ubiquitous language
 
-The glossary for Maestro: the words for its parts and what they mean, and nothing else. Code, docs, Briefs, and the skill use these words and no others for these things; rules, limits, and settings live in the configuration reference.
+The glossary for Maestro: the words for its parts and what they mean, and nothing else. Code, docs, Briefs, and the skill use these words and no others for these things; settings live in the configuration reference (`docs/configuration.md`), and rules and limits live in the behavior reference (`docs/reference.md`).
 
 ## Actors
 

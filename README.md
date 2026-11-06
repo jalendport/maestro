@@ -48,15 +48,15 @@ maestro adapter install  # connect every harness found on this machine
 maestro init             # in each project: write .agents/maestro.toml
 ```
 
-`maestro doctor` shows the Harness versions and starts no Dispatch. `maestro doctor --canary` runs one small read Dispatch on each installed Harness to check its launch, its Report, and the Maestro hook. See [Doctor and Canary](docs/configuration.md#doctor-and-canary).
+`maestro doctor` shows the Harness versions and starts no Dispatch. `maestro doctor --canary` runs one small read Dispatch on each installed Harness to check its launch, its Report, and the Maestro hook. See [Doctor and Canary](docs/reference.md#doctor-and-canary).
 
-`maestro adapter` prints the steps for each Harness and writes nothing. `maestro adapter install` does the steps; `maestro adapter install claude` connects one Harness. See [Adapters](docs/configuration.md#adapters).
+`maestro adapter` prints the steps for each Harness and writes nothing. `maestro adapter install` does the steps; `maestro adapter install claude` connects one Harness. See [Adapters](docs/reference.md#adapters).
 
 `maestro init` writes the Project file `.agents/maestro.toml`, which puts the project in hook scope, and detects the stack from the files at the project root. `maestro init --write` merges the proposed additions into an existing Project file. See [Project file configuration](docs/configuration.md#agentsmaestrotoml).
 
 ### Connect Claude Code
 
-Every Claude Lane runs in the Claude sandbox with the hook and settings that Maestro supplies. See [Claude Code](docs/configuration.md#claude-code).
+Every Claude Lane runs in the Claude sandbox with the hook and settings that Maestro supplies. See [Claude Code](docs/reference.md#claude-code).
 
 ```sh
 maestro adapter install claude
@@ -79,7 +79,7 @@ echo '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose"}}' | 
 
 ### Connect Codex
 
-The Codex sandbox holds the Access of a Codex Lane. See [Codex](docs/configuration.md#codex).
+The Codex sandbox holds the Access of a Codex Lane. See [Codex](docs/reference.md#codex).
 
 ```sh
 maestro adapter install codex
@@ -102,7 +102,7 @@ echo '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose"}}' | 
 
 ### Connect Grok
 
-A Grok Lane runs in always-approve mode and never prompts. The Maestro hook and the workspace sandbox hold its Access. See [Grok](docs/configuration.md#grok).
+A Grok Lane runs in always-approve mode and never prompts. The Maestro hook and the workspace sandbox hold its Access. See [Grok](docs/reference.md#grok).
 
 ```sh
 maestro adapter install grok
@@ -126,7 +126,7 @@ echo '{"toolName":"spawn_subagent","toolInput":{"agent":"general-purpose"}}' | m
 
 ### Connect Antigravity
 
-Antigravity has no kernel sandbox, so the Maestro hook is the only boundary of an Antigravity Lane. See [Antigravity](docs/configuration.md#antigravity).
+Antigravity has no kernel sandbox, so the Maestro hook is the only boundary of an Antigravity Lane. See [Antigravity](docs/reference.md#antigravity).
 
 ```sh
 maestro adapter install agy
@@ -154,7 +154,7 @@ You install once and plan with your agent. The agent hands finished plans to Mae
 1. Install Maestro and connect the Harnesses once. See [Installation](#installation).
 2. Plan with your agent as you do now: a grilling session, a spec, a Plan file. The Maestro skill tells the agent what a finished plan looks like.
 3. When you approve the plan, the agent writes the Plan file and runs `maestro run` itself. Nobody asks you to type anything.
-4. Inside Solo, each Task is a todo, each result is a comment, and a finished Run wakes the agent; see [Solo](docs/configuration.md#solo). Outside Solo, the agent reports from `maestro wait`.
+4. Inside Solo, each Task is a todo, each result is a comment, and a finished Run wakes the agent; see [Solo](docs/reference.md#solo). Outside Solo, the agent reports from `maestro wait`.
 5. Maestro needs you when a verb exits with code 2. The agent reads the item or report and either answers or asks you one question.
 
 For example, you end a grilling session with a plan for a new probe feature. The agent writes `.agents/plans/probe-feature.md` and starts the Run. Some minutes later it tells you that the three Tasks are done and the checks pass. If a Lane needs an answer, the agent asks you one question and passes your answer on.
@@ -169,7 +169,7 @@ maestro wait 7f3a                                   # prints the status, changes
 maestro dispatch .agents/briefs/add-probe.md --wait # or block
 ```
 
-Several ordered Tasks go in a Plan file (`maestro help plan`). A Run can hold for approval; see [Run](docs/configuration.md#run). `maestro wait` returns early when Maestro needs the Orchestrator; see [Verbs](docs/configuration.md#verbs).
+Several ordered Tasks go in a Plan file (`maestro help plan`). A Run can hold for approval; see [Approval holds](docs/reference.md#approval-holds). `maestro wait` returns early when Maestro needs the Orchestrator; see [Verbs](docs/reference.md#verbs).
 
 ```sh
 maestro run .agents/plans/probe-feature.md   # provisional routes; holds for approval when a trigger fires
@@ -201,7 +201,7 @@ Exit codes: `0` ok, `1` failed, `2` needs the Orchestrator (an open Relay, a hel
 
 ## Configuration
 
-Maestro works with no configuration: the Roster, the rules table, the prices, and the thresholds are compiled in. Two optional files refine it. Every key, its type, and its default are in [docs/configuration.md](docs/configuration.md).
+Maestro works with no configuration: the Roster, the rules table, the prices, and the thresholds are compiled in. Two optional files refine it. Every key, its type, and its default are in [docs/configuration.md](docs/configuration.md); what Maestro does with them is in [docs/reference.md](docs/reference.md).
 
 `~/.maestro/config.toml` holds your accounts, harness overrides, and deltas on families and chains. Maestro never rewrites it.
 
@@ -236,9 +236,9 @@ redact   = ["ACME"]                                              # strings repla
 councils = "always"                                              # an end-of-run council on every run
 ```
 
-Worktrees are on by default; see [Worktrees](docs/configuration.md#worktrees) for how to turn them off and how to set the commit message.
+Worktrees are on by default; see [`[run]`](docs/configuration.md#run) to turn them off, [`[commit]`](docs/configuration.md#commit) to set the commit message, and [Worktrees and landing](docs/reference.md#worktrees-and-landing) for how they work.
 
-Maestro writes the Ledger, the Budget, the discovery cache, and the Run and Council folders itself; see [Generated state](docs/configuration.md#generated-state) for the paths and `maestro clean`.
+Maestro writes the Ledger, the Budget, the discovery cache, and the Run and Council folders itself; see [Generated state](docs/reference.md#generated-state) for the paths and `maestro clean`.
 
 ## Support
 
