@@ -54,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Removed `maestro tell` and `maestro roster solo`, which used Lane tabs and Solo agent tool discovery
 
 ### Fixed
+- Fixed checks that a failed check's rerun left no budget for: they are recorded as `skipped (wall limit after a rerun)` and the first failure stays the Task's outcome
+- Fixed the Plan check's start grace to count from the moment the check detaches, `maestro cancel` during a check to report `cancel requested` and be honoured, standalone Dispatches saved under the old Worktree identity to land and clean, and a hand fix after a failed cleanup to land with its commit
 - Fixed the overlap order to use the Brief's own `touch`, so a test file in `Files` no longer serializes independent Tasks; `maestro add` queues a fix Task on a paused Run after a landing check failure; the Plan check reads bulleted findings, `maestro run` names `maestro wait` as the next command while the check runs, `maestro cancel` ends a running check, and a dead check supervisor gives `no result` instead of a held Run
 - Fixed standalone Dispatch Worktrees to use `d-<run>-<task>` as their identity, so two Dispatches never share a Worktree, and a hand fix in the kept Worktree lands through `maestro dispatch --finish`
 - Fixed a stalled check rerun that replaced the first failure and skipped later checks; a rerun does not start when the budget cannot hold it, and the hook and Relay timing tests keep a loose regression guard
