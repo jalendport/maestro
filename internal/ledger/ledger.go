@@ -18,6 +18,16 @@ import (
 
 // Append writes one row. The row must carry its own "kind" field.
 func Append(row any) error {
+	b, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	var header struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(b, &header); err != nil || header.Kind == "" {
+		return fmt.Errorf("ledger: row of type %T must have a nonempty kind", row)
+	}
 	if err := config.EnsureHome(); err != nil {
 		return err
 	}
@@ -35,10 +45,6 @@ func Append(row any) error {
 		return err
 	}
 	defer f.Close()
-	b, err := json.Marshal(row)
-	if err != nil {
-		return err
-	}
 	_, err = f.Write(append(b, '\n'))
 	return err
 }

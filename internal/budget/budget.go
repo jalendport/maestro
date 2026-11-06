@@ -49,11 +49,12 @@ type Account struct {
 // File is ~/.maestro/budget.json. Dispatches, Seats, and probes share one
 // File across goroutines, so every method takes the lock.
 type File struct {
-	Accounts   map[string]*Account `json:"accounts"`
-	UpdatedAt  time.Time           `json:"updated_at"`
-	mu         sync.Mutex
-	baseline   map[string]*Account
-	creditsSet map[string]bool
+	Accounts         map[string]*Account `json:"accounts"`
+	UpdatedAt        time.Time           `json:"updated_at"`
+	mu               sync.Mutex
+	baseline         map[string]*Account
+	creditsSet       map[string]bool
+	retainedAccounts map[string]bool
 }
 
 // Load reads the file; missing is empty.
@@ -69,6 +70,21 @@ func Load() (*File, error) {
 		f.baseline = copyAccounts(f.Accounts)
 	}
 	return f, err
+}
+
+// Prune drops Accounts that are not in accounts, including on later saves.
+func (f *File) Prune(accounts []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.retainedAccounts = make(map[string]bool, len(accounts))
+	for _, id := range accounts {
+		f.retainedAccounts[id] = true
+	}
+	for id := range f.Accounts {
+		if !f.retainedAccounts[id] {
+			delete(f.Accounts, id)
+		}
+	}
 }
 
 func readFile() (*File, error) {
@@ -139,6 +155,13 @@ func (f *File) Save() error {
 			if !currentFuture || (localFuture && local.BlockedUntil.After(*current.BlockedUntil)) ||
 				(!localFuture && base != nil && sameBlock(current, base)) {
 				current.BlockedUntil, current.BlockReason = local.BlockedUntil, local.BlockReason
+			}
+		}
+	}
+	if f.retainedAccounts != nil {
+		for id := range merged.Accounts {
+			if !f.retainedAccounts[id] {
+				delete(merged.Accounts, id)
 			}
 		}
 	}

@@ -64,6 +64,9 @@ func TestCodexResetHonoursDeadline(t *testing.T) {
 }
 
 func TestCodexResetPublicDeadline(t *testing.T) {
+	oldDeadline := codexResetDeadline
+	codexResetDeadline = 30 * time.Millisecond
+	t.Cleanup(func() { codexResetDeadline = oldDeadline })
 	bin := filepath.Join(t.TempDir(), "codex")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -74,6 +77,15 @@ func TestCodexResetPublicDeadline(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed >= 15*time.Second {
 		t.Fatalf("reset took %s", elapsed)
+	}
+	if elapsed := time.Since(start); elapsed < codexResetDeadline || elapsed > time.Second {
+		t.Fatalf("injected reset deadline took %s", elapsed)
+	}
+}
+
+func TestCodexResetDeadlineDefault(t *testing.T) {
+	if codexResetDeadline != 14*time.Second {
+		t.Fatalf("Codex reset deadline = %s", codexResetDeadline)
 	}
 }
 

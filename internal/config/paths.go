@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 )
 
 // Home is the global state directory, ~/.maestro by default. MAESTRO_HOME
@@ -15,6 +16,9 @@ import (
 func Home() string {
 	if h := os.Getenv("MAESTRO_HOME"); h != "" {
 		return h
+	}
+	if testing.Testing() {
+		panic("config.Home: set MAESTRO_HOME to a temporary folder in each test")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

@@ -5,8 +5,28 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestHomeRequiresTemporaryFolderInTests(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", "")
+	defer func() {
+		message, ok := recover().(string)
+		if !ok || !strings.Contains(message, "MAESTRO_HOME") || !strings.Contains(message, "temporary folder") {
+			t.Fatalf("panic = %q, want the fix", message)
+		}
+	}()
+	Home()
+}
+
+func TestHomeUsesTestFolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("MAESTRO_HOME", home)
+	if got := Home(); got != home {
+		t.Fatalf("Home() = %q, want %q", got, home)
+	}
+}
 
 func TestControlDir(t *testing.T) {
 	home := t.TempDir()
@@ -125,12 +145,13 @@ func TestEnsureIgnoredDir(t *testing.T) {
 }
 
 func TestControlDirForFolderRounds(t *testing.T) {
-	t.Setenv("MAESTRO_HOME", "/m")
+	home := t.TempDir()
+	t.Setenv("MAESTRO_HOME", home)
 	key := fmt.Sprintf("%x", sha256.Sum256([]byte("/p")))[:16]
-	if got, err := ControlDirForFolder("/p/.agents/maestro/councils/slug/round-2/grok"); err != nil || got != "/m/control/"+key+"/slug/round-2/grok" {
+	if got, err := ControlDirForFolder("/p/.agents/maestro/councils/slug/round-2/grok"); err != nil || got != filepath.Join(home, "control", key, "slug", "round-2", "grok") {
 		t.Fatalf("round folder mapped to %s, %v", got, err)
 	}
-	if got, err := ControlDirForFolder("/p/.agents/maestro/runs/r-0001/abcd"); err != nil || got != "/m/control/"+key+"/r-0001/abcd" {
+	if got, err := ControlDirForFolder("/p/.agents/maestro/runs/r-0001/abcd"); err != nil || got != filepath.Join(home, "control", key, "r-0001", "abcd") {
 		t.Fatalf("task folder mapped to %s, %v", got, err)
 	}
 }

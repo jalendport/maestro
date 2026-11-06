@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -14,6 +15,39 @@ import (
 
 	"github.com/jalendport/maestro/internal/config"
 )
+
+func TestAppendRejectsEmptyKindWithoutWriting(t *testing.T) {
+	type row struct {
+		Kind string `json:"kind"`
+	}
+	for _, value := range []any{row{}, &row{}, map[string]any{}, map[string]any{"kind": ""}, nil} {
+		t.Run(fmt.Sprintf("%T", value), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("MAESTRO_HOME", home)
+			err := Append(value)
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%T", value)) {
+				t.Fatalf("error = %v, want the row type", err)
+			}
+			if entries, err := os.ReadDir(home); err != nil || len(entries) != 0 {
+				t.Fatalf("invalid row wrote files: %v, %v", entries, err)
+			}
+			if err := Append(row{Kind: "dispatch"}); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(config.LedgerFile())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := Append(value); err == nil {
+				t.Fatal("accepted a row with no kind")
+			}
+			after, err := os.ReadFile(config.LedgerFile())
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("invalid row changed the Ledger: %q, %v", after, err)
+			}
+		})
+	}
+}
 
 func TestAppendProcess(t *testing.T) {
 	if id := os.Getenv("MAESTRO_LEDGER_TEST_WRITER"); id != "" {

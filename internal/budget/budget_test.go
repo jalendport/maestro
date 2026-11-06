@@ -17,6 +17,50 @@ func rules() Rules {
 	return Rules{BlockAt: 0.90, WarnAt: 0.75, Reserve: 0.35, StaleAfter: 30 * time.Minute, AssumedHeadroom: 0.50}
 }
 
+func TestPruneKeepsOnlyNamedAccountsOnSave(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	seed := &File{Accounts: map[string]*Account{}}
+	for _, id := range []string{"keep", "also-keep", "renamed"} {
+		seed.RecordManual(id, .2)
+		seed.SetCredits(id, 2, "pro")
+	}
+	if err := seed.Save(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Prune([]string{"keep", "also-keep", "no-reading"})
+	if len(f.Accounts) != 2 || f.Snapshot("renamed") != nil || f.Snapshot("keep").Credits != 2 || f.Snapshot("also-keep").Windows[0].Used != .2 {
+		t.Fatalf("Accounts after Prune: %+v", f.Accounts)
+	}
+	// A save must also drop an Account added on disk after Load.
+	seed.RecordManual("also-removed", .3)
+	seed.RecordManual("keep", .4)
+	if err := seed.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+	f, err = Load()
+	if err != nil || len(f.Accounts) != 2 || f.Snapshot("keep").Windows[0].Used != .4 || f.Snapshot("also-keep").Credits != 2 {
+		t.Fatalf("saved Accounts = %+v, error = %v", f, err)
+	}
+	f.Prune(nil)
+	if len(f.Accounts) != 0 {
+		t.Fatalf("empty Roster kept Accounts: %+v", f.Accounts)
+	}
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil || len(loaded.Accounts) != 0 {
+		t.Fatalf("saved empty Roster = %+v, error = %v", loaded, err)
+	}
+}
+
 func TestSaveMergesDifferentAccounts(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
 	first, err := Load()

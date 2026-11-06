@@ -17,6 +17,8 @@ import (
 	"github.com/jalendport/maestro/internal/harness"
 )
 
+var codexResetDeadline = 14 * time.Second
+
 // ProbeClaude runs a one-word Haiku prompt and harvests its rate_limit_event.
 // It costs a few thousand cached tokens; it runs only when a reading is stale
 // and a Claude Lane is a candidate.
@@ -153,7 +155,7 @@ func ReadCodex(bin string) (*CodexLimits, error) {
 
 // ConsumeCodexReset spends one Codex reset credit through the app-server.
 func ConsumeCodexReset(bin string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), codexResetDeadline)
 	defer cancel()
 	return consumeCodexReset(ctx, bin)
 }
