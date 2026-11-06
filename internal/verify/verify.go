@@ -17,6 +17,7 @@ import (
 type CheckResult struct {
 	Command      string `json:"command"`
 	OK           bool   `json:"ok"`
+	Flaky        bool   `json:"flaky,omitempty"`
 	Output       string `json:"output,omitempty"`
 	Duration     string `json:"duration"`
 	Reason       string `json:"reason,omitempty"`
@@ -49,7 +50,7 @@ func RunChecks(root string, cmds []string, idle, budget time.Duration) []CheckRe
 			if budgetFirst {
 				preflightDeadline = deadline
 			}
-			preflight := runCheck(root, "docker info", 0, preflightDeadline)
+			preflight, _ := runCheck(root, "docker info", 0, preflightDeadline)
 			if !preflight.OK {
 				preflight.Command = c
 				if preflight.Reason != "wall limit" || !budgetFirst {
@@ -61,7 +62,17 @@ func RunChecks(root string, cmds []string, idle, budget time.Duration) []CheckRe
 				continue
 			}
 		}
-		result := runCheck(root, c, idle, deadline)
+		start := time.Now()
+		result, normalExit := runCheck(root, c, idle, deadline)
+		if !result.OK && normalExit {
+			first := result
+			result, _ = runCheck(root, c, idle, deadline)
+			result.Duration = time.Since(start).Round(time.Millisecond).String()
+			if result.OK {
+				result.Flaky = true
+				result.Output = first.Output
+			}
+		}
 		out = append(out, result)
 		if result.Reason != "" {
 			stopped = result
@@ -86,7 +97,7 @@ func (o *checkOutput) Write(p []byte) (int, error) {
 	return o.buf.Write(p)
 }
 
-func runCheck(root, command string, idle time.Duration, deadline time.Time) (result CheckResult) {
+func runCheck(root, command string, idle time.Duration, deadline time.Time) (result CheckResult, normalExit bool) {
 	start := time.Now()
 	result.Command = command
 	defer func() {
@@ -94,7 +105,7 @@ func runCheck(root, command string, idle time.Duration, deadline time.Time) (res
 	}()
 	if !deadline.IsZero() && !start.Before(deadline) {
 		result.Reason, result.FailureClass = "wall limit", "stall"
-		return result
+		return result, normalExit
 	}
 	cmd := exec.Command("/bin/sh", "-c", command)
 	cmd.Dir = root
@@ -104,7 +115,7 @@ func runCheck(root, command string, idle time.Duration, deadline time.Time) (res
 	cmd.Stdout, cmd.Stderr = output, output
 	if err := cmd.Start(); err != nil {
 		result.Output = err.Error()
-		return result
+		return result, normalExit
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -125,6 +136,7 @@ loop:
 		select {
 		case err := <-done:
 			result.OK = err == nil
+			normalExit = cmd.ProcessState.Exited()
 			break loop
 		case <-wallC:
 			result.Reason = "wall limit"
@@ -145,6 +157,7 @@ loop:
 		select {
 		case err := <-done:
 			result.OK = err == nil
+			normalExit = cmd.ProcessState.Exited()
 			result.Reason = ""
 		default:
 			result.FailureClass = "stall"
@@ -154,13 +167,37 @@ loop:
 		break
 	}
 	output.mu.Lock()
-	text := output.buf.String()
-	if len(text) > 4000 {
-		text = text[len(text)-4000:]
-	}
-	result.Output = strings.TrimSpace(text)
+	result.Output = recordedOutput(output.buf.String(), !result.OK)
 	output.mu.Unlock()
-	return result
+	return result, normalExit
+}
+
+func recordedOutput(text string, failed bool) string {
+	if len(text) <= 4000 {
+		return strings.TrimSpace(text)
+	}
+	tail := text[len(text)-4000:]
+	if !failed {
+		return strings.TrimSpace(tail)
+	}
+	var failures strings.Builder
+	for _, line := range strings.Split(text, "\n") {
+		for _, marker := range []string{"--- FAIL", "FAIL\t", "panic:", "Error:", "error:", "✗", "not ok"} {
+			if !strings.Contains(line, marker) {
+				continue
+			}
+			line += "\n"
+			if remaining := 2000 - failures.Len(); len(line) > remaining {
+				line = line[:remaining]
+			}
+			failures.WriteString(line)
+			break
+		}
+		if failures.Len() == 2000 {
+			break
+		}
+	}
+	return strings.TrimSpace(strings.TrimRight(failures.String(), "\n") + "\n" + tail)
 }
 
 // Head returns the current commit, or "" outside a git repository.

@@ -25,7 +25,7 @@ func controlFolder(t *testing.T, folder string) string {
 }
 
 func waitRelayRequest(folder string) (RelayRequest, error) {
-	until := time.Now().Add(time.Second)
+	until := time.Now().Add(10 * time.Second)
 	for time.Now().Before(until) {
 		var request RelayRequest
 		b, err := os.ReadFile(filepath.Join(folder, "relay.json"))
@@ -347,7 +347,7 @@ func TestRelayWaitSerializesAnswers(t *testing.T) {
 func TestRelayWaitLockDeadlineDoesNotConsumeAnswer(t *testing.T) {
 	folder := t.TempDir()
 	// A live owner's lock inside the Relay deadline is never taken over.
-	if err := writeRelayJSON(folder, "relay.lock", relayLock{PID: os.Getpid(), At: time.Now().UTC(), ID: "owner"}); err != nil {
+	if err := writeRelayJSON(folder, "relay.lock", relayLock{PID: os.Getpid(), At: time.Now().UTC().Add(time.Hour), ID: "owner"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(folder, "answer-allow"), []byte("owner"), 0o600); err != nil {

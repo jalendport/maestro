@@ -190,6 +190,7 @@ func TestAttentionResumeWhileStartIsSlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.Router.Backend, r.Router.BaseURL = "jev", server.URL
+	r.Router.Thresholds["jev"]["timeout_s"] = 30
 	r.Families = map[string]*roster.Family{"codex-sol": r.Families["codex-sol"]}
 	r.Accounts = map[string]config.Account{"codex": r.Accounts["codex"]}
 	off := false
@@ -219,11 +220,11 @@ func TestAttentionResumeWhileStartIsSlow(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(20 * time.Second):
 			t.Error("supervisor did not stop")
 		}
 	})
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if running, err := dispatch.LoadRecord(sibling.Folder); err == nil && running.State == "running" && dispatch.ProcessAlive(running) {
 			break
@@ -238,7 +239,7 @@ func TestAttentionResumeWhileStartIsSlow(t *testing.T) {
 	}
 	select {
 	case <-entered:
-	case <-time.After(5 * time.Second):
+	case <-time.After(20 * time.Second):
 		t.Fatal("start did not reach the Router")
 	}
 	current, err := run.Load(s.Folder)

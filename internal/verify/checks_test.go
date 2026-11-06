@@ -1,6 +1,8 @@
 package verify
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,6 +44,89 @@ func TestCheckExitFailureDoesNotStopNext(t *testing.T) {
 	results := RunChecks(t.TempDir(), []string{"printf failure; exit 3", "printf next"}, time.Second, time.Minute)
 	if results[0].OK || results[0].Reason != "" || results[0].Skipped || !results[1].OK || results[1].Output != "next" {
 		t.Fatalf("checks: %+v", results)
+	}
+}
+
+func TestCheckRerunsNormalExitOnce(t *testing.T) {
+	for _, passes := range []bool{true, false} {
+		t.Run(fmt.Sprint(passes), func(t *testing.T) {
+			root := t.TempDir()
+			command := "printf 'call\\n' >> calls; if [ ! -f first ]; then touch first; printf '%s\\n' '--- FAIL: first attempt'; exit 1; fi; "
+			if passes {
+				command += "printf passed"
+			} else {
+				command += "printf 'second failure'; exit 2"
+			}
+			results := RunChecks(root, []string{command, "printf next"}, time.Minute, time.Minute)
+			if len(results) != 2 || results[0].OK != passes || results[0].Flaky != passes || results[0].Reason != "" || !results[1].OK || results[1].Flaky {
+				t.Fatalf("checks: %+v", results)
+			}
+			want := "second failure"
+			if passes {
+				want = "--- FAIL: first attempt"
+			}
+			if results[0].Output != want {
+				t.Fatalf("output: %q, want %q", results[0].Output, want)
+			}
+			raw, err := json.Marshal(results[0])
+			if err != nil || strings.Contains(string(raw), `"flaky":true`) != passes {
+				t.Fatalf("record: %s, %v", raw, err)
+			}
+			calls, err := os.ReadFile(filepath.Join(root, "calls"))
+			if err != nil || string(calls) != "call\ncall\n" {
+				t.Fatalf("calls: %q, %v", calls, err)
+			}
+		})
+	}
+}
+
+func TestCheckDoesNotRerunStallOrSignal(t *testing.T) {
+	for _, command := range []string{"sleep 30", "kill -KILL $$"} {
+		t.Run(command, func(t *testing.T) {
+			root := t.TempDir()
+			results := RunChecks(root, []string{"printf 'call\\n' >> calls; " + command}, time.Second, time.Minute)
+			if len(results) != 1 || results[0].OK || results[0].Flaky {
+				t.Fatalf("checks: %+v", results)
+			}
+			calls, err := os.ReadFile(filepath.Join(root, "calls"))
+			if err != nil || string(calls) != "call\n" {
+				t.Fatalf("calls: %q, %v", calls, err)
+			}
+		})
+	}
+}
+
+func TestCheckRerunSharesWallBudget(t *testing.T) {
+	root := t.TempDir()
+	command := "printf 'call\\n' >> calls; sleep 2; exit 1"
+	results := RunChecks(root, []string{command, "printf skipped"}, time.Minute, 3*time.Second)
+	if len(results) != 2 || results[0].OK || results[0].Flaky || results[0].Reason != "wall limit" || results[0].FailureClass != "stall" || !results[1].Skipped {
+		t.Fatalf("checks: %+v", results)
+	}
+	calls, err := os.ReadFile(filepath.Join(root, "calls"))
+	if err != nil || string(calls) != "call\ncall\n" {
+		t.Fatalf("calls: %q, %v", calls, err)
+	}
+}
+
+func TestFailedCheckKeepsFailureLinesBeforeLongTail(t *testing.T) {
+	root := t.TempDir()
+	markers := "--- FAIL: TestExample\nFAIL\texample/package\npanic: example\nError: example\nerror: example\n✗ example\nnot ok 1 example\n"
+	text := markers + strings.Repeat("detail\n", 15000) + "last line\n"
+	if err := os.WriteFile(filepath.Join(root, "output"), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	results := RunChecks(root, []string{"cat output; exit 1"}, time.Minute, time.Minute)
+	if len(results) != 1 || results[0].OK || !strings.HasPrefix(results[0].Output, markers) || !strings.HasSuffix(results[0].Output, "last line") || len(results[0].Output) > 6001 {
+		t.Fatalf("failure output: %+v", results)
+	}
+	text = strings.Repeat("--- FAIL: TestExample\n", 1000) + strings.Repeat("tail\n", 1000)
+	output := recordedOutput(text, true)
+	if !strings.HasPrefix(output, "--- FAIL: TestExample\n") || !strings.HasSuffix(output, strings.TrimSpace(text[len(text)-4000:])) || len(output) > 6001 {
+		t.Fatalf("failure output length: %d", len(output))
+	}
+	if output := recordedOutput(text, false); strings.Contains(output, "--- FAIL") || len(output) > 4000 {
+		t.Fatalf("passing output length: %d", len(output))
 	}
 }
 
@@ -114,9 +199,15 @@ func TestDockerPreflightUsesRemainingBudget(t *testing.T) {
 }
 
 func TestDockerPreflightExitFailureSkipsChecks(t *testing.T) {
-	stubDocker(t, "printf 'daemon unavailable' >&2\nexit 1\n")
+	log := filepath.Join(t.TempDir(), "docker.log")
+	t.Setenv("MAESTRO_TEST_DOCKER_LOG", log)
+	stubDocker(t, "printf '%s\\n' \"$*\" >>\"$MAESTRO_TEST_DOCKER_LOG\"\nprintf 'daemon unavailable' >&2\nexit 1\n")
 	results := RunChecks(t.TempDir(), []string{"docker ps", "printf skipped"}, time.Second, time.Minute)
 	if results[0].OK || results[0].Reason != "Docker does not respond" || results[0].FailureClass != "bad result" || !strings.Contains(results[0].Output, "daemon unavailable") || !results[1].Skipped {
 		t.Fatalf("checks: %+v", results)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil || string(calls) != "info\n" {
+		t.Fatalf("Docker calls: %q, %v", calls, err)
 	}
 }

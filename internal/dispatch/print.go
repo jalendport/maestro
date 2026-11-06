@@ -66,6 +66,9 @@ func Print(rec *Record, asJSON bool) int {
 			label = ""
 		}
 		res := "ok"
+		if c.OK && c.Flaky {
+			res = "ok (flaky: passed on rerun)"
+		}
 		if !c.OK {
 			res = "failed"
 		}

@@ -270,7 +270,7 @@ func TestRunOnceDrainsFinalStreamBeforeWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := &Env{Root: root, Roster: &roster.Roster{}, Reg: harness.New(map[string]string{"claude": bin})}
-	task := &Task{Project: root, Folder: folder, Task: "abcd", Access: brief.AccessRead, Route: &router.Route{Harness: "claude"}, WallLimit: "1m", IdleLimit: "1m"}
+	task := &Task{Project: root, Folder: folder, Task: "abcd", Access: brief.AccessRead, Route: &router.Route{Harness: "claude"}}
 	rec := runOnce(env, task, &brief.Brief{}, 1, nil)
 	if rec.Outcome.Outcome != OutcomeAnswered {
 		t.Fatalf("outcome: %+v", rec.Outcome)
