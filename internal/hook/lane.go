@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -378,12 +379,12 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 				continue
 			}
 			if lane.Access == "read" {
-				return Verdict{Kind: "deny", Reason: "read Lane: command not on the read-only list"}
+				return Verdict{Kind: "deny", Reason: "read Lane: command not on the read-only list; accepted commands: " + readOnlyCommandNames()}
 			}
 			if lane.Access == "edit" && (c.Harness == "claude" || c.Harness == "agy") && lane.Harness != "grok" && lane.Harness != "codex" {
 				return Verdict{Kind: "relay"}
 			}
-			return Verdict{Kind: "deny", Reason: "outside the Lane's allow list; add it to `checks` or the project `allow` list"}
+			return Verdict{Kind: "deny", Reason: "outside the Lane's allow list; add it to `checks` or the project `allow` list; accepted read-only commands: " + readOnlyCommandNames()}
 		}
 		return Verdict{Kind: "auto_approve"}
 	default:
@@ -501,14 +502,47 @@ var readOnlyCommands = map[string][]string{
 	"wc":   nil, "pwd": nil, "echo": nil, "which": nil, "date": nil, "diff": nil,
 	"tree": {"-o", "-R", "-H"}, "sort": {"-o", "--output", "--compress-program"}, "uniq": nil, "cut": nil,
 	"basename": nil, "dirname": nil, "stat": nil, "realpath": nil,
+	"sed":  {"-i", "-I", "--in-place", "-f", "--file"},
+	"file": {"-C", "--compile", "-p", "--preserve-date", "-z", "-Z", "--uncompress", "--uncompress-noreport"},
+	"du":   nil, "df": nil, "tr": nil, "jq": nil,
+	"yq":   {"-i", "--inplace", "--in-place", "-s", "--split-exp", "--split-exp-file"},
+	"test": nil, "[": nil,
 	"git log": {"--output", "--ext-diff", "--textconv"}, "git diff": {"--output", "--ext-diff", "--textconv"}, "git show": {"--output", "--ext-diff", "--textconv"},
 	"git status": nil, "git blame": nil,
-	"git branch": {"-d", "-D", "-m", "-M", "-c", "-C", "-f", "--delete", "--move", "--copy", "--force", "--set-upstream-to", "--unset-upstream", "--edit-description"},
+	"git branch":   {"-d", "-D", "-m", "-M", "-c", "-C", "-f", "--delete", "--move", "--copy", "--force", "--set-upstream-to", "--unset-upstream", "--edit-description"},
+	"git ls-files": nil, "git describe": {"--dirty", "--broken"}, "git rev-parse": nil,
+	"git tag":    {"-a", "-d", "-f", "-s", "-m", "-F", "--annotate", "--delete", "--force", "--sign", "--message", "--file", "--local-user", "--create-reflog"},
+	"go version": nil, "go env": {"-w", "-u"},
+	"go list":        {"-o", "-modfile", "-toolexec", "-debug-actiongraph", "-pkgdir", "-asmflags", "-gccgoflags", "-gcflags", "-ldflags"},
+	"go doc":         {"-http"},
+	"node --version": nil, "npm --version": nil,
+	"npm ls": nil, "npm view": nil, "pnpm ls": nil,
+	"pnpm --version": nil, "yarn --version": nil,
+	"php --version": nil, "composer --version": nil, "composer show": nil,
+	"python3 --version": nil, "pip --version": nil, "pip list": {"--log"}, "pip show": {"--log"},
+	"cargo --version": nil, "rustc --version": nil, "docker --version": nil,
+	"docker version": nil, "docker info": nil, "docker ps": nil, "docker images": nil,
+	"docker compose ps": nil, "docker compose config": {"-o", "--output", "--lock-image-digests"},
+}
+
+func readOnlyCommandNames() string {
+	names := make([]string, 0, len(readOnlyCommands))
+	for name := range readOnlyCommands {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 func readCommand(words []string) (string, int) {
 	if len(words) == 0 {
 		return "", 0
+	}
+	for n := min(len(words), 3); n > 0; n-- {
+		name := strings.Join(words[:n], " ")
+		if _, ok := readOnlyCommands[name]; ok {
+			return name, n
+		}
 	}
 	if words[0] == "git" && len(words) > 1 {
 		return "git " + words[1], 2
@@ -520,11 +554,18 @@ func unsafeReadFlag(command string) string {
 	words := commandWords(command)
 	name, start := readCommand(words)
 	if _, ok := readOnlyCommands[name]; ok {
-		if form := shellExpansion(command); form != "" {
+		expansion := strings.TrimSpace(command)
+		if name == "[" && len(expansion) > 1 && expansion[0] == '[' && (expansion[1] == ' ' || expansion[1] == '\t') {
+			expansion = expansion[1:]
+		}
+		if form := shellExpansion(expansion); form != "" {
 			return "shell expansion " + form
 		}
 	}
-	for _, word := range words[start:] {
+	if strings.HasSuffix(name, " --version") && len(words) != start {
+		return name + " with extra arguments"
+	}
+	for i, word := range words[start:] {
 		// `--` ends the options of every listed command except find, whose
 		// expression (-exec, -delete) comes after the paths and still runs.
 		if word == "--" && name != "find" {
@@ -533,9 +574,19 @@ func unsafeReadFlag(command string) string {
 		if word == "--text" {
 			continue
 		}
+		if name == "go list" && (word == "-mod=mod" || word == "--mod=mod" || (word == "-mod" || word == "--mod") && start+i+1 < len(words) && words[start+i+1] == "mod") {
+			return "go list -mod=mod"
+		}
 		for _, flag := range readOnlyCommands[name] {
 			option, _, _ := strings.Cut(word, "=")
-			if word == flag || strings.HasPrefix(flag, "--") && strings.HasPrefix(option, "--") && len(option) > 2 && strings.HasPrefix(flag, option) {
+			// Go accepts single and double dashes, but does not bundle flags.
+			if strings.HasPrefix(name, "go ") {
+				if option == flag || option == "-"+flag {
+					return word
+				}
+				continue
+			}
+			if option == flag || strings.HasPrefix(flag, "--") && strings.HasPrefix(option, "--") && len(option) > 2 && strings.HasPrefix(flag, option) {
 				return word
 			}
 			if len(flag) == 2 && strings.HasPrefix(word, "-") && !strings.HasPrefix(word, "--") && strings.Contains(word[1:], flag[1:]) {
@@ -548,6 +599,46 @@ func unsafeReadFlag(command string) string {
 	}
 	if name == "git branch" {
 		return unsafeBranchForm(words[start:])
+	}
+	if name == "git tag" {
+		return unsafeTagForm(words[start:])
+	}
+	if name == "sed" {
+		return unsafeSedForm(words[start:])
+	}
+	return ""
+}
+
+func unsafeTagForm(words []string) string {
+	list := false
+	for i := 0; i < len(words); i++ {
+		word := words[i]
+		switch {
+		case word == "-l" || word == "--list":
+			list = true
+		case word == "-n" || strings.HasPrefix(word, "-n") && allDigits(word[2:]):
+			list = true
+		case word == "--contains" || word == "--points-at" || word == "--sort":
+			list = true
+			if i+1 < len(words) && !strings.HasPrefix(words[i+1], "-") {
+				i++
+			} else if word != "--contains" {
+				return "git tag " + word + " without a value"
+			}
+		case strings.HasPrefix(word, "--contains=") || strings.HasPrefix(word, "--points-at=") || strings.HasPrefix(word, "--sort="):
+			list = true
+		case word == "--":
+			if !list && i+1 < len(words) {
+				return "git tag operand: " + words[i+1]
+			}
+			return ""
+		case strings.HasPrefix(word, "-"):
+			return "git tag form: " + word
+		default:
+			if !list {
+				return "git tag operand: " + word
+			}
+		}
 	}
 	return ""
 }

@@ -219,9 +219,9 @@ func TestDecideLaneCommandPermissions(t *testing.T) {
 				t.Fatalf("%s command=%q: %+v, want %s", access, tc.command, got, want)
 			}
 			if want == "deny" {
-				reason := "read Lane: command not on the read-only list"
+				reason := "read Lane: command not on the read-only list; accepted commands: " + readOnlyCommandNames()
 				if access == "edit" {
-					reason = "outside the Lane's allow list; add it to `checks` or the project `allow` list"
+					reason = "outside the Lane's allow list; add it to `checks` or the project `allow` list; accepted read-only commands: " + readOnlyCommandNames()
 				}
 				if got.Reason != reason {
 					t.Fatalf("denial: %+v, want %s", got, reason)
