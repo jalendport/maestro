@@ -40,6 +40,9 @@ func Report(s *State) string {
 	}
 	w.WriteString("\n")
 	w.WriteString(ModeLine(s) + "\n")
+	if line := s.LandingCheck.Line(); line != "" {
+		w.WriteString(line + "\n")
+	}
 	if s.PlanCheckNote != "" {
 		w.WriteString(s.PlanCheckNote + "\n")
 	}
@@ -170,6 +173,9 @@ func Status(s *State) string {
 	}
 	fmt.Fprintf(&w, "run %s  %s  started %s  %s  %d of %d done%s\n", s.Run, s.Title, s.StartedAt.Format("15:04"), state, done, len(s.Tasks), awake)
 	w.WriteString(ModeLine(s) + "\n")
+	if line := s.LandingCheck.Line(); line != "" {
+		w.WriteString(line + "\n")
+	}
 	if s.PlanCheckNote != "" {
 		w.WriteString(s.PlanCheckNote + "\n")
 	}

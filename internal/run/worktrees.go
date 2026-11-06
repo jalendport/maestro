@@ -6,13 +6,55 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/dispatch"
+	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/ui"
 	"github.com/jalendport/maestro/internal/verify"
 	"github.com/jalendport/maestro/internal/worktree"
 )
+
+func (sup *Supervisor) checkLanding(r worktree.Run) error {
+	var cmds []string
+	if sup.Env.Project != nil {
+		cmds = sup.Env.Project.Checks
+	}
+	idle := sup.Env.Roster.Failure.IdleLimit.Duration
+	budget := sup.Env.Roster.WallLimit(roster.TierDaily).Duration
+	var prior *dispatch.Verification
+	merged := 0
+	for _, task := range sup.State.Tasks {
+		if task.Access != brief.AccessEdit || task.State != TaskDone {
+			continue
+		}
+		if saved, err := dispatch.LoadTask(task.Folder); err == nil {
+			if wall, err := time.ParseDuration(saved.WallLimit); err == nil && wall > budget {
+				budget = wall
+			}
+		} else if task.Route != nil {
+			if wall := sup.Env.Roster.WallLimit(task.Route.Tier).Duration; wall > budget {
+				budget = wall
+			}
+		}
+		if rec, err := dispatch.LoadRecord(task.Folder); err == nil && rec.Verification.CommitRange != "" {
+			merged++
+			v := rec.Verification
+			prior = &v
+		}
+	}
+	if merged != 1 {
+		prior = nil
+	}
+	result, err := dispatch.CheckLanding(r, cmds, idle, budget, prior)
+	sup.State.LandingCheck = result
+	ui.Eventf("landing check", "%s  %s", sup.State.Run, result.Line())
+	if saveErr := sup.State.Save(); saveErr != nil {
+		return saveErr
+	}
+	return err
+}
 
 func chooseMode(env *dispatch.Env, s *State) {
 	s.Mode, s.ModeReason = "tree", ""

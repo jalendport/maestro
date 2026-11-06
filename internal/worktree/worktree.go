@@ -578,6 +578,12 @@ func (r Run) merge(w Worktree) (result MergeResult, mergeErr error) {
 }
 
 func (r Run) Finish(commit bool) error {
+	return r.FinishChecked(commit, nil)
+}
+
+// FinishChecked calls check after the landing rebase and before the merge.
+// A retry after a completed merge only continues cleanup.
+func (r Run) FinishChecked(commit bool, check func() error) error {
 	// Keep the last completed step until cleanup succeeds. A squash leaves a
 	// dirty tree, so a retry must not run the pre-merge check again.
 	stagePath := filepath.Join(r.dir, "finish")
@@ -660,6 +666,29 @@ func (r Run) Finish(commit bool) error {
 	}
 	if len(overlap) != 0 {
 		return fmt.Errorf("landing blocked: uncommitted changes in %s overlap the Run; commit or stash them, then maestro resume %s --finish", strings.Join(overlap, ", "), r.ID)
+	}
+	if check != nil {
+		checked, err := head(r.Root, r.Branch)
+		if err != nil {
+			return err
+		}
+		if err := check(); err != nil {
+			return err
+		}
+		now, err := head(r.Root, r.Branch)
+		if err != nil {
+			return err
+		}
+		user, err := head(r.Root, r.UserBranch)
+		if err != nil {
+			return err
+		}
+		if now != checked || user != current {
+			return fmt.Errorf("landing branches changed during the landing check; retry maestro resume %s --finish", r.ID)
+		}
+		if err := r.checkUserBranch(); err != nil {
+			return err
+		}
 	}
 	mode := "--ff-only"
 	if !commit {
@@ -758,6 +787,26 @@ func (r Run) rebaseLanding(current string) (rebaseErr error) {
 		return errors.Join(err, pathErr, abortErr)
 	}
 	return nil
+}
+
+// LandingWorktree gives checks a detached checkout with dependency links.
+// A checkout left by a stopped check is removed before the next check.
+func (r Run) LandingWorktree() (dir string, cleanup func(), err error) {
+	dir = filepath.Join(r.dir, "landing")
+	cleanup = func() { _, _ = git(r.Root, "", "worktree", "remove", "--force", dir) }
+	if _, statErr := os.Stat(filepath.Join(dir, ".git")); statErr == nil {
+		if _, err := git(r.Root, "", "worktree", "remove", "--force", dir); err != nil {
+			return "", nil, err
+		}
+	}
+	if _, err := git(r.Root, "", "worktree", "add", "--detach", dir, r.Branch); err != nil {
+		return "", nil, err
+	}
+	if _, err := Link(r.Root, dir); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return dir, cleanup, nil
 }
 
 // Remove returns the branches it keeps when the Run did not land.

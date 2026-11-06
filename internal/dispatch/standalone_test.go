@@ -18,6 +18,7 @@ import (
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
+	"github.com/jalendport/maestro/internal/worktree"
 )
 
 func standaloneFixture(t *testing.T, commit bool, script string) (*Env, *Task, func(...string) string) {
@@ -80,6 +81,92 @@ func writeStandalone(t *testing.T, path, text string) {
 }
 
 const standaloneChange = "printf 'Lane work\\n' > work.txt\nprintf '## Summary\\nChange the file.\\n\\nSTATUS: done\\n' > \"$MAESTRO_TASK_FOLDER/result.md\""
+
+func TestStandaloneLandingCheckSkipsOrChecksRebasedHead(t *testing.T) {
+	for _, mode := range []string{"no checks", "same base", "moved base"} {
+		t.Run(mode, func(t *testing.T) {
+			env, task, git := standaloneFixture(t, true, standaloneChange)
+			if mode != "no checks" {
+				env.Project = &config.Project{Checks: []string{"test -f work.txt"}}
+			}
+			if err := openStandalone(env, task); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "moved base" {
+				writeStandalone(t, filepath.Join(env.Root, "user.txt"), "user change\n")
+				git("add", "user.txt")
+				git("commit", "-m", "User change")
+			}
+			rec, err := Execute(env, task)
+			if err != nil || rec.FinishPending || rec.Outcome.Outcome != OutcomeUnverified {
+				t.Fatalf("Execute: %+v, %v", rec, err)
+			}
+			saved, err := LoadTask(task.Folder)
+			if err != nil || saved.Standalone.LandingCheck == nil {
+				t.Fatalf("saved landing check: %+v, %v", saved, err)
+			}
+			check := saved.Standalone.LandingCheck
+			want := map[string]string{"no checks": "landing check: skipped (no project checks)", "same base": "landing check: skipped (one merged Task checked on the same base)", "moved base": "landing check: passed (1 checks, "}[mode]
+			if !strings.Contains(check.Line(), want) {
+				t.Fatalf("landing check: %+v", check)
+			}
+			if mode == "moved base" && check.Head != git("rev-parse", "HEAD") {
+				t.Fatal("landing check did not test the rebased head")
+			}
+		})
+	}
+}
+
+func TestStandaloneLandingFailureKeepsCommitsAndFinishRetries(t *testing.T) {
+	env, task, git := standaloneFixture(t, true, standaloneChange)
+	command := "if [ -f user.txt ] && [ ! -f fixed.txt ]; then printf 'combined failure\\nmore detail\\n'; exit 1; fi"
+	env.Project = &config.Project{Checks: []string{command}}
+	if err := openStandalone(env, task); err != nil {
+		t.Fatal(err)
+	}
+	writeStandalone(t, filepath.Join(env.Root, "user.txt"), "user change\n")
+	git("add", "user.txt")
+	git("commit", "-m", "User change")
+	userHead := git("rev-parse", "HEAD")
+	rec, err := Execute(env, task)
+	want := "landing check failed: " + command + ": combined failure"
+	if err != nil || rec.Outcome.Outcome != OutcomeBlocked || !rec.FinishPending || !strings.Contains(rec.Outcome.ErrorText, want) {
+		t.Fatalf("Execute did not block: %+v, %v", rec, err)
+	}
+	if len(rec.Verification.Checks) != 1 || !rec.Verification.Checks[0].OK || git("rev-parse", "HEAD") != userHead || git("rev-list", "--count", "master.."+rec.RunBranch) != "1" {
+		t.Fatalf("Task checks or commits: %+v", rec)
+	}
+	r, err := worktree.Open(env.Root, task.Task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := r.Add("fix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStandalone(t, filepath.Join(w.Dir, "fixed.txt"), "fixed\n")
+	if _, err := w.Commit("Fix combined failure", []string{"fixed.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Merge("fix"); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := LoadTask(task.Folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err = FinishStandalone(env, reloaded)
+	if err != nil || rec.FinishPending || rec.Outcome.Outcome != OutcomeUnverified || reloaded.Standalone.LandingCheck.State != "passed" {
+		t.Fatalf("Finish: %+v, %v", rec, err)
+	}
+	if git("rev-list", "--count", userHead+"..HEAD") != "2" {
+		t.Fatal("Finish lost the Task or fix commit")
+	}
+	calls, err := os.ReadFile(filepath.Join(task.Folder, "calls"))
+	if err != nil || string(calls) != "call\n" {
+		t.Fatalf("Finish started another Lane: %q, %v", calls, err)
+	}
+}
 
 func TestStandaloneLandsBothCommitSettings(t *testing.T) {
 	for _, commit := range []bool{false, true} {

@@ -1,12 +1,78 @@
 package worktree
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestLandingWorktreeIsDetachedLinkedAndCleaned(t *testing.T) {
+	root := repository(t)
+	write(t, root, ".gitignore", "node_modules/\n")
+	tgit(t, root, "add", ".gitignore")
+	tgit(t, root, "commit", "-m", "Ignore dependencies")
+	write(t, root, "node_modules/package/index.js", "dependency\n")
+	r := openRun(t, root)
+	w := addTask(t, r, "a")
+	commitTask(t, w, "change.txt", "Run change\n")
+	mergeTask(t, r, "a")
+	dir, cleanup, err := r.LandingWorktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if filepath.Base(dir) != "landing" || tgit(t, dir, "branch", "--show-current") != "" || tgit(t, dir, "rev-parse", "HEAD") != tgit(t, root, "rev-parse", r.Branch) {
+		t.Fatal("landing Worktree is not detached at the Run branch head")
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "node_modules/package/index.js")); err != nil || string(data) != "dependency\n" {
+		t.Fatalf("dependency link: %q, %v", data, err)
+	}
+	write(t, dir, "change.txt", "left by a stopped check\n")
+	dir, cleanupAgain, err := r.LandingWorktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "change.txt")); err != nil || string(data) != "Run change\n" {
+		t.Fatalf("stopped check was not cleared: %q, %v", data, err)
+	}
+	cleanupAgain()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("landing Worktree remains: %v", err)
+	}
+}
+
+func TestFinishCheckedRunsAfterRebaseAndKeepsFailedHead(t *testing.T) {
+	root := repository(t)
+	r := openRun(t, root)
+	w := addTask(t, r, "a")
+	commitTask(t, w, "change.txt", "Run change\n")
+	mergeTask(t, r, "a")
+	write(t, root, "user.txt", "user change\n")
+	tgit(t, root, "add", "user.txt")
+	tgit(t, root, "commit", "-m", "User change")
+	current := tgit(t, root, "rev-parse", "HEAD")
+	failure := errors.New("landing check failed: test: failure")
+	err := r.FinishChecked(true, func() error {
+		dir, cleanup, err := r.LandingWorktree()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cleanup()
+		if _, err := os.Stat(filepath.Join(dir, "user.txt")); err != nil {
+			t.Fatalf("check ran before the landing rebase: %v", err)
+		}
+		return failure
+	})
+	if !errors.Is(err, failure) || tgit(t, root, "rev-parse", "HEAD") != current || tgit(t, root, "rev-list", "--count", "master.."+r.Branch) != "1" {
+		t.Fatalf("failed landing changed the user branch or lost commits: %v", err)
+	}
+	if err := r.FinishChecked(true, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestOpenSavedRunOnDetachedHead(t *testing.T) {
 	root := repository(t)

@@ -1058,7 +1058,7 @@ func (sup *Supervisor) end(state string) error {
 	if s.Mode == "worktree" && state == StateFinished {
 		r, err := worktree.Open(s.Project, s.Run)
 		if err == nil {
-			err = r.Finish(s.Commit)
+			err = r.FinishChecked(s.Commit, func() error { return sup.checkLanding(r) })
 		}
 		if err != nil {
 			s.FinishPending = true
@@ -1216,7 +1216,8 @@ func ledgerRow(s *State) map[string]any {
 	return map[string]any{
 		"kind": "run", "project": s.Project, "run": s.Run, "plan_path": s.Plan, "tasks": tasks, "state": s.State,
 		"pause_reason": s.PauseReason, "councils": s.Councils, "started_at": s.StartedAt, "ended_at": s.EndedAt,
-		"duration_s": s.EndedAt.Sub(s.StartedAt).Seconds(),
+		"duration_s":    s.EndedAt.Sub(s.StartedAt).Seconds(),
+		"landing_check": s.LandingCheck,
 	}
 }
 

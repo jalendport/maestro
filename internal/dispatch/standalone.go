@@ -4,18 +4,93 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/ledger"
 	"github.com/jalendport/maestro/internal/ui"
+	"github.com/jalendport/maestro/internal/verify"
 	"github.com/jalendport/maestro/internal/worktree"
 )
 
 // Standalone keeps the steps needed to retry landing without a new Lane.
 type Standalone struct {
-	ModeReason string   `json:"mode_reason,omitempty"`
-	Merged     bool     `json:"merged,omitempty"`
-	Outcome    *Outcome `json:"outcome,omitempty"`
+	ModeReason   string        `json:"mode_reason,omitempty"`
+	Merged       bool          `json:"merged,omitempty"`
+	Outcome      *Outcome      `json:"outcome,omitempty"`
+	LandingCheck *LandingCheck `json:"landing_check,omitempty"`
+}
+
+// LandingCheck is the result at the merged Run branch head.
+type LandingCheck struct {
+	State    string               `json:"state"`
+	Reason   string               `json:"reason,omitempty"`
+	Head     string               `json:"head,omitempty"`
+	Checks   []verify.CheckResult `json:"checks,omitempty"`
+	Duration string               `json:"duration,omitempty"`
+}
+
+func (c *LandingCheck) Line() string {
+	if c == nil {
+		return ""
+	}
+	switch c.State {
+	case "skipped":
+		return "landing check: skipped (" + c.Reason + ")"
+	case "passed":
+		return fmt.Sprintf("landing check: passed (%d checks, %s)", len(c.Checks), c.Duration)
+	default:
+		return "landing check: " + c.State
+	}
+}
+
+// CheckLanding is shared by Runs and standalone Dispatches. prior is set
+// only when exactly one edit Task was merged into the Run branch.
+func CheckLanding(r worktree.Run, cmds []string, idle, budget time.Duration, prior *Verification) (*LandingCheck, error) {
+	c := &LandingCheck{State: "skipped", Reason: "no project checks"}
+	if len(cmds) == 0 {
+		return c, nil
+	}
+	c.State, c.Reason = "failed", ""
+	dir, cleanup, err := r.LandingWorktree()
+	if err != nil {
+		return c, fmt.Errorf("landing check failed: prepare Worktree: %w", err)
+	}
+	defer cleanup()
+	c.Head = verify.Head(dir)
+	if prior != nil && prior.CommitRange == c.Head && prior.StartCommit != "" && prior.StartCommit == verify.Head(r.Root) {
+		allPassed := true
+		for _, cmd := range cmds {
+			passed := false
+			for _, check := range prior.Checks {
+				if check.Command == cmd && check.OK && !check.Skipped {
+					passed = true
+				}
+			}
+			allPassed = allPassed && passed
+		}
+		if allPassed {
+			c.State, c.Reason = "skipped", "one merged Task checked on the same base"
+			return c, nil
+		}
+	}
+	start := time.Now()
+	c.Checks = verify.RunChecks(dir, cmds, idle, budget)
+	c.Duration = time.Since(start).Round(time.Millisecond).String()
+	for _, check := range c.Checks {
+		if !check.OK {
+			line := ui.FirstLine(strings.TrimSpace(check.Output), 0)
+			if line == "" {
+				line = check.Reason
+			}
+			if line == "" {
+				line = "command failed"
+			}
+			return c, fmt.Errorf("landing check failed: %s: %s", check.Command, line)
+		}
+	}
+	c.State = "passed"
+	return c, nil
 }
 
 func standaloneReason(env *Env, t *Task) string {
@@ -103,7 +178,21 @@ func finishStandalone(env *Env, t *Task, rec *Record) error {
 			return err
 		}
 	}
-	if err := r.Finish(t.Commit); err != nil {
+	if err := r.FinishChecked(t.Commit, func() error {
+		var cmds []string
+		if env.Project != nil {
+			cmds = env.Project.Checks
+		}
+		idle, _ := time.ParseDuration(t.IdleLimit)
+		budget, _ := time.ParseDuration(t.WallLimit)
+		result, err := CheckLanding(r, cmds, idle, budget, &rec.Verification)
+		t.Standalone.LandingCheck = result
+		rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "landing check", Text: result.Line()})
+		if saveErr := t.Save(); saveErr != nil {
+			return saveErr
+		}
+		return err
+	}); err != nil {
 		// Merge removes the Task Worktree. Keep one for a hand fix when landing stops.
 		w, addErr := r.Add(t.Task, t.Touch)
 		if addErr == nil {
