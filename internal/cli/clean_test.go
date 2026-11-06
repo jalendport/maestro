@@ -19,7 +19,7 @@ func TestCleanStandaloneWorktrees(t *testing.T) {
 	for _, mode := range []string{"failed", "blocked", "cancelled", "finish-pending", "landed", "recent", "running"} {
 		t.Run(mode, func(t *testing.T) {
 			root, git := worktreeConfigFixture(t)
-			r, err := worktree.Open(root, "abcd")
+			r, err := worktree.Open(root, dispatch.StandaloneRunID(&dispatch.Task{Run: "r-0001", Task: "abcd"}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -79,7 +79,7 @@ func TestCleanStandaloneWorktrees(t *testing.T) {
 					t.Fatalf("keep=%t: %s: %v", keep, path, err)
 				}
 			}
-			branches := git("branch", "--list", "maestro/abcd/*")
+			branches := git("branch", "--list", "maestro/"+dispatch.StandaloneRunID(task)+"/*")
 			for _, branch := range []string{r.Branch, w.Branch} {
 				want := keep || (mode != "landed" && (branch == w.Branch || mode == "finish-pending"))
 				if strings.Contains(branches, branch) != want || (!keep && want && !strings.Contains(output, "kept branch "+branch)) {
@@ -87,6 +87,47 @@ func TestCleanStandaloneWorktrees(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCleanStandaloneKeepsOtherDispatchWithSameTaskID(t *testing.T) {
+	root, git := worktreeConfigFixture(t)
+	var tasks []*dispatch.Task
+	for _, id := range []string{"r-0001", "r-0002"} {
+		task := &dispatch.Task{Project: root, Run: id, Task: "abcd", Access: "edit", Standalone: &dispatch.Standalone{}}
+		task.Folder = filepath.Join(config.RunsDir(root), id, task.Task)
+		if err := os.MkdirAll(task.Folder, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		r, err := worktree.Open(root, dispatch.StandaloneRunID(task))
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, err := r.Add(task.Task)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task.Workdir = w.Dir
+		writeWorktreeConfig(t, filepath.Join(w.Dir, "base.txt"), id+"\n")
+		if _, err := w.Commit("Change the file", []string{"base.txt"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := task.Save(); err != nil {
+			t.Fatal(err)
+		}
+		tasks = append(tasks, task)
+	}
+	if _, err := cleanStandaloneWorktrees(filepath.Dir(tasks[0].Folder)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(tasks[0].Workdir); !os.IsNotExist(err) {
+		t.Fatalf("expired Worktree remains: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(tasks[1].Workdir, "base.txt")); err != nil || string(data) != "r-0002\n" {
+		t.Fatalf("other Worktree changed: %q, %v", data, err)
+	}
+	if got := strings.TrimSpace(git("show", "maestro/"+dispatch.StandaloneRunID(tasks[1])+"/abcd:base.txt")); got != "r-0002" {
+		t.Fatalf("other Task branch changed: %s", got)
 	}
 }
 

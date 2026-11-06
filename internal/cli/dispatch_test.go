@@ -49,7 +49,7 @@ func TestDispatchFinishRetriesLanding(t *testing.T) {
 	if err := (&discovery.Cache{RefreshedAt: time.Now()}).Save(); err != nil {
 		t.Fatal(err)
 	}
-	r, err := worktree.Open(root, "abcd")
+	r, err := worktree.Open(root, dispatch.StandaloneRunID(&dispatch.Task{Run: "r-0001", Task: "abcd"}))
 	if err != nil {
 		t.Fatal(err)
 	}

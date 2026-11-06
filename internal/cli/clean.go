@@ -34,7 +34,7 @@ func cleanStandaloneWorktrees(folder string) ([]string, error) {
 		if task.Standalone == nil || task.LedgerByRun || task.Council || task.Access != brief.AccessEdit || task.Workdir == "" || task.Workdir == task.Project {
 			continue
 		}
-		branches, err := worktree.Remove(task.Project, task.Task)
+		branches, err := worktree.Remove(task.Project, dispatch.StandaloneRunID(task))
 		kept = append(kept, branches...)
 		if err != nil {
 			return kept, err

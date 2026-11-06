@@ -82,6 +82,84 @@ func writeStandalone(t *testing.T, path, text string) {
 
 const standaloneChange = "printf 'Lane work\\n' > work.txt\nprintf '## Summary\\nChange the file.\\n\\nSTATUS: done\\n' > \"$MAESTRO_TASK_FOLDER/result.md\""
 
+func TestStandaloneIdentityIncludesRun(t *testing.T) {
+	env, first, git := standaloneFixture(t, true, standaloneChange)
+	if err := openStandalone(env, first); err != nil {
+		t.Fatal(err)
+	}
+	writeStandalone(t, filepath.Join(first.Workdir, "work.txt"), "kept work\n")
+	second := *first
+	second.Run, second.Workdir = "r-9999", ""
+	second.Standalone = nil
+	second.Folder = filepath.Join(config.RunsDir(env.Root), second.Run, second.Task)
+	if err := os.MkdirAll(second.Folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := openStandalone(env, &second); err != nil {
+		t.Fatal(err)
+	}
+	if first.Workdir == second.Workdir || StandaloneRunID(first) == StandaloneRunID(&second) {
+		t.Fatal("Dispatches share a Worktree identity")
+	}
+	if got := git("-C", second.Workdir, "symbolic-ref", "--short", "HEAD"); got != "maestro/"+StandaloneRunID(&second)+"/"+second.Task {
+		t.Fatalf("Task branch: %s", got)
+	}
+	second.Workdir = first.Workdir
+	if err := openStandalone(env, &second); err == nil {
+		t.Fatal("accepted another Dispatch's Worktree")
+	}
+	if data, _ := os.ReadFile(filepath.Join(first.Workdir, "work.txt")); string(data) != "kept work\n" {
+		t.Fatalf("kept work changed: %q", data)
+	}
+}
+
+func TestStandaloneFinishLandsHandFix(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		t.Run(fmt.Sprint(committed), func(t *testing.T) {
+			env, task, git := standaloneFixture(t, true, standaloneChange)
+			env.Project = &config.Project{Checks: []string{"test ! -f user.txt || test -f fixed.txt"}}
+			if err := openStandalone(env, task); err != nil {
+				t.Fatal(err)
+			}
+			writeStandalone(t, filepath.Join(env.Root, "user.txt"), "user change\n")
+			git("add", "user.txt")
+			git("commit", "-m", "User change")
+			rec, err := Execute(env, task)
+			if err != nil || !rec.FinishPending {
+				t.Fatalf("landing did not stop: %+v, %v", rec, err)
+			}
+			writeStandalone(t, filepath.Join(task.Workdir, "fixed.txt"), "hand fix\n")
+			message := "Task " + task.Task + ": Change the file"
+			if committed {
+				message = "Fix the landing check"
+				git("-C", task.Workdir, "add", "fixed.txt")
+				git("-C", task.Workdir, "commit", "-m", message)
+			}
+			reloaded, err := LoadTask(task.Folder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec, err = FinishStandalone(env, reloaded)
+			if err != nil || rec.FinishPending || reloaded.Standalone.LandingCheck.State != "passed" {
+				t.Fatalf("Finish: %+v, %v", rec, err)
+			}
+			if got := git("log", "-1", "--format=%s"); got != message {
+				t.Fatalf("fix commit: %s", got)
+			}
+			if data, _ := os.ReadFile(filepath.Join(env.Root, "fixed.txt")); string(data) != "hand fix\n" {
+				t.Fatalf("hand fix lost: %q", data)
+			}
+			if got := git("branch", "--list", "maestro/*"); got != "" {
+				t.Fatalf("branches remain: %s", got)
+			}
+			calls, _ := os.ReadFile(filepath.Join(task.Folder, "calls"))
+			if string(calls) != "call\n" {
+				t.Fatalf("new Lane: %q", calls)
+			}
+		})
+	}
+}
+
 func TestStandaloneLandingCheckSkipsOrChecksRebasedHead(t *testing.T) {
 	for _, mode := range []string{"no checks", "same base", "moved base"} {
 		t.Run(mode, func(t *testing.T) {
@@ -136,7 +214,7 @@ func TestStandaloneLandingFailureKeepsCommitsAndFinishRetries(t *testing.T) {
 	if len(rec.Verification.Checks) != 1 || !rec.Verification.Checks[0].OK || git("rev-parse", "HEAD") != userHead || git("rev-list", "--count", "master.."+rec.RunBranch) != "1" {
 		t.Fatalf("Task checks or commits: %+v", rec)
 	}
-	r, err := worktree.Open(env.Root, task.Task)
+	r, err := worktree.Open(env.Root, StandaloneRunID(task))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +481,7 @@ func TestStandaloneKeepsStoppedWorktree(t *testing.T) {
 			if _, err := os.Stat(task.Workdir); err != nil {
 				t.Fatalf("Worktree lost: %v", err)
 			}
-			if got := git("branch", "--list", "maestro/"+task.Task+"/*"); !strings.Contains(got, "maestro/"+task.Task+"/run") || !strings.Contains(got, "maestro/"+task.Task+"/"+task.Task) {
+			if got := git("branch", "--list", "maestro/"+StandaloneRunID(task)+"/*"); !strings.Contains(got, "maestro/"+StandaloneRunID(task)+"/run") || !strings.Contains(got, "maestro/"+StandaloneRunID(task)+"/"+task.Task) {
 				t.Fatalf("branches lost: %s", got)
 			}
 			if data, _ := os.ReadFile(filepath.Join(env.Root, "work.txt")); string(data) != "base\n" {

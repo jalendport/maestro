@@ -185,6 +185,30 @@ func (r Run) task(task string) (Worktree, error) {
 	return w, err
 }
 
+// CheckTask refuses a saved Worktree path that belongs to another Task or Run.
+func (r Run) CheckTask(task, dir string) error {
+	w, err := r.task(task)
+	if err != nil {
+		return err
+	}
+	want, err := filepath.EvalSymlinks(w.Dir)
+	if err != nil {
+		return err
+	}
+	got, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("Worktree at %s does not belong to %s", dir, r.ID)
+	}
+	branch, err := git(r.Root, dir, "symbolic-ref", "--short", "HEAD")
+	if err != nil || strings.TrimSpace(branch) != w.Branch {
+		return fmt.Errorf("Worktree at %s is not on %s", dir, w.Branch)
+	}
+	return nil
+}
+
 // Add accepts the touch list so a shared dependency folder stays read-only.
 func (r Run) Add(task string, touch ...[]string) (Worktree, error) {
 	w, err := r.task(task)

@@ -17,6 +17,7 @@ import (
 type Standalone struct {
 	ModeReason   string        `json:"mode_reason,omitempty"`
 	Merged       bool          `json:"merged,omitempty"`
+	MergedHead   string        `json:"merged_head,omitempty"`
 	Outcome      *Outcome      `json:"outcome,omitempty"`
 	LandingCheck *LandingCheck `json:"landing_check,omitempty"`
 }
@@ -116,7 +117,7 @@ func StandaloneModeLine(env *Env, t *Task) string {
 }
 
 func openStandalone(env *Env, t *Task) error {
-	if t.LedgerByRun || t.Council || t.Access != brief.AccessEdit || t.Workdir != "" {
+	if t.LedgerByRun || t.Council || t.Access != brief.AccessEdit || (t.Workdir != "" && t.Standalone == nil) {
 		return nil
 	}
 	if t.Standalone == nil {
@@ -126,9 +127,12 @@ func openStandalone(env *Env, t *Task) error {
 	if t.Standalone.ModeReason != "" {
 		return t.Save()
 	}
-	r, err := worktree.Open(t.Project, t.Task)
+	r, err := worktree.Open(t.Project, StandaloneRunID(t))
 	if err != nil {
 		return err
+	}
+	if t.Workdir != "" {
+		return r.CheckTask(t.Task, t.Workdir)
 	}
 	w, err := r.Add(t.Task, t.Touch)
 	if w.Dir != "" {
@@ -157,11 +161,35 @@ func landStandalone(env *Env, t *Task, rec *Record) {
 }
 
 func finishStandalone(env *Env, t *Task, rec *Record) error {
-	r, err := worktree.Open(t.Project, t.Task)
+	r, err := worktree.Open(t.Project, StandaloneRunID(t))
 	if err != nil {
 		return err
 	}
 	rec.RunBranch = r.Branch
+	prior := &rec.Verification
+	if t.Standalone.Merged {
+		prior = nil
+		if _, err := os.Stat(t.Workdir + "/.git"); err == nil {
+			if err := r.CheckTask(t.Task, t.Workdir); err != nil {
+				return err
+			}
+			dirty, err := worktree.Dirty(t.Workdir)
+			if err != nil {
+				return err
+			}
+			if len(dirty) > 0 || (t.Standalone.MergedHead != "" && verify.Head(t.Workdir) != t.Standalone.MergedHead) {
+				fix := *rec
+				fix.Outcome = *t.Standalone.Outcome
+				fix.Verification.Changed = dirty
+				if err := CommitChanges(env, t, &fix); err != nil {
+					return err
+				}
+				t.Standalone.Merged = false
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
 	if !t.Standalone.Merged {
 		if err := CommitChanges(env, t, rec); err != nil {
 			return err
@@ -174,6 +202,7 @@ func finishStandalone(env *Env, t *Task, rec *Record) error {
 			return fmt.Errorf("merge conflict in %s", strings.Join(merged.Conflicts, ", "))
 		}
 		t.Standalone.Merged = true
+		t.Standalone.MergedHead = merged.Head
 		if err := t.Save(); err != nil {
 			return err
 		}
@@ -185,7 +214,7 @@ func finishStandalone(env *Env, t *Task, rec *Record) error {
 		}
 		idle, _ := time.ParseDuration(t.IdleLimit)
 		budget, _ := time.ParseDuration(t.WallLimit)
-		result, err := CheckLanding(r, cmds, idle, budget, &rec.Verification)
+		result, err := CheckLanding(r, cmds, idle, budget, prior)
 		t.Standalone.LandingCheck = result
 		rec.Events = append(rec.Events, Event{At: time.Now(), Kind: "landing check", Text: result.Line()})
 		if saveErr := t.Save(); saveErr != nil {
@@ -197,6 +226,7 @@ func finishStandalone(env *Env, t *Task, rec *Record) error {
 		w, addErr := r.Add(t.Task, t.Touch)
 		if addErr == nil {
 			t.Workdir, rec.Workdir = w.Dir, w.Dir
+			t.Standalone.MergedHead = verify.Head(w.Dir)
 			addErr = t.Save()
 		}
 		if addErr != nil {
@@ -210,8 +240,8 @@ func finishStandalone(env *Env, t *Task, rec *Record) error {
 }
 
 func blockStandalone(t *Task, rec *Record, err error) {
-	reason := strings.ReplaceAll(err.Error(), "maestro resume "+t.Task+" --finish", "maestro dispatch --finish "+t.Task)
-	rec.RunBranch = "maestro/" + t.Task + "/run"
+	reason := strings.ReplaceAll(err.Error(), "maestro resume "+StandaloneRunID(t)+" --finish", "maestro dispatch --finish "+t.Task)
+	rec.RunBranch = "maestro/" + StandaloneRunID(t) + "/run"
 	rec.Outcome.Outcome, rec.Outcome.Decision = OutcomeBlocked, "blocked"
 	rec.Outcome.ErrorText = reason + "; Run branch " + rec.RunBranch
 	rec.FinishPending = true

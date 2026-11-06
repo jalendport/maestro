@@ -18,6 +18,11 @@ var runIDRe = regexp.MustCompile(`^r-(\d{4,})$`)
 
 var taskIDBytes = rand.Read
 
+// StandaloneRunID gives each standalone Dispatch its own Worktrees and branches.
+func StandaloneRunID(t *Task) string {
+	return "d-" + t.Run + "-" + t.Task
+}
+
 // NextRunID allocates the next r-NNNN in the project's runs folder.
 // It reserves the folder before returning.
 func NextRunID(root string) (string, error) {
