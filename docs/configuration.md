@@ -4,7 +4,7 @@ Maestro runs with no configuration file. It reads three layers, in this order: t
 
 A key that Maestro does not know gives a warning. It does not stop a Route.
 
-Every Lane runs as a headless child process on the one-shot path, inside Solo and outside it. This includes Run Tasks, single Dispatches, and Council Seats. Solo supplies todos, Report and Merge comments, and wake-ups.
+Every Lane runs as a headless child process, inside Solo and outside it. This includes Run Tasks, single Dispatches, and Council Seats. Solo supplies todos, Report and Merge comments, and wake-ups.
 
 ## ~/.maestro/config.toml
 
@@ -246,7 +246,7 @@ This list does not grant shell loops, command substitution, redirects, or a pipe
 
 The Router makes the Routes. The backend is Jev or the rules table, and Maestro uses the rules table when Jev is absent or sure of nothing.
 
-Jev's Judgment level sets the Task's Tier. The Brief's `level` is the Orchestrator's estimate. `maestro dispatch --level` and `maestro run --level` replace that estimate when set. The estimate goes to Jev as context and never raises Jev's score or limits its pick. The rules table uses the estimate when Jev is absent or below the confidence floor. Only a Brief's `floor:` and `ceiling:`, or `maestro run --floor` and `--ceiling`, set hard Tier bounds. An edit never goes Light. When Jev's score is below the estimate, the Reason line says, for example, `jev some, orchestrator estimated expert`. The Route record keeps both values.
+Jev's Judgment level sets the Task's Tier. The Brief's `level` is the Orchestrator's estimate. `maestro dispatch --level` and `maestro run --level` replace that estimate when set. The estimate goes to Jev as context and never raises Jev's score or limits its pick. The rules table uses the estimate when Jev is absent or below the confidence floor. Only a Brief's `floor:` and `ceiling:`, or `maestro run --floor` and `--ceiling`, set hard Tier bounds. An edit never goes Light. When Jev's score is below the estimate, the Reason line says, for example, `jev some, orchestrator estimated expert`. The Route record keeps both values. The Orchestrator writes the `level` it believes and does not raise it or name a Lane to reach a stronger Lane, because Maestro uses a Frontier Lane when the work calls for it.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -324,7 +324,7 @@ In hook scope, a Reminder event also starts a detached `caffeinate -i -s -w <orc
 | Antigravity | `PreInvocation` | `Stop`, process exit, or 30 minutes after the last Reminder event, whichever comes first |
 | Grok | None: its Carrier is a rules file, with no Reminder event | No Orchestrator turn protection; its Lanes and blocking Maestro verbs still have protection |
 
-The lease protects a turn, not an idle Harness session. If `Stop` does not reach Maestro, the lease releases the Mac within 30 minutes of the last Reminder event. Run `maestro adapter install` again to add the `Stop` entries; `maestro doctor` reports a missing entry as a partial Adapter. In Codex, review and trust the new `Stop` hook in `/hooks`. The current [Codex hooks](https://learn.chatgpt.com/docs/hooks) and [Antigravity hooks](https://antigravity.google/docs/hooks) both provide `Stop`.
+The lease protects a turn, not an idle Harness session. If `Stop` does not reach Maestro, the lease releases the Mac within 30 minutes of the last Reminder event. `maestro doctor` reports a missing entry as a partial Adapter. The current [Codex hooks](https://learn.chatgpt.com/docs/hooks) and [Antigravity hooks](https://antigravity.google/docs/hooks) both provide `Stop`.
 
 Default `wall_limit`:
 
@@ -380,7 +380,7 @@ Fold any Council findings into the Plan file, then use `maestro approve <run>`. 
 
 ## Worktrees
 
-A standalone edit Dispatch uses a Worktree under the same conditions as a Run: Worktrees are on, the repository has a commit, HEAD is on a branch, the Brief's `touch` names no refused link, and no check is container-bound. Its supervisor opens the Worktree before it starts the Lane. The Task starts from HEAD, and the main checkout stays unchanged until landing. Otherwise, `maestro dispatch` prints `worktrees: off (<reason>)` and uses the project tree. A standalone read Dispatch keeps its current behavior.
+A standalone edit Dispatch uses a Worktree under the same conditions as a Run: Worktrees are on, the repository has a commit, HEAD is on a branch, the Brief's `touch` names no refused link, and no check is container-bound. Its supervisor opens the Worktree before it starts the Lane. The Task starts from HEAD, and the main checkout stays unchanged until landing. Otherwise, `maestro dispatch` prints `worktrees: off (<reason>)` and uses the project tree.
 
 After the checks and gate, a standalone edit Dispatch commits its changed paths with the Roster's commit message template when the outcome is `verified`, or `unverified` with a Report and changed files. It merges the Task branch into its Run branch and lands with the Brief's `commit` setting: `true` keeps the commit on the user's branch; `false` leaves the changes uncommitted and unstaged. Its identity is `d-<run>-<task>`, which includes both its Run id and Task id. Its Run branch is `maestro/d-<run>-<task>/run`, its Task branch is `maestro/d-<run>-<task>/<task>`, and its Worktree is at `~/.maestro/worktrees/<project-key>/d-<run>-<task>/<task>/`. Dispatches with the same Task id in different Runs use separate Worktrees and branches.
 
@@ -392,7 +392,7 @@ A Run uses Worktree mode when Worktrees are on, the repository has a commit, HEA
 
 A container-bound check has `ddev`, `docker`, `docker-compose`, `lando`, `sail`, or a path ending in `/sail` as its first word after environment words. Maestro removes leading assignments and `env` words, including `env -i` and `env -u NAME`, for this check. It checks the Project file's `checks` and each Task's own checks. Such a check uses the project folder mounted in the container, so a separate checkout cannot supply the Task's files. The Run and standalone Dispatch use tree mode with `checks run in a container bound to the project folder (<first word>)`. `go test ./...` permits Worktree mode.
 
-Maestro chooses the mode when it creates the Run. For a held Run, `maestro approve` chooses the mode again from the current Plan, including new Tasks and changes to `touch`. The mode stays the same on resume. A saved Run keeps its user branch even when HEAD is detached. In tree mode, an edit Task waits with `tree busy` while another edit Task runs. In Worktree mode, Tasks with files that overlap wait in Plan order with `files overlap with <n>`; Routes and status show `after <n> (files overlap)`. If a Task's `touch` names a shared dependency folder or a path inside it, the Run starts in tree mode with the reason `task <n> touches <folder>`. A new Run with a detached HEAD uses tree mode with the reason `HEAD is not on a branch`. When landing needs the user's branch and it is not checked out, the Run pauses with `user branch <name> is not checked out`; check out that branch, then use `maestro resume <run> --finish`.
+Maestro chooses the mode when it creates the Run. The mode line of `maestro run` says `worktrees: on` or gives the reason for tree mode. For a held Run, `maestro approve` chooses the mode again from the current Plan, including new Tasks and changes to `touch`. The mode stays the same on resume. A saved Run keeps its user branch even when HEAD is detached. In tree mode, an edit Task waits with `tree busy` while another edit Task runs. In Worktree mode, Tasks with files that overlap wait in Plan order with `files overlap with <n>`; Routes and status show `after <n> (files overlap)`. If a Task's `touch` names a shared dependency folder or a path inside it, the Run starts in tree mode with the reason `task <n> touches <folder>`. A new Run with a detached HEAD uses tree mode with the reason `HEAD is not on a branch`. When landing needs the user's branch and it is not checked out, the Run pauses with `user branch <name> is not checked out`; check out that branch, then use `maestro resume <run> --finish`.
 
 Overlap uses the Brief's declared `Files` and `touch` patterns. The Scope guard's test-file rule does not add overlap between Tasks.
 
