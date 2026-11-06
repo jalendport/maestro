@@ -36,7 +36,18 @@ Ask the user only when a verb exits 2, or when a Task touches a human gate: push
 
 A blocked Task comes back to you with its Cause: for `brief`, correct the Brief; for `environment`, resolve the blocker; for `none`, judge the Bad result before you resume; for `capability`, a stronger Lane can help.
 
-Size a Task for ten to twenty Lane minutes. Prefer four to six independent Tasks over fifteen small Tasks. Keep work on the same files in one Task, or chain the Tasks with `blocked_by`. Name every path in `Files`, so Maestro can order Tasks whose files overlap.
+Size a Task for ten to twenty Lane minutes. Prefer four to six independent Tasks over fifteen small Tasks. Keep work on the same files in one Task, or chain the Tasks with `blocked_by`. Name the code files the Task changes in `Files`, so Maestro can order Tasks whose files overlap.
+
+## Plans for Worktree mode
+
+Parallel Tasks in Worktrees merge at the end of each Task. Write the Plan so they do not conflict:
+
+- `Files` is the precise list of code files the Task changes. Maestro orders Tasks whose `Files` overlap.
+- `touch` is wide: the whole packages the Task changes, every test file that asserts the behavior (in other packages too), and every doc file the shared rules name (`docs/**`, `CONTEXT.md`, `skills/maestro/**`). A `touch` that leaves out a test or a doc costs one blocked attempt and one resume.
+- In a Plan with more than one edit Task, Lanes do not edit `CHANGELOG.md` or `README.md`: parallel edits to the same section conflict at every merge. Tell each Lane to put its changelog line in the Summary of its Report. After the Run, you write `CHANGELOG.md` and the README once.
+- A change that removes or renames an exported function goes in the same Task as every caller. If it does not, the build fails inside the Task's `touch`.
+- Four to six Tasks of ten to twenty Lane minutes each, with disjoint `Files`, end a Run in 20 to 40 minutes.
+- The Report format has fixed headings. Never ask for a new heading in a Plan.
 
 One nudge is one more attempt on the same Lane for the Done items that the gate scored under `0.5`; it runs when the checks pass, the verdict is `pass`, the risk is at most `medium`, and the score is under the close threshold. For this rule, the checks pass when no checks are set. The nudge Brief tells the Lane to keep the previous work and complete the listed Done items.
 
@@ -64,7 +75,7 @@ A Task is accepted when you have read its diff. Outcome `unverified` means Maest
 
 ## When a Run pauses or a Task is blocked
 
-Read the Cause and the Lane's Blocked items. Cause `brief` means the Brief excludes required work or contradicts itself; correct the Brief. Cause `environment` means a tool or service was denied, down, or missing; resolve that blocker before you resume. Cause `none` means nothing went wrong; on a Bad result, judge the result before you resume. These three Causes block for the Orchestrator. Only Cause `capability` can re-Route a Bad result to a stronger Lane. A blocked Report still needs your answer, regardless of its Cause. If Jev is absent, a rule classifies a touch violation or blocked Report as `brief`, a partial Report with Blocked items or a failed Docker pre-flight as `environment`, and other failures as `capability`. A partial Report with Blocked items keeps its Bad result and Cause after a check Stall. A Gate with only a Cause shows `cause <value> (<source>)` in `maestro wait` and `maestro status`; absent scores stay out of the Ledger. The Run report, `maestro wait`, the Reminder, and the Solo wake-up give the Cause and the Blocked items.
+Read the Cause and the Lane's Blocked items. Cause `brief` means the Brief excludes required work or contradicts itself; correct the Brief. Cause `environment` means a tool or service was denied, down, or missing; resolve that blocker before you resume. Cause `none` means nothing went wrong; on a Bad result, judge the result before you resume. These three Causes block for the Orchestrator. Only Cause `capability` can re-Route a Bad result to a stronger Lane. A blocked Report still needs your answer, regardless of its Cause. If Jev is absent, a rule classifies a touch violation or blocked Report as `brief`, a partial Report with Blocked items or a failed Docker pre-flight as `environment`, and other failures as `capability`. A partial Report with Blocked items keeps its Bad result and Cause after a check Stall. The Record and Ledger keep zero numbers and use `scored` to identify scores. A Gate with only a Cause has `scored: false`; `maestro wait` and `maestro status` show `cause <value> (<source>)` for it. A scored Gate has `scored: true` and shows `satisfies <n> verdict <v> risk <r>`. The Run report, `maestro wait`, the Reminder, and the Solo wake-up give the Cause and the Blocked items.
 
 Read the item from `maestro wait` and `report.md` when present, then answer once: `maestro resume <run> --task <n> --lane <family[:effort]>`, `--brief <corrected file>`, or `--skip`. A Relay is a Lane's permission prompt: in Solo it wakes you; `maestro wait` returns it and `maestro status` prints the `relay` event. Answer with `maestro answer <task> allow|deny --relay <id>`, with the id from the item or event.
 

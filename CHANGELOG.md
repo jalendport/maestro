@@ -50,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Removed `maestro tell` and `maestro roster solo`, which used Lane tabs and Solo agent tool discovery
 
 ### Fixed
+- Fixed the read-only command check to deny unquoted brace lists and globs that can match a file name that starts with `-`; globs after a fixed prefix stay permitted, and the deny reason tells the Lane to write `./` before the glob
+- Fixed Run landing on busy checkouts: Worktree mode no longer needs a clean tree or more than one edit Task, a user branch that gained commits is rebased onto, uncommitted changes block a landing only when their paths overlap the Run's, a saved Run keeps its mode on resume, a read Worktree left by a stopped supervisor is reused, and a squash retry continues after a failed marker write
+- Fixed `maestro clean` to remove expired Runs with a blocked Task or `finish_pending` again while Worktree cleanup keeps the branches that did not land; `maestro wait <task>` follows only that Task and returns its result when the Task ends, even while other Tasks of the Run continue
+- Fixed zero Gate scores to stay recorded and printed as scores with `scored: true`, and failed Docker pre-flight checks to set the error text for partial Reports with Blocked items
+- Fixed the awake worker to verify the Orchestrator's process start time and to walk past a shell wrapper, so a wrapper that exits first no longer loses the Reminder lease or the Stop event
+- Added the section `Plans for Worktree mode` to the skill file: precise `Files`, wide `touch`, no `CHANGELOG.md` or `README.md` edits by Lanes in a parallel Plan, callers in the same Task as a removed export, and the Task shape that ends a Run in 20 to 40 minutes
 - Fixed command matching for environment prefixes: the hook strips `env`, `env -i`, and `env -u NAME`, and strips a `NAME=value` word only for a short list of harmless names (`CI`, `TERM`, `CGO_ENABLED`, and others); any other variable keeps the full command, so a read Lane is denied and an edit Lane relays, with the variable named
 - Fixed the read-only command check to permit globs and brace lists (`*`, `?`, `[`, `]`, `{`, `}`) while `$`, backquotes, and `(` stay denied; `composer show` requires `--no-plugins`, `pip list` and `pip show` deny `--python`, and the npm, pnpm, Yarn, cargo, and rustc forms leave the baseline list because their launchers can run project-selected code
 - Fixed timing tests to use wide limits or result assertions instead of tight elapsed-time bounds
