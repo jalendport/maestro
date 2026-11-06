@@ -563,10 +563,6 @@ func (a *app) cleanCmd() *cobra.Command {
 						continue
 					}
 					if state, err := run.Load(p); err == nil && state.Mode == "worktree" {
-						_, blocked, _, _, _, _ := state.Counts()
-						if state.FinishPending || blocked > 0 {
-							continue
-						}
 						if state.State != run.StateFinished && state.State != run.StateCancelled && state.State != run.StatePaused {
 							continue
 						}

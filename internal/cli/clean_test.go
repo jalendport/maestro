@@ -121,3 +121,37 @@ func TestCleanGlobalControlAndCache(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanRunExpiryDoesNotDependOnBlockedTasksOrFinish(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	old := time.Now().Add(-48 * time.Hour)
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for _, mode := range []string{"tree", "worktree"} {
+		for _, state := range []string{run.StateCancelled, run.StateFinished, run.StatePaused, run.StateLive} {
+			t.Run(mode+"/"+state, func(t *testing.T) {
+				folder := t.TempDir()
+				s := &run.State{Folder: folder, Mode: mode, State: state, EndedAt: old, FinishPending: true, Tasks: []*run.TaskState{{State: run.TaskBlocked}}}
+				if err := s.Save(); err != nil {
+					t.Fatal(err)
+				}
+				want := state == run.StateCancelled || state == run.StateFinished || (mode == "worktree" && state == run.StatePaused)
+				for _, recent := range []bool{false, true} {
+					if recent {
+						s.EndedAt = time.Now()
+						if err := s.Save(); err != nil {
+							t.Fatal(err)
+						}
+					}
+					exists, expired, err := stateFileExpired(filepath.Join(folder, run.FileState), cutoff)
+					if err != nil || !exists || expired != (want && !recent) {
+						t.Fatalf("expiry: exists=%t expired=%t recent=%t: %v", exists, expired, recent, err)
+					}
+					expired, err = controlRecordExpired(filepath.Join(folder, "task"), cutoff)
+					if err != nil || expired != (want && !recent) {
+						t.Fatalf("control expiry: expired=%t recent=%t: %v", expired, recent, err)
+					}
+				}
+			})
+		}
+	}
+}

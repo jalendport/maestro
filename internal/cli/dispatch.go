@@ -152,7 +152,7 @@ func (a *app) waitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "wait <task|run>",
 		Short: "Wait until work ends or needs the Orchestrator",
-		Long:  "Wait for a Task (4-hex id) or a Run (r-NNNN) in the current project. Return with exit 2 and the next command for an open Relay, a paused Run, or a blocked Task of a Run. Wait again after the answer to continue. At the end, print the result. --json prints one object: the item that needs an answer, dispatch.json, or run.json.",
+		Long:  "Wait for a Task (4-hex id) or a Run (r-NNNN) in the current project. A Task wait follows only that Task, including after a resume answer. It waits while the Task is waiting or running and prints its result when done, skipped, or cancelled, even while other Tasks run. A Task wait returns exit 2 with the next command for its open Relay or when the Run holds that Task as blocked or failed with an answer pending. A Run wait returns exit 2 for an open Relay, a held or paused Run, or a blocked or failed Task with an answer pending. Wait again after the answer to continue. --json prints one object: the item that needs an answer, dispatch.json, the skipped or cancelled Task state, or run.json.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			env, err := a.env(false)

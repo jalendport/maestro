@@ -81,6 +81,140 @@ func TestWaitRunTaskDuringChecks(t *testing.T) {
 	}
 }
 
+func TestWaitTaskEndsWhileOtherTasksNeedAnswers(t *testing.T) {
+	for _, state := range []string{run.TaskDone, run.TaskSkipped, run.TaskCancelled} {
+		for _, asJSON := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/json=%t", state, asJSON), func(t *testing.T) {
+				rec, s := waitFixture(t)
+				rec.State = "ended"
+				rec.Outcome = dispatch.Outcome{Status: "done", Outcome: dispatch.OutcomeVerified}
+				if err := rec.Save(); err != nil {
+					t.Fatal(err)
+				}
+				s.Tasks[0].State = state
+				s.Tasks = append([]*run.TaskState{{Number: 2, ID: "def0", State: run.TaskBlocked, Error: "other Task needs an answer"}}, s.Tasks...)
+				if err := s.Save(); err != nil {
+					t.Fatal(err)
+				}
+				oldSleep := waitSleep
+				t.Cleanup(func() { waitSleep = oldSleep })
+				waitSleep = func(time.Duration) { t.Fatal("wait polled after the Task ended") }
+				args := []string{"wait", rec.Task}
+				if asJSON {
+					args = append(args, "--json")
+				}
+				output, err := waitCommand(t, args...)
+				if err != nil || !strings.Contains(output, rec.Task) || strings.Contains(output, "def0") {
+					t.Fatalf("Task result: %v, %s", err, output)
+				}
+				if state != run.TaskDone && !strings.Contains(output, state) {
+					t.Fatalf("Task state absent: %s", output)
+				}
+			})
+		}
+	}
+}
+
+func TestWaitTaskIgnoresOtherTasksWhenRunPauses(t *testing.T) {
+	for _, state := range []string{run.TaskWaiting, run.TaskRunning} {
+		for _, asJSON := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/json=%t", state, asJSON), func(t *testing.T) {
+				rec, s := waitFixture(t)
+				s.State, s.PauseReason = run.StatePaused, "another Task needs an answer"
+				s.Tasks[0].State = state
+				s.Tasks = append(s.Tasks, &run.TaskState{Number: 2, ID: "def0", State: run.TaskBlocked, Error: s.PauseReason})
+				if err := s.Save(); err != nil {
+					t.Fatal(err)
+				}
+				oldSleep := waitSleep
+				t.Cleanup(func() { waitSleep = oldSleep })
+				polled := false
+				waitSleep = func(time.Duration) {
+					if polled {
+						t.Fatal("wait continued after its Task ended")
+					}
+					polled = true
+					rec.State = "ended"
+					rec.Outcome = dispatch.Outcome{Status: "done", Outcome: dispatch.OutcomeVerified}
+					if err := rec.Save(); err != nil {
+						t.Fatal(err)
+					}
+					s.Tasks[0].State = run.TaskDone
+					if err := s.Save(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				args := []string{"wait", rec.Task}
+				if asJSON {
+					args = append(args, "--json")
+				}
+				output, err := waitCommand(t, args...)
+				if err != nil || !polled || !strings.Contains(output, rec.Task) || strings.Contains(output, "def0") {
+					t.Fatalf("Task result in paused Run: %v, %s", err, output)
+				}
+			})
+		}
+	}
+}
+
+func TestWaitTaskAfterAnswerWaitsThroughItsOwnStates(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		t.Run(fmt.Sprint(asJSON), func(t *testing.T) {
+			rec, s := waitFixture(t)
+			rec.State = "ended"
+			rec.Outcome = dispatch.Outcome{Outcome: dispatch.OutcomeBlocked}
+			if err := rec.Save(); err != nil {
+				t.Fatal(err)
+			}
+			s.Tasks[0].State = run.TaskBlocked
+			s.Tasks = append([]*run.TaskState{{Number: 2, ID: "def0", State: run.TaskFailed, Error: "other Task needs an answer"}}, s.Tasks...)
+			if err := s.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := run.WriteIndex(s); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { run.RemoveIndex(s.Project, s.Run) })
+			args := []string{"wait", rec.Task}
+			if asJSON {
+				args = append(args, "--json")
+			}
+			output, err := waitCommand(t, args...)
+			requireWaitItem(t, output, err, asJSON, "task_blocked", rec.Task, s.Run, "maestro resume r-0001 --task 1")
+			if _, err := waitCommand(t, "resume", s.Run, "--task", "1", "--skip"); err != nil {
+				t.Fatal(err)
+			}
+			oldSleep := waitSleep
+			t.Cleanup(func() { waitSleep = oldSleep })
+			polls := 0
+			waitSleep = func(time.Duration) {
+				polls++
+				switch polls {
+				case 1:
+					s.Tasks[1].State = run.TaskWaiting
+				case 2:
+					s.Tasks[1].State = run.TaskRunning
+				case 3:
+					s.Tasks[1].State = run.TaskDone
+					rec.Outcome = dispatch.Outcome{Status: "done", Outcome: dispatch.OutcomeVerified}
+					if err := rec.Save(); err != nil {
+						t.Fatal(err)
+					}
+				default:
+					t.Fatal("wait continued after its Task ended")
+				}
+				if err := s.Save(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			output, err = waitCommand(t, args...)
+			if err != nil || polls != 3 || !strings.Contains(output, rec.Task) || strings.Contains(output, "def0") {
+				t.Fatalf("Task result after answer: polls=%d, %v, %s", polls, err, output)
+			}
+		})
+	}
+}
+
 func TestWaitTaskFollowsRunAndDoesNotReturnAnsweredAttempt(t *testing.T) {
 	for _, state := range []string{run.StateLive, run.StatePaused} {
 		for _, taskState := range []string{run.TaskBlocked, run.TaskFailed} {
@@ -134,13 +268,14 @@ func TestWaitTaskFollowsRunAndDoesNotReturnAnsweredAttempt(t *testing.T) {
 					polled := false
 					waitSleep = func(time.Duration) {
 						polled = true
-						s.State, s.Tasks[0].State = run.StateFinished, run.TaskSkipped
+						s.Tasks[0].State = run.TaskSkipped
+						s.Tasks = append(s.Tasks, &run.TaskState{Number: 2, ID: "def0", State: run.TaskBlocked, Error: "another Task needs an answer"})
 						if err := s.Save(); err != nil {
 							t.Fatal(err)
 						}
 					}
 					output, err = waitCommand(t, args...)
-					if err != nil || !polled || !strings.Contains(output, run.StateFinished) {
+					if err != nil || !polled || !strings.Contains(output, run.TaskSkipped) || strings.Contains(output, "def0") {
 						t.Fatalf("wait returned the answered attempt: %v, %s", err, output)
 					}
 				})

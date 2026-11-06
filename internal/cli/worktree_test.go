@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/hook"
 	"github.com/jalendport/maestro/internal/run"
 	"github.com/jalendport/maestro/internal/worktree"
 )
@@ -153,7 +154,7 @@ func TestCleanRemovesEndedWorktreesAndBranches(t *testing.T) {
 	}
 	git("add", ".")
 	git("commit", "-m", "Start test repository")
-	for _, status := range []string{run.StateFinished, run.StateCancelled, run.StatePaused, "finish-pending", "blocked"} {
+	for _, status := range []string{run.StateFinished, run.StateCancelled, run.StatePaused, "finish-pending", "blocked", "cancelled-blocked"} {
 		r, err := worktree.Open(root, "r-"+status)
 		if err != nil {
 			t.Fatal(err)
@@ -181,12 +182,14 @@ func TestCleanRemovesEndedWorktreesAndBranches(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := &run.State{Run: r.ID, Project: root, Mode: "worktree", State: status, Folder: folder, EndedAt: old}
-		protected := status == "finish-pending" || status == "blocked"
-		if protected {
+		if status == "finish-pending" || status == "blocked" || status == "cancelled-blocked" {
 			s.State = run.StatePaused
 			s.FinishPending = status == "finish-pending"
-			if status == "blocked" {
+			if status == "blocked" || status == "cancelled-blocked" {
 				s.Tasks = []*run.TaskState{{ID: "task", State: run.TaskBlocked}}
+			}
+			if status == "cancelled-blocked" {
+				s.State = run.StateCancelled
 			}
 		}
 		if err := s.Save(); err != nil {
@@ -195,24 +198,31 @@ func TestCleanRemovesEndedWorktreesAndBranches(t *testing.T) {
 		if err := os.Chtimes(folder, old, old); err != nil {
 			t.Fatal(err)
 		}
+		control := controlFolder(t, filepath.Join(folder, "task"))
+		if err := os.MkdirAll(control, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		body, err := json.Marshal(hook.Lane{Root: root, RunFolder: filepath.Join(folder, "task")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(control, "lane.json"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
 		output, err := waitCommand(t, "clean", "--older-than", "1d")
 		if err != nil {
 			t.Fatalf("clean: %s, %v", output, err)
-		}
-		if protected {
-			if _, err := os.Stat(w.Dir); err != nil {
-				t.Fatalf("protected Worktree removed: %v", err)
-			}
-			if branches := strings.TrimSpace(git("branch", "--list", "maestro/"+r.ID+"/*")); !strings.Contains(branches, w.Branch) || !strings.Contains(branches, r.Branch) {
-				t.Fatalf("protected branches removed: %s", branches)
-			}
-			continue
 		}
 		if !strings.Contains(output, "removed 1 folder(s)") {
 			t.Fatalf("clean count: %s", output)
 		}
 		if _, err := os.Stat(w.Dir); !os.IsNotExist(err) {
 			t.Fatalf("Worktree remains: %s, %v", w.Dir, err)
+		}
+		for _, path := range []string{folder, control} {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("clean kept %s: %v", path, err)
+			}
 		}
 		branches := strings.TrimSpace(git("branch", "--list", "maestro/"+r.ID+"/*"))
 		if status == run.StateFinished {
