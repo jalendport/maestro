@@ -22,7 +22,7 @@ The small per-Harness piece that connects an Orchestrator to Maestro: a skill, a
 ## Lanes and the Roster
 
 **Lane**:
-One runnable combination of harness + model + effort, for example `codex gpt-5.6-sol high`. Maestro routes Tasks to Lanes and starts each Lane as a headless child process.
+One runnable combination of harness + model + effort, for example `codex gpt-6.1-sol high`. Maestro routes Tasks to Lanes and starts each Lane as a headless child process.
 _Avoid_: Tool (the word already names a function a model calls)
 
 **Family**:
