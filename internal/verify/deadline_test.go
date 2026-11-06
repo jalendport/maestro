@@ -7,7 +7,7 @@ import (
 
 func TestCheckDeadlineStopsChildren(t *testing.T) {
 	start := time.Now()
-	results := RunChecks(t.TempDir(), []string{"sleep 2; true"}, 100*time.Millisecond)
+	results := RunChecks(t.TempDir(), []string{"sleep 2; true"}, 100*time.Millisecond, time.Minute)
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("deadline took %s", elapsed)
 	}

@@ -63,6 +63,12 @@ func Print(rec *Record, asJSON bool) int {
 		if !c.OK {
 			res = "failed"
 		}
+		if c.Skipped {
+			res = "skipped"
+		}
+		if c.Reason != "" {
+			res += ": " + c.Reason + " (" + c.FailureClass + ")"
+		}
 		fmt.Fprintf(os.Stdout, "%-8s %-40s %s\n", label, c.Command, res)
 	}
 	if len(rec.Verification.Gate) > 0 {
