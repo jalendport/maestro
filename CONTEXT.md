@@ -18,6 +18,11 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Council** — several Lanes answering the same question in parallel. The Orchestrator synthesizes; Maestro returns a Merge.
 - **Adapter** — the small per-Harness piece that connects an Orchestrator to Maestro: one shared skill file, one hook file, and the Carrier of the Reminder. Maestro itself works without any Adapter. `maestro adapter install` writes it.
 - **Run** — one invocation of Maestro on a plan: its Tasks, their Routes and Dispatches, the checks, and the report back to the Orchestrator.
+- **Worktree** — a separate git checkout for one edit Task, outside the project tree.
+- **Run branch** — the branch `maestro/<run>/run` that holds the commits of a Run, made from the user's HEAD when the Run starts.
+- **Task branch** — the branch `maestro/<run>/<task>` that holds one Task's commits, made from the Run branch when the Task starts.
+- **Worktree mode** — a Run mode in which edit Tasks use separate Worktrees and Maestro merges their commits into the Run branch.
+- **Tree mode** — a Run mode in which edit Tasks use the project tree one at a time.
 - **Brief** — the text a Lane receives for one Task: the goal, the definition of done, the files, the checks, and the permission mode.
 - **Tier** — a rung on the strength ladder that Lane families sit on: Light, Daily, Heavy, Frontier. "One Tier up" means the next rung.
 - **Judgment level** — how much a Lane must decide on its own to finish a Task: none, some, significant, or expert. The level Jev scores sets the Tier. The Brief's `level` is the Orchestrator's estimate: context for Jev and the level for the rules fallback. Only `floor` and `ceiling` set hard Tier bounds; an edit never goes Light.
