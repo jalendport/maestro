@@ -109,6 +109,36 @@ func TestRenderHidesTierWords(t *testing.T) {
 	}
 }
 
+func TestRenderNudgeKeepsPreviousWork(t *testing.T) {
+	b, err := ParseText(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, nudge := range []bool{true, false} {
+		out := Render(b, RenderOpts{Access: AccessEdit, Retry: &Retry{
+			Attempt: 2, Reason: "gate nudge: missing Done items", Nudge: nudge,
+			Findings: []string{"Done item 1: The command prints ok."},
+		}})
+		if !strings.Contains(out, "This is attempt 2.") || !strings.Contains(out, "- Done item 1: The command prints ok.") {
+			t.Fatalf("retry Brief: %s", out)
+		}
+		if nudge {
+			for _, want := range []string{"work passed the checks", "gate's verdict was `pass`", "Keep that work", "This gate nudge is for the listed Done items", "gate scored under `0.5`"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("nudge Brief lacks %q: %s", want, out)
+				}
+			}
+			for _, banned := range []string{"Confirmed findings", "discard", "stopped partway"} {
+				if strings.Contains(out, banned) {
+					t.Errorf("nudge Brief has %q: %s", banned, out)
+				}
+			}
+		} else if !strings.Contains(out, "stopped partway") || !strings.Contains(out, "Confirmed findings") {
+			t.Fatalf("ordinary retry Brief changed: %s", out)
+		}
+	}
+}
+
 func TestParseReport(t *testing.T) {
 	r := ParseReport("## Summary\nok\n\n## Changed\n- a.go\n- b.go\n\n## Checks\n- `go test` — ok\n\n## Blocked\n- none\n\nSTATUS: partial\n")
 	if r.Status != StatusPartial || len(r.Changed) != 2 || len(r.Blocked) != 0 || len(r.Checks) != 1 {

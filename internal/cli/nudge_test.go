@@ -49,7 +49,7 @@ func TestGateNudgeAndWaitReport(t *testing.T) {
 		{name: "unknown risk", risk: "unknown", attempts: 1, want: dispatch.OutcomeUnverified},
 		{name: "no missing item", itemScore: 0.5, attempts: 1, want: dispatch.OutcomeUnverified},
 		{name: "no item answer", noScore: true, attempts: 1, want: dispatch.OutcomeUnverified},
-		{name: "no checks", noChecks: true, attempts: 1, want: dispatch.OutcomeUnverified},
+		{name: "no checks", noChecks: true, attempts: 2, secondScore: 0.80, want: dispatch.OutcomeUnverified},
 		{name: "failed checks", check: "false", attempts: 1, want: dispatch.OutcomeFailed},
 		{name: "nudge fails gate", secondVerdict: "wrong_logic", attempts: 2, secondScore: 0.80, want: dispatch.OutcomeFailed},
 		{name: "nudge partial", secondStatus: "partial", attempts: 2, want: dispatch.OutcomeFailed},

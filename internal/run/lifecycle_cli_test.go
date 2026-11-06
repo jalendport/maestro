@@ -159,7 +159,16 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 		t.Helper()
 		return invokeWith(t, want, project, nil, args...)
 	}
-	invoke(2, "run", "plan.md", "--council", "--level", "significant", "--floor", "heavy", "--ceiling", "heavy")
+	// A Router question holds the Run without a gap in the level estimate.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"answers":{"lane":{"choice":"ask_orchestrator","confidence":0.95},"spec_is_concrete":{"noul":1}}}`)
+	}))
+	defer server.Close()
+	write(config.ProjectFile(project), "router = \"jev\"\ncouncils = \"always\"\n", 0o644)
+	write(config.UserFile(), strings.Replace(settings, "backend = \"rules\"", "backend = \"jev\"\nbase_url = "+fmt.Sprintf("%q", server.URL), 1), 0o644)
+	invokeWith(t, 2, project, []string{"TYPESAFE_API_KEY=fixture-key"}, "run", "plan.md", "--council", "--level", "significant", "--floor", "heavy", "--ceiling", "heavy")
+	write(config.ProjectFile(project), "router = \"rules\"\ncouncils = \"always\"\n", 0o644)
+	write(config.UserFile(), settings, 0o644)
 	runFolder := filepath.Join(config.RunsDir(project), "r-0001")
 	s, err := run.Load(runFolder)
 	if err != nil || s.State != run.StateHeld || len(s.Tasks) != 2 {

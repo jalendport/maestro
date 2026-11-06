@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,7 @@ import (
 )
 
 func TestCommittedAttemptReachesScopeGuardAndGateDiff(t *testing.T) {
+	testGitEnv(t)
 	root, folder := t.TempDir(), t.TempDir()
 	git := func(args ...string) {
 		t.Helper()
@@ -86,7 +88,7 @@ func TestCheckStopReasonAndClassReachLedger(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("MAESTRO_HOME", t.TempDir())
-			root, folder := t.TempDir(), t.TempDir()
+			root, folder := causeRoot(t), t.TempDir()
 			if tc.name == "docker" {
 				bin := t.TempDir()
 				if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
@@ -94,7 +96,7 @@ func TestCheckStopReasonAndClassReachLedger(t *testing.T) {
 				}
 				t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 			}
-			env := &Env{Roster: &roster.Roster{}}
+			env := &Env{Roster: &roster.Roster{Router: config.Router{Backend: "rules"}}}
 			// The Lane has used more than the checks' entire Wall limit.
 			rec := &Record{Kind: "dispatch", Path: folder, StartedAt: time.Now().Add(-time.Hour)}
 			task := &Task{Project: root, Access: brief.AccessEdit, IdleLimit: tc.idle, WallLimit: tc.wall}
@@ -103,6 +105,11 @@ func TestCheckStopReasonAndClassReachLedger(t *testing.T) {
 			want := "check failed: " + tc.command + ": " + tc.reason
 			if rec.Outcome.Outcome != OutcomeFailed || rec.Outcome.FailureClass != tc.class || rec.Outcome.ErrorText != want {
 				t.Fatalf("outcome: %+v", rec.Outcome)
+			}
+			if tc.name == "docker" {
+				if cause := rec.ResolveCause(); cause != CauseEnvironment {
+					t.Fatalf("Docker Cause: %s", cause)
+				}
 			}
 			checks := rec.Verification.Checks
 			if len(checks) != 3 || checks[0].Skipped || checks[0].Reason != "" || checks[1].Skipped || !checks[2].Skipped || checks[2].Reason != tc.reason {
@@ -129,7 +136,50 @@ func TestCheckStopReasonAndClassReachLedger(t *testing.T) {
 			if err != nil || stored.Outcome.FailureClass != tc.class || stored.Outcome.ErrorText != want {
 				t.Fatalf("saved record: %+v, %v", stored, err)
 			}
+			if tc.name == "docker" {
+				assertCauseOnlyGate(t, rec, CauseEnvironment, "rule")
+			}
 		})
+	}
+}
+
+func TestPartialBlockedReportKeepsBadResultAfterCheckStall(t *testing.T) {
+	for _, limit := range []string{"idle", "wall"} {
+		for _, blocked := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/blocked=%t", limit, blocked), func(t *testing.T) {
+				root, folder := causeRoot(t), t.TempDir()
+				env := &Env{Roster: &roster.Roster{Router: config.Router{Backend: "rules"}}}
+				task := &Task{Project: root, Access: brief.AccessEdit, IdleLimit: "50ms", WallLimit: "1m"}
+				if limit == "wall" {
+					task.IdleLimit, task.WallLimit = "1m", "50ms"
+				}
+				text := "## Blocked\n- none\nSTATUS: partial"
+				if blocked {
+					text = "## Blocked\n- tool is missing\nSTATUS: partial"
+				}
+				rec := &Record{Path: folder}
+				judge(env, task, rec, brief.ParseReport(text), []string{"sleep 30", "touch must-not-run"}, &brief.Brief{}, attemptBaseline{})
+				checks := rec.Verification.Checks
+				if len(checks) != 2 || checks[0].FailureClass != FailStall || !checks[1].Skipped {
+					t.Fatalf("checks: %+v", checks)
+				}
+				want := FailStall
+				if blocked {
+					want = FailBad
+					if cause := rec.ResolveCause(); cause != CauseEnvironment {
+						t.Fatalf("partial Report Cause: %s", cause)
+					}
+					assertCauseOnlyGate(t, rec, CauseEnvironment, "rule")
+				}
+				if rec.Outcome.Outcome != OutcomeFailed || rec.Outcome.FailureClass != want {
+					t.Fatalf("outcome: %+v", rec.Outcome)
+				}
+				stored, err := LoadRecord(folder)
+				if err != nil || stored.Outcome.FailureClass != want || (blocked && stored.ResolveCause() != CauseEnvironment) {
+					t.Fatalf("saved record: %+v error=%v", stored, err)
+				}
+			})
+		}
 	}
 }
 

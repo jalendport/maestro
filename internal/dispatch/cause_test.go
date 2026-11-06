@@ -15,6 +15,7 @@ import (
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/jev"
+	"github.com/jalendport/maestro/internal/ledger"
 	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/router"
 	"github.com/jalendport/maestro/internal/verify"
@@ -31,11 +32,69 @@ type causeRequest struct {
 
 func causeRoot(t *testing.T) string {
 	t.Helper()
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	testGitEnv(t)
 	root := t.TempDir()
 	if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)
 	}
 	return root
+}
+
+func testGitEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_AUTHOR_NAME", "Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.com")
+}
+
+func assertCauseOnlyGate(t *testing.T, rec *Record, cause, source string) {
+	t.Helper()
+	var fields map[string]any
+	if err := json.Unmarshal(rec.Verification.Gate, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"satisfies", "verdict", "risk", "verdict_confidence", "risk_confidence"} {
+		if _, ok := fields[field]; ok {
+			t.Errorf("Cause-only Gate has %s: %s", field, rec.Verification.Gate)
+		}
+	}
+	copy := *rec
+	copy.Kind, copy.Route = "dispatch", &router.Route{}
+	file, err := os.CreateTemp(t.TempDir(), "print")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	old := os.Stdout
+	func() { os.Stdout = file; defer func() { os.Stdout = old }(); Print(&copy, false) }()
+	printed, err := os.ReadFile(file.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "cause " + cause + " (" + source + ")"
+	for _, text := range []string{string(printed), Status(&copy)} {
+		if !strings.Contains(text, want) || strings.Contains(text, "satisfies") {
+			t.Errorf("Cause-only output: %s", text)
+		}
+	}
+	if err := ledger.Append(&copy); err != nil {
+		t.Fatal(err)
+	}
+	rows := 0
+	if err := ledger.Each(func(raw json.RawMessage) error {
+		rows++
+		if strings.Contains(string(raw), `"satisfies"`) {
+			t.Errorf("unscored satisfies in Ledger: %s", raw)
+		}
+		return nil
+	}); err != nil || rows == 0 {
+		t.Fatalf("Ledger rows=%d error=%v", rows, err)
+	}
 }
 
 func TestBadResultAsksCauseAlone(t *testing.T) {
@@ -83,6 +142,7 @@ func TestBadResultAsksCauseAlone(t *testing.T) {
 			if err := json.Unmarshal(rec.Verification.Gate, &gate); err != nil || gate.Cause != tc.cause || gate.CauseSource != "jev" {
 				t.Fatalf("gate: %+v, %v", gate, err)
 			}
+			assertCauseOnlyGate(t, rec, tc.cause, "jev")
 			saved, err := LoadRecord(folder)
 			if err != nil || saved.ResolveCause() != tc.cause {
 				t.Fatalf("saved Cause: %+v, %v", saved, err)
@@ -112,6 +172,7 @@ func TestTouchViolationHasBriefCauseWithoutJev(t *testing.T) {
 			if err := json.Unmarshal(rec.Verification.Gate, &gate); err != nil || gate.Cause != CauseBrief || gate.CauseSource != "rule" || calls != 0 {
 				t.Fatalf("gate=%+v calls=%d error=%v", gate, calls, err)
 			}
+			assertCauseOnlyGate(t, rec, CauseBrief, "rule")
 		})
 	}
 }
@@ -173,6 +234,7 @@ func TestCauseFallbackWhenJevIsAbsent(t *testing.T) {
 				if err := json.Unmarshal(rec.Verification.Gate, &gate); err != nil || gate.Cause != tc.cause || gate.CauseSource != "rule" {
 					t.Fatalf("report=%s gate=%+v error=%v", tc.report, gate, err)
 				}
+				assertCauseOnlyGate(t, rec, tc.cause, "rule")
 			}
 		})
 	}

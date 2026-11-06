@@ -15,6 +15,7 @@ import (
 func TestJevLevelSetsTier(t *testing.T) {
 	for _, tc := range []struct {
 		name, estimate, access, pick string
+		override                     roster.Level
 		score                        int
 		confidence                   float64
 		floor, ceiling, tier         roster.Tier
@@ -22,6 +23,7 @@ func TestJevLevelSetsTier(t *testing.T) {
 		clamped                      bool
 	}{
 		{name: "estimate does not raise score", estimate: "expert", access: "edit", pick: "codex-sol", score: 1, level: roster.LevelSome, tier: roster.TierDaily},
+		{name: "level flag overrides Brief", estimate: "some", override: roster.LevelExpert, access: "edit", pick: "codex-sol", score: 1, level: roster.LevelSome, tier: roster.TierDaily},
 		{name: "medium confidence", estimate: "expert", access: "edit", pick: "codex-sol", score: 1, confidence: 0.63, level: roster.LevelSome, tier: roster.TierDaily},
 		{name: "estimate does not lower score", estimate: "some", access: "edit", pick: "codex-sol", score: 3, level: roster.LevelExpert, tier: roster.TierHeavy},
 		{name: "light read", estimate: "expert", access: "read", pick: "codex-luna", score: 0, level: roster.LevelNone, tier: roster.TierLight},
@@ -53,11 +55,15 @@ func TestJevLevelSetsTier(t *testing.T) {
 			rt.Roster.Router.Backend = "jev"
 			rt.Roster.Router.BaseURL = server.URL
 			b := &brief.Brief{Fields: brief.Fields{Level: tc.estimate, Category: "implement"}}
-			route, err := rt.Route(Request{Brief: b, Access: tc.access, Floor: tc.floor, Ceiling: tc.ceiling})
+			route, err := rt.Route(Request{Brief: b, Access: tc.access, Floor: tc.floor, Ceiling: tc.ceiling, Level: tc.override})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if route.Source != "jev" || route.Level != tc.level || route.Tier != tc.tier || route.LevelEstimate != roster.Level(tc.estimate) {
+			estimate := tc.estimate
+			if tc.override != "" {
+				estimate = string(tc.override)
+			}
+			if route.Source != "jev" || route.Level != tc.level || route.Tier != tc.tier || route.LevelEstimate != roster.Level(estimate) {
 				t.Fatalf("Route: %+v", route)
 			}
 			if !tc.clamped && route.FamilyID != tc.pick {
@@ -67,15 +73,15 @@ func TestJevLevelSetsTier(t *testing.T) {
 				t.Fatalf("clamped=%t; defaults: %v", got, route.DefaultsUsed)
 			}
 			score := levelFromScore(float64(tc.score))
-			if score.Rank() < roster.Level(tc.estimate).Rank() {
-				want := fmt.Sprintf("jev %s, orchestrator estimated %s", score, tc.estimate)
+			if score.Rank() < roster.Level(estimate).Rank() {
+				want := fmt.Sprintf("jev %s, orchestrator estimated %s", score, estimate)
 				if !strings.Contains(route.ReasonLine, want) {
 					t.Fatalf("Reason line lacks %q: %s", want, route.ReasonLine)
 				}
 			} else if strings.Contains(route.ReasonLine, "orchestrator estimated") {
 				t.Fatalf("Reason line has no lower Jev score: %s", route.ReasonLine)
 			}
-			if state := <-states; state["orchestrator_estimate"] != tc.estimate {
+			if state := <-states; state["orchestrator_estimate"] != estimate {
 				t.Fatalf("route state: %+v", state)
 			}
 			if tc.name == "estimate does not raise score" && !route.GapFlag {

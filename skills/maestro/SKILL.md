@@ -36,9 +36,9 @@ A blocked Task comes back to you with its Cause: for `brief`, correct the Brief;
 
 Size a Task for ten to twenty Lane minutes. Prefer four to six independent Tasks over fifteen small Tasks. Keep work on the same files in one Task, or chain the Tasks with `blocked_by`. Name every path in `Files`, so Maestro can order Tasks whose files overlap.
 
-One nudge is one more attempt on the same Lane for the Done items that the gate scored under `0.5`; it runs when the checks pass, the verdict is `pass`, the risk is at most `medium`, and the score is under the close threshold.
+One nudge is one more attempt on the same Lane for the Done items that the gate scored under `0.5`; it runs when the checks pass, the verdict is `pass`, the risk is at most `medium`, and the score is under the close threshold. For this rule, the checks pass when no checks are set. The nudge Brief tells the Lane to keep the previous work and complete the listed Done items.
 
-Jev sees the `level` as context. The rules fallback uses it when Jev is absent or below the confidence floor. Set `floor:` and `ceiling:` in the Brief, or `maestro run --floor` and `--ceiling`, for hard Tier bounds. An edit never goes Light. The Reason line shows when Jev's score is below the estimate.
+Jev sees the `level` as context. `maestro dispatch --level` and `maestro run --level` replace the Brief's estimate when set. The rules fallback uses the estimate when Jev is absent or below the confidence floor. Set `floor:` and `ceiling:` in the Brief, or `maestro run --floor` and `--ceiling`, for hard Tier bounds. An edit never goes Light. The Reason line shows when Jev's score is below the estimate.
 
 ## Results
 
@@ -60,7 +60,7 @@ A Task is accepted when you have read its diff. Outcome `unverified` means Maest
 
 ## When a Run pauses or a Task is blocked
 
-Read the Cause and the Lane's Blocked items. Cause `brief` means the Brief excludes required work or contradicts itself; correct the Brief. Cause `environment` means a tool or service was denied, down, or missing; resolve that blocker before you resume. Maestro does not re-Route these Tasks automatically. Cause `capability` can use a stronger Lane. A blocked Report still needs your answer, regardless of its Cause. If Jev is absent, a rule classifies a touch violation or blocked Report as `brief`, a partial Report with Blocked items as `environment`, and other failures as `capability`. The Run report, `maestro wait`, the Reminder, and the Solo wake-up give the Cause and the Blocked items.
+Read the Cause and the Lane's Blocked items. Cause `brief` means the Brief excludes required work or contradicts itself; correct the Brief. Cause `environment` means a tool or service was denied, down, or missing; resolve that blocker before you resume. Maestro does not re-Route these Tasks automatically. Cause `capability` can use a stronger Lane. A blocked Report still needs your answer, regardless of its Cause. If Jev is absent, a rule classifies a touch violation or blocked Report as `brief`, a partial Report with Blocked items or a failed Docker pre-flight as `environment`, and other failures as `capability`. A partial Report with Blocked items keeps its Bad result and Cause after a check Stall. A Gate with only a Cause shows `cause <value> (<source>)` in `maestro wait` and `maestro status`; absent scores stay out of the Ledger. The Run report, `maestro wait`, the Reminder, and the Solo wake-up give the Cause and the Blocked items.
 
 Read the item from `maestro wait` and `report.md` when present, then answer once: `maestro resume <run> --task <n> --lane <family[:effort]>`, `--brief <corrected file>`, or `--skip`. A Relay is a Lane's permission prompt: in Solo it wakes you; `maestro wait` returns it and `maestro status` prints the `relay` event. Answer with `maestro answer <task> allow|deny --relay <id>`, with the id from the item or event.
 

@@ -37,6 +37,7 @@ type Retry struct {
 	Attempt  int
 	Reason   string // Failure class or verdict
 	Findings []string
+	Nudge    bool
 }
 
 // Pointer is the one-line prompt every Lane receives.
@@ -99,9 +100,17 @@ func Render(b *Brief, o RenderOpts) string {
 		w.WriteString(ReportShape(o.Access, o.ReportPath, o.ReportByMessage))
 	}
 	if o.Retry != nil {
-		fmt.Fprintf(&w, "\n## Previous attempt\n\nThis is attempt %d. A previous attempt stopped partway (%s). Its changes are in the working tree. Check them, then keep or discard them.\n", o.Retry.Attempt, o.Retry.Reason)
+		if o.Retry.Nudge {
+			fmt.Fprintf(&w, "\n## Previous attempt\n\nThis is attempt %d. The previous attempt's work passed the checks and the gate's verdict was `pass`. Keep that work in the working tree. This gate nudge is for the listed Done items that the gate scored under `0.5`.\n", o.Retry.Attempt)
+		} else {
+			fmt.Fprintf(&w, "\n## Previous attempt\n\nThis is attempt %d. A previous attempt stopped partway (%s). Its changes are in the working tree. Check them, then keep or discard them.\n", o.Retry.Attempt, o.Retry.Reason)
+		}
 		if len(o.Retry.Findings) > 0 {
-			w.WriteString("\nConfirmed findings from the last attempt:\n\n")
+			if o.Retry.Nudge {
+				w.WriteString("\nDone items that the gate scored under `0.5`:\n\n")
+			} else {
+				w.WriteString("\nConfirmed findings from the last attempt:\n\n")
+			}
 			for _, f := range o.Retry.Findings {
 				fmt.Fprintf(&w, "- %s\n", f)
 			}

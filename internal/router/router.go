@@ -160,11 +160,8 @@ func (rt *Router) Route(req Request) (route *Route, err error) {
 		category = "implement"
 		defaults = append(defaults, "category=implement")
 	}
-	estimate, _ := roster.ParseLevel(req.Brief.Level)
+	estimate := levelEstimate(req)
 	level := estimate
-	if req.Level != "" {
-		level = req.Level
-	}
 	if level == "" {
 		level = roster.LevelSome
 		defaults = append(defaults, "level=some")
@@ -585,6 +582,14 @@ func (rt *Router) finish(f *roster.Family, level, estimate roster.Level, categor
 		r.BudgetWarning = "budget reading stale"
 	}
 	return r
+}
+
+func levelEstimate(req Request) roster.Level {
+	if req.Level != "" {
+		return req.Level
+	}
+	estimate, _ := roster.ParseLevel(req.Brief.Level)
+	return estimate
 }
 
 func abs(x int) int {

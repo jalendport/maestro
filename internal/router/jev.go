@@ -150,7 +150,7 @@ func (rt *Router) jevRoute(req Request, cands []*roster.Family, category string,
 		defaults = append(defaults, "Jev pick clamped to allowed Tier "+string(pick.TierFor(useLevel)))
 	}
 
-	estimate, _ := roster.ParseLevel(req.Brief.Level)
+	estimate := levelEstimate(req)
 	r := rt.finish(pick, useLevel, estimate, category, req.Access, "jev", defaults, nil)
 	r.Confidence = conf
 	r.Band = band
@@ -170,8 +170,8 @@ func (rt *Router) jevRoute(req Request, cands []*roster.Family, category string,
 // Orchestrator's estimate, category, and facts. Never diffs or file lists.
 func routeState(req Request) map[string]any {
 	s := map[string]any{"title": req.Brief.Title, "goal": req.Brief.Goal, "done": req.Brief.Done}
-	if req.Brief.Level != "" {
-		s["orchestrator_estimate"] = req.Brief.Level
+	if estimate := levelEstimate(req); estimate != "" {
+		s["orchestrator_estimate"] = string(estimate)
 	}
 	if req.Brief.Category != "" {
 		s["category"] = req.Brief.Category

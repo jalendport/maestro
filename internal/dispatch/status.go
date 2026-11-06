@@ -125,6 +125,10 @@ func Status(rec *Record) string {
 	if rec.Workdir != "" && rec.Workdir != rec.Project {
 		text += fmt.Sprintf("workdir %s\n", rec.Workdir)
 	}
+	var gate Gate
+	if json.Unmarshal(rec.Verification.Gate, &gate) == nil && gate.Verdict == "" && gate.Cause != "" {
+		text += fmt.Sprintf("gate     cause %s (%s)\n", gate.Cause, gate.CauseSource)
+	}
 	return text + RelayEvents(rec)
 }
 

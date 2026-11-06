@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -51,12 +52,41 @@ func (s attemptBaseline) Changed(root string) []string {
 	for _, p := range append(current.Changed(root), s.PriorChanged...) {
 		seen[p] = true
 	}
+	for _, p := range s.PriorChanged {
+		if !s.priorPathChanged(root, p) {
+			delete(seen, p)
+		}
+	}
 	changed := make([]string, 0, len(seen))
 	for p := range seen {
 		changed = append(changed, p)
 	}
 	sort.Strings(changed)
 	return changed
+}
+
+// priorPathChanged compares earlier work with the earliest baseline for the path.
+func (s attemptBaseline) priorPathChanged(root, p string) bool {
+	if before, ok := s.Contents[p]; ok {
+		after, err := os.ReadFile(filepath.Join(root, p))
+		if err != nil && !os.IsNotExist(err) {
+			return true
+		}
+		return (before == nil) != (after == nil) || !bytes.Equal(before, after)
+	}
+	if s.Commit != "" {
+		cmd := exec.Command("git", "-C", root, "-c", "core.fsmonitor=false", "-c", "diff.external=", "diff", "--no-ext-diff", "--no-textconv", "--quiet", s.Commit, "--", p)
+		if err := cmd.Run(); err != nil {
+			return true
+		}
+		if err := exec.Command("git", "-C", root, "cat-file", "-e", s.Commit+":"+p).Run(); err == nil {
+			return false
+		}
+	}
+	// Git diff omits untracked paths. A path absent at the start still
+	// differs when it exists now, including in a repository with no commits.
+	_, err := os.Lstat(filepath.Join(root, p))
+	return !os.IsNotExist(err)
 }
 
 func (s attemptBaseline) diff(root string, changed []string) (string, error) {
@@ -123,8 +153,8 @@ func (s attemptBaseline) diff(root string, changed []string) (string, error) {
 
 // inherit carries the earlier attempts' work into this attempt's baseline.
 // Each path an earlier attempt changed is measured against the tree as it
-// stood before that attempt, and counts as changed even when this attempt
-// leaves it alone, so the gate and the end-of-run Council see the Task's
+// stood before that attempt, and counts as changed while it still differs,
+// so the gate and the end-of-run Council see the Task's
 // whole diff and not the last attempt's slice of it. The earliest attempt
 // wins for a path that several attempts changed.
 func (s *attemptBaseline) inherit(folder string, attempt int) error {

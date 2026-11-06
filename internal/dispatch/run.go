@@ -366,7 +366,7 @@ attempts:
 			break
 		}
 		if len(findings) > 0 {
-			retry = &brief.Retry{Attempt: attempt + 1, Reason: "gate nudge: missing Done items", Findings: findings}
+			retry = &brief.Retry{Attempt: attempt + 1, Reason: "gate nudge: missing Done items", Findings: findings, Nudge: true}
 		} else {
 			ui.Eventf("retry", "task %s  %s: %s; retrying on %s in %s", t.Task, rec.Outcome.FailureClass, ui.FirstLine(rec.Outcome.ErrorText, 0), t.Route.FamilyID, wait)
 			if retry != nil {
@@ -977,7 +977,7 @@ func judge(env *Env, t *Task, rec *Record, report *brief.Report, allChecks []str
 		if !c.OK {
 			failedChecks++
 		}
-		if c.Reason != "" && !c.Skipped {
+		if c.Reason != "" && !c.Skipped && !(report.Status == brief.StatusPartial && len(report.Blocked) > 0) {
 			rec.Outcome.Outcome = OutcomeFailed
 			rec.Outcome.FailureClass = c.FailureClass
 			rec.Outcome.ErrorText = fmt.Sprintf("check failed: %s: %s", c.Command, c.Reason)

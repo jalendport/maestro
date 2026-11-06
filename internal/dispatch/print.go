@@ -79,8 +79,11 @@ func Print(rec *Record, asJSON bool) int {
 		if json.Unmarshal(rec.Verification.Gate, &g) == nil {
 			if g.Skipped != "" {
 				fmt.Fprintf(os.Stdout, "gate     skipped (%s)\n", g.Skipped)
-			} else {
+			} else if g.Verdict != "" {
 				fmt.Fprintf(os.Stdout, "gate     satisfies %.2f  verdict %s  risk %s\n", g.Satisfies, g.Verdict, g.Risk)
+			}
+			if g.Verdict == "" && g.Cause != "" {
+				fmt.Fprintf(os.Stdout, "gate     cause %s (%s)\n", g.Cause, g.CauseSource)
 			}
 		}
 	}

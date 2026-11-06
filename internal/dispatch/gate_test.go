@@ -123,6 +123,7 @@ func TestCollectDiffDoesNotRunConfiguredHelpers(t *testing.T) {
 
 func diffRepo(t *testing.T) string {
 	t.Helper()
+	testGitEnv(t)
 	root := t.TempDir()
 	git := func(args ...string) {
 		t.Helper()

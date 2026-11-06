@@ -23,14 +23,14 @@ const (
 
 // Gate is the Jev verification gate's answer.
 type Gate struct {
-	Satisfies         float64         `json:"satisfies"`
-	Verdict           string          `json:"verdict"`
-	VerdictConfidence float64         `json:"verdict_confidence"`
-	Risk              string          `json:"risk"`
-	RiskConfidence    float64         `json:"risk_confidence"`
-	Model             string          `json:"jev_model"`
-	ElapsedMS         int64           `json:"elapsed_ms"`
-	DiffBytes         int             `json:"diff_bytes"`
+	Satisfies         float64         `json:"satisfies,omitempty"`
+	Verdict           string          `json:"verdict,omitempty"`
+	VerdictConfidence float64         `json:"verdict_confidence,omitempty"`
+	Risk              string          `json:"risk,omitempty"`
+	RiskConfidence    float64         `json:"risk_confidence,omitempty"`
+	Model             string          `json:"jev_model,omitempty"`
+	ElapsedMS         int64           `json:"elapsed_ms,omitempty"`
+	DiffBytes         int             `json:"diff_bytes,omitempty"`
 	Skipped           string          `json:"skipped,omitempty"`
 	Cause             string          `json:"cause,omitempty"`
 	CauseSource       string          `json:"cause_source,omitempty"`
@@ -152,9 +152,13 @@ func ruleCause(rec *Record) string {
 		return CauseBrief
 	case rec.Outcome.Status == brief.StatusPartial && len(rec.Permission.Blocked) > 0:
 		return CauseEnvironment
-	default:
-		return CauseCapability
 	}
+	for _, check := range rec.Verification.Checks {
+		if !check.OK && !check.Skipped && check.Reason == "Docker does not respond" {
+			return CauseEnvironment
+		}
+	}
+	return CauseCapability
 }
 
 func ensureCause(env *Env, t *Task, rec *Record, b *brief.Brief, report *brief.Report, snap attemptBaseline) {

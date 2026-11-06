@@ -1,16 +1,104 @@
 package dispatch
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jalendport/maestro/internal/brief"
 )
+
+func TestInheritedPathLeavesTouchGuardWhenReverted(t *testing.T) {
+	for _, kind := range []string{"tracked", "committed", "dirty tracked", "dirty untracked", "new", "deleted", "no commit"} {
+		for _, reverted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/reverted=%t", kind, reverted), func(t *testing.T) {
+				root, folder := causeRoot(t), t.TempDir()
+				git := func(args ...string) {
+					t.Helper()
+					if out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+						t.Fatalf("git %v: %v %s", args, err, out)
+					}
+				}
+				write := func(text string) {
+					t.Helper()
+					if err := os.WriteFile(filepath.Join(root, "prior.txt"), []byte(text), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if kind != "no commit" {
+					write("committed before\n")
+					git("add", "prior.txt")
+					git("commit", "-qm", "Start")
+				}
+				before := "committed before\n"
+				switch kind {
+				case "dirty tracked", "dirty untracked":
+					before = "dirty before\n"
+					if kind == "dirty untracked" {
+						git("rm", "prior.txt")
+						git("commit", "-qm", "Remove")
+					}
+					write(before)
+				case "new":
+					git("rm", "prior.txt")
+					git("commit", "-qm", "Remove")
+				}
+				_, err := takeBaseline(root, folder)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if kind == "deleted" {
+					if err := os.Remove(filepath.Join(root, "prior.txt")); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					write("earlier attempt\n")
+				}
+				if kind == "committed" {
+					git("add", "prior.txt")
+					git("commit", "-qm", "Earlier attempt")
+				}
+				if err := (&Record{Path: folder, Attempt: 1, Verification: Verification{Changed: []string{"prior.txt"}}}).Save(); err != nil {
+					t.Fatal(err)
+				}
+				archiveAttempt(folder, 1)
+				snap, err := takeBaseline(root, folder)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := snap.inherit(folder, 2); err != nil {
+					t.Fatal(err)
+				}
+				if reverted {
+					if kind == "new" || kind == "no commit" {
+						if err := os.Remove(filepath.Join(root, "prior.txt")); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						write(before)
+					}
+				}
+				rec := &Record{}
+				recordChanges(&Task{Project: root, Access: brief.AccessEdit, Touch: []string{"allowed.txt"}}, rec, snap)
+				want := []string{"prior.txt"}
+				if reverted {
+					want = []string{}
+				}
+				if !reflect.DeepEqual(snap.Changed(root), want) || len(rec.Verification.Changed) != len(want) || len(rec.Verification.TouchViolations) != len(want) {
+					t.Fatalf("changed=%v verification=%+v want=%v", snap.Changed(root), rec.Verification, want)
+				}
+			})
+		}
+	}
+}
 
 func TestInheritCarriesEarlierAttemptsIntoTheBaseline(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
+	testGitEnv(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not on PATH")
 	}
@@ -131,6 +219,7 @@ func TestAttemptDiffDoesNotRunConfiguredHelpers(t *testing.T) {
 
 func TestInheritKeepsTheEmptyCommitOfAnUncommittedStart(t *testing.T) {
 	t.Setenv("MAESTRO_HOME", t.TempDir())
+	testGitEnv(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not on PATH")
 	}
