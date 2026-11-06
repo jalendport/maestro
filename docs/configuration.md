@@ -204,6 +204,10 @@ The hook is the set of `maestro hook` entries that each Adapter installs in a Ha
 
 For a Reminder in scope, the hook compares the installed skill and Grok rules with the text in the binary. If either differs, it adds `Adapter stale (<harnesses>): run maestro adapter install` with each stale Harness's name. Claude Code, Codex, and Antigravity all receive this line, including when only Grok's rules are stale. The check reads local files and makes no network call. Run `maestro adapter install` to update the files and clear the line. Grok has no Reminder event; use `maestro doctor` there. Missing or unreadable files remain checks for `maestro doctor`.
 
+Inside hook scope, the Orchestrator gets a Reminder on every prompt in Claude Code and Codex, and before every model call in Antigravity. Its fixed text comes first, then the stale Adapter line when needed. Each live item of the project follows on its own line: an open Relay with its Task, tool, input, and answer command; a paused Run with its reason and resume command; a blocked or failed Task of a live Run; or a running Lane with its Task, Family, effort, and elapsed time. The hook reads local Run and control folders, with no Solo or network call. It uses the same project root as the CLI, including from a nested git folder. It leaves out a live Run or running Dispatch whose process is gone; `maestro status` marks it `stale (process gone)`. With no live items or stale Adapter, it sends only the fixed text.
+
+In Grok, the rules file loads at the start of each session and states the scope condition in words, so there the scope is best-effort. A Grok Orchestrator does not get the live items through the Reminder; use `maestro status` to read them.
+
 #### Read-only commands
 
 The hook's read-only command list is the baseline for every project. It serves Go, Node, PHP, Python, Rust, and Docker projects. These commands need no project `allow` entry. A command's write or execution forms are denied even when a check or `allow` entry names the command.
@@ -244,7 +248,7 @@ This list does not grant shell loops, command substitution, redirects, or a pipe
 
 ### [router]
 
-The Router makes the Routes. The backend is Jev or the rules table, and Maestro uses the rules table when Jev is absent or sure of nothing.
+The Router makes the Routes. The backend is Jev or the rules table, and Maestro uses the rules table when Jev is absent or sure of nothing. Without a Jev key the rules table routes every Task, and edit Tasks end `unverified`; the Orchestrator reads the diff.
 
 Jev's Judgment level sets the Task's Tier. The Brief's `level` is the Orchestrator's estimate. `maestro dispatch --level` and `maestro run --level` replace that estimate when set. The estimate goes to Jev as context and never raises Jev's score or limits its pick. The rules table uses the estimate when Jev is absent or below the confidence floor. Only a Brief's `floor:` and `ceiling:`, or `maestro run --floor` and `--ceiling`, set hard Tier bounds. An edit never goes Light. When Jev's score is below the estimate, the Reason line says, for example, `jev some, orchestrator estimated expert`. The Route record keeps both values. The Orchestrator writes the `level` it believes and does not raise it or name a Lane to reach a stronger Lane, because Maestro uses a Frontier Lane when the work calls for it.
 
@@ -313,7 +317,7 @@ The Ledger stores `cause` and `cause_source` (`jev` or `rule`) under `verificati
 | `run_pause_after_escalations` | integer | `3` | Sets the number of consecutive Task hand-offs to the Orchestrator that pauses a Run; a completed Task resets the count. Maestro prints the count and Task number; running Dispatches finish, and no new Dispatch starts. |
 | `run_pause_after_same_error` | integer | `2` | Sets the number of Task hand-offs with the same first error line that pauses a Run; the count accumulates until the Run resumes. Maestro prints the count, Task number, and error; running Dispatches finish, and no new Dispatch starts. |
 
-With `keep_awake = true`, each Maestro process shares one `caffeinate -i -s -w <pid>` while it works or waits on live work. This includes `maestro wait` for a Dispatch, Run, or Council, the `--wait` paths, the Relay verb, and a hook that waits for a Relay answer. `-i` prevents idle sleep on battery and AC power; `-s` also prevents system sleep on AC power. The process releases its assertion when the work or wait ends. This does not prevent display sleep.
+With `keep_awake = true`, each Maestro process shares one `caffeinate -i -s -w <pid>` while it works or waits on live work. This includes `maestro wait` for a Dispatch, Run, or Council, the `--wait` paths, the Relay verb, and a hook that waits for a Relay answer. `-i` prevents idle sleep on battery and AC power; `-s` also prevents system sleep on AC power. The process releases its assertion when the work or wait ends. This does not prevent display sleep. Keep-awake and the end-of-run notice are macOS only; on Linux they do nothing.
 
 In hook scope, a Reminder event also starts a detached `caffeinate -i -s -w <orchestrator pid> -t 1800`. The hook writes the Reminder and reads its parent's pid and start time through the OS, with no `ps` call. If that parent is a known shell, the hook reads the shell's parent before it returns. It passes the pid and start time to a detached worker. The worker checks that the pid still has the same start time, then finds the nearest ancestor whose executable matches a configured Harness binary and writes the lease record. If the parent is gone or its start time changed, the worker writes one line to `~/.maestro/control/awake/worker.log` and exits. It does nothing when no ancestor matches. Reminder and Stop events do no sleep-control work when `keep_awake = false`, outside hook scope, or in a Lane. Each later Reminder event replaces the same process's caffeinate and refreshes its 30-minute lease. The record is `~/.maestro/control/awake/<pid>`. Each worker removes records for Orchestrator processes that have ended.
 
@@ -536,3 +540,95 @@ Maestro rejects a Ledger row with no `kind`. It drops Budget Accounts that are a
 | `~/.maestro/runs/` | `maestro run` writes one index file for each live Run. |
 | `.agents/maestro/runs/` | `maestro dispatch` and `maestro run` write one Run folder for each Run. |
 | `.agents/maestro/councils/` | `maestro council` writes one folder for each Council. |
+
+Maestro writes a `.gitignore` into each Run and Council folder it creates, so nothing under them reaches git.
+
+## Adapters
+
+`maestro adapter` prints the steps for each Harness and writes nothing. `maestro adapter install` does the steps. Maestro touches nothing else in the configuration of a Harness. To connect one Harness only, give its name: `maestro adapter install claude`. The names are `claude`, `codex`, `grok`, and `agy`. For the stale Adapter line in the Reminder, see [hook](#hook).
+
+### Claude Code
+
+Every Claude Lane ignores the user, project, and local settings files. `CLAUDE.md` still loads. Maestro supplies the Lane hook and sandbox settings at launch. A Claude edit Lane runs shell commands in the Claude sandbox: writes stay in the project, the Run folder, the project's `dirs`, and the per-user temp directory. Shell commands have no outbound network, so a check that must download something fails inside a Claude Lane. Caches already on disk are readable; a check that writes a cache needs that cache in `dirs`. A shell command that names a network host is denied without a prompt in every Claude Lane (`sandbox.network.strictAllowlist`, Claude Code 2.1.219 or later); a check that needs a module download must find it in the caches first. `claude_auto = true` makes Claude edit Lanes `best-effort`: Claude's own classifier decides whether to allow a command outside the allow list.
+
+The hook probe in the README denies only where the hook is in scope: with the default `[hook] scope = "projects"` that is inside a project that has `.agents/maestro.toml`, and `scope = "all"` in `~/.maestro/config.toml` makes it global.
+
+### Codex
+
+The Codex sandbox holds the Access of a Codex Lane. A Codex Lane does not relay; see [Relay](#relay).
+
+### Grok
+
+Grok takes read and edit work. Headless Grok runs with full tool access. A Grok Lane runs in always-approve mode and never prompts. The Maestro hook is the policy: it runs before every tool call and denies what the Lane may not do, and the workspace sandbox backs it at the kernel level:
+
+- A read Lane runs the built-in read-only commands and writes only its Report in the Run folder
+- An edit Lane also runs the checks and the project `allow` list, and writes inside the project, the Run folder, and the extra `dirs`; the workspace sandbox also permits writes to temp directories and `~/.grok`
+- Grok never relays: a command outside the allow list is denied; add it to `checks` or the project `allow` list
+
+The hook's [read-only command list](#read-only-commands) is the baseline for every project. It includes text and file commands, version control reads, and version and listing forms for Go, Node, PHP, Python, and Docker. Tests, builds, formatters, and installs need project `checks` or `allow` entries.
+
+The hook judges a command as written. It denies shell expansion with `$`, a backquote, or an unquoted `(`, `{`, or `}` in a read-only command. A glob is allowed after a fixed prefix, as in `grep -r --include=*.go x .` and `ls ./*_test.go`; a glob that can match a file name that starts with `-`, such as a bare `*`, is denied. It removes leading `env` words and assignments to a [short list of harmless environment names](#agentsmaestrotoml) before it matches a command. Other assignments are denied in a read Lane. An edit Lane needs a check or `allow` entry for the full command, or uses Relay where its Harness supports Relay. `composer show` requires `--no-plugins`; npm, pnpm, Yarn, cargo, and rustc forms that can select a project toolchain are outside the baseline list. The sandbox is the boundary that holds a shell; the hook is the second line that holds paths, tool names, and the command list.
+
+Grok Lanes run under `--sandbox workspace` when every writable directory is inside the project. For edit Lanes, this includes `dirs`. If a directory lies outside the project, as this repository's Go caches do, the Grok edit Lane runs without the sandbox and its Route is `best-effort`. A read Lane does not use the extra edit `dirs`.
+
+The hook first tries to record its judgment in the control folder under `~/.maestro`. The Grok workspace sandbox permits this record only inside the project, so the hook uses the Task's Run folder when the control write fails. The Canary reads both places and names the place in its hook result.
+
+Maestro cannot detect three limits. Grok warns and continues without the kernel sandbox when the OS refuses a built-in profile. Maestro finds a Grok Lane through the `transcriptPath` key in the hook payload; a Grok release that drops the key leaves the Lane under the Orchestrator rule. A check that runs Lane-written code under the Grok workspace sandbox can write `~/.grok`, Grok's own home. Grok's `hashline` file toolset is not supported in a Lane: its write tools are denied as unknown.
+
+### Antigravity
+
+Antigravity takes read and edit work, like the other Harnesses. The Maestro hook entry carries each Lane's permissions:
+
+- A read Lane runs read-only commands and returns its Report in its final message; Maestro saves the `response` text as `result.md` in the Run folder
+- An edit Lane also runs commands on the checks and `allow` lists, and writes inside the project, the Run folder, and the extra `dirs`
+- An edit Lane relays other commands; a read Lane denies them
+
+Antigravity has no kernel sandbox, so the hook is the only boundary of an Antigravity Lane. It judges a command as written: a read-only command with `$`, a backquote, or an unquoted `(`, `{`, or `}` is denied; a glob needs a fixed prefix, as in `ls ./*_test.go`.
+
+## Doctor and Canary
+
+`maestro doctor` shows the stored Canary result for each installed Harness version and starts no Dispatch. Run `maestro doctor --canary` to check every installed Harness, or `maestro doctor --canary codex` to check one. Each Canary uses your Account for one small read Dispatch with the cheapest enabled Family. It runs in a scratch folder. Maestro removes that folder after a pass. After a fail, it keeps the files under `~/.maestro/cache/maestro-canary-<harness>`, and the doctor line gives the path. The next Canary for the same Harness removes those files first.
+
+A pass needs a process that starts and ends with no error, a Lane tool call judged by the Maestro hook, and a Report with a valid Status line. For Codex, the hook part does not apply: the Codex sandbox holds Access, and a pass needs only the process and Report parts. Maestro stores the version, time, and all three parts; an older version's pass does not count for an update.
+
+The hook result names the control folder or the Run folder where it found the record. The Lane can write a record in the Run folder, so that record checks for a broken Harness and does not prove the Lane is safe. The Canary uses only its Wall limit. Canary Dispatches have `canary: true` in the Ledger and do not count in Route statistics. A Canary runs only when you request it.
+
+## Solo
+
+Every Lane runs as a headless child process. Inside Solo, Maestro creates todos, adds Report and Merge comments, and sends wake-ups.
+
+Maestro wakes the Orchestrator once for each item that needs it:
+
+- A Relay opens: `maestro answer <task> allow|deny --relay <id>`.
+- A Run pauses: `maestro resume <run> --task <n> (--lane <family[:effort]> | --brief <file> | --skip)`.
+- A single Dispatch ends failed, blocked, timed out, or with an unshaped Report: `maestro wait <task>`.
+- A Run ends: `maestro wait <run>`.
+
+Each wake-up gives the same next command as `maestro wait`. An item resolved during the wake-up delay sends no wake-up. A Task of a Run uses the Run's pause or end wake-up. A single Dispatch that ends verified, answered, or unverified with a shaped Report sends no wake-up.
+
+With a Solo link, Maestro passes Solo's MCP server to a Claude Lane through `--mcp-config`. Read and edit Lanes get the same read-only set, which also permits a todo comment:
+
+- `mcp__solo__list_processes`
+- `mcp__solo__get_process_status`
+- `mcp__solo__get_process_output`
+- `mcp__solo__search_output`
+- `mcp__solo__get_process_ports`
+- `mcp__solo__todo_comment_create`
+
+The Brief gives the Solo project id. Each Solo tool call needs this id in `project_id`. A Claude Lane can read dev server or test watcher output and add a todo comment. Other Solo tools are denied without a Relay. A Lane has no Solo identity, so Solo could treat its action as an action of the Orchestrator. All `SOLO_` variables stay removed. With no Solo link, a Claude Lane gets no MCP config. Other Harnesses and the Canary get no Solo MCP tools.
+
+## Verbs
+
+### Wait
+
+`maestro wait <task|run>` returns with exit code `2` as soon as a Relay opens, a Run pauses, or a Task of a Run is blocked or failed and waits for the Orchestrator. It prints the item, the reason, and the next `maestro answer` or `maestro resume` command. Relay input in the reason and in the Reminder is limited to 300 characters. Answer, then use `maestro wait` with the same id to continue. Answered or resolved items do not stop it again. At the end, `wait` prints the report and returns the outcome's exit code. For an early return, `--json` prints one object with `kind`, `run` or `task`, and `next_command`. A failed Task has the kind `task_failed`. A paused Run also gives the path to `report.md`, in text and in the JSON field `report_path`.
+
+### Exit codes
+
+`0` ok, `1` failed, `2` needs the Orchestrator (an open Relay, a held breakdown, a paused Run, a blocked or failed Task, or a single-opinion Council). A Run that holds for approval exits with `2`; the hold rules are under [run](#run). `--json` prints one object per verb.
+
+### Relay
+
+Answer a Relay with `maestro answer <task> allow|deny --relay <id>`. Use the id from the `relay` event printed by `maestro wait` or `maestro status`.
+
+Claude and Antigravity edit Lanes relay commands outside the allow list. Read Lanes, Grok Lanes, and Codex Lanes do not relay. An open Relay pauses the Idle limit and the Wall limit; an unanswered Relay is denied after 10 minutes and the Lane continues. Antigravity edit Lanes use Maestro's limits with no vendor print timeout.
