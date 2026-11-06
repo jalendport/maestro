@@ -48,3 +48,20 @@ func TestAncestorResolvesConfiguredSymlink(t *testing.T) {
 		t.Fatalf("ancestor = %d", got)
 	}
 }
+
+func TestSnapshotProcessIdentity(t *testing.T) {
+	p, err := SnapshotProcess(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Parent != os.Getppid() || p.Executable == "" || p.Started == "" {
+		t.Fatalf("process identity = %+v", p)
+	}
+	again, err := SnapshotProcess(os.Getpid())
+	if err != nil || again.Started != p.Started {
+		t.Fatalf("process start time changed: %+v, %v", again, err)
+	}
+	if _, err := SnapshotProcess(1 << 30); err == nil {
+		t.Fatal("missing process returned an identity")
+	}
+}

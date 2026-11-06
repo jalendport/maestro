@@ -52,23 +52,38 @@ func OrchestratorPID(r *roster.Roster, parent int, lookup func(int) (proc.Proces
 // QueueAwake starts a detached worker after the Reminder is written. It does
 // not wait for a control lock or a caffeinate process.
 func QueueAwake(r *roster.Roster, event string) {
-	queueAwake(r, event, os.Getppid(), detachAwake)
+	queueAwake(r, event, os.Getppid(), proc.SnapshotProcess, detachAwake)
 }
 
-func queueAwake(r *roster.Roster, event string, parent int, start func(string, int, int64)) {
+func queueAwake(r *roster.Roster, event string, parent int, lookup func(int) (proc.Process, error), start func(string, int, string, int64)) {
 	at := time.Now().UnixNano()
 	if r == nil || !r.KeepAwake() {
 		return
 	}
-	start(event, parent, at)
+	seen := map[int]bool{}
+	for parent > 1 && !seen[parent] {
+		seen[parent] = true
+		p, err := lookup(parent)
+		if err != nil || p.Started == "" {
+			logAwakeParent(parent)
+			return
+		}
+		switch filepath.Base(p.Executable) {
+		case "sh", "bash", "zsh", "dash", "ksh", "fish":
+			parent = p.Parent
+		default:
+			start(event, parent, p.Started, at)
+			return
+		}
+	}
 }
 
-func detachAwake(event string, pid int, at int64) {
+func detachAwake(event string, pid int, started string, at int64) {
 	exe, err := os.Executable()
 	if err != nil {
 		return
 	}
-	cmd := exec.Command(exe, "hook", "awake", event, strconv.Itoa(pid), strconv.FormatInt(at, 10))
+	cmd := exec.Command(exe, "hook", "awake", event, strconv.Itoa(pid), started, strconv.FormatInt(at, 10))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if cmd.Start() == nil {
 		go cmd.Wait()
@@ -76,17 +91,34 @@ func detachAwake(event string, pid int, at int64) {
 }
 
 // TurnAwake finds the Orchestrator and updates its lease in the detached worker.
-func TurnAwake(r *roster.Roster, parent int, event string, at int64) {
-	turnAwake(r, parent, event, at, proc.LookupProcess)
+func TurnAwake(r *roster.Roster, parent int, started string, event string, at int64) {
+	turnAwake(r, parent, started, event, at, proc.LookupProcess)
 }
 
-func turnAwake(r *roster.Roster, parent int, event string, at int64, lookup func(int) (proc.Process, error)) {
+func turnAwake(r *roster.Roster, parent int, started string, event string, at int64, lookup func(int) (proc.Process, error)) {
 	_ = PruneAwake(config.Home())
 	if r == nil || !r.KeepAwake() {
 		return
 	}
+	p, err := lookup(parent)
+	if err != nil || started == "" || p.Started != started {
+		logAwakeParent(parent)
+		return
+	}
 	pid := OrchestratorPID(r, parent, lookup)
 	updateAwake(pid, event, true, at)
+}
+
+func logAwakeParent(pid int) {
+	dir := filepath.Join(config.Home(), "control", "awake")
+	if os.MkdirAll(dir, 0o700) != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "worker.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err == nil {
+		defer f.Close()
+		_, _ = f.WriteString("awake: parent " + strconv.Itoa(pid) + " is gone or its start time changed\n")
+	}
 }
 
 // PruneAwake removes lease records for Orchestrator processes that have ended.

@@ -148,21 +148,21 @@ func (a *app) hookCommand(awake func(*roster.Roster, string)) *cobra.Command {
 		},
 	}
 	c.AddCommand(&cobra.Command{
-		Use:    "awake <reminder|stop> <pid> <event-time>",
+		Use:    "awake <reminder|stop> <pid> <start-time> <event-time>",
 		Hidden: true,
-		Args:   cobra.ExactArgs(3),
+		Args:   cobra.ExactArgs(4),
 		RunE: func(_ *cobra.Command, args []string) error {
 			pid, err := strconv.Atoi(args[1])
 			if err != nil {
 				return nil
 			}
-			at, err := strconv.ParseInt(args[2], 10, 64)
+			at, err := strconv.ParseInt(args[3], 10, 64)
 			if err != nil {
 				return nil
 			}
 			r, err := roster.Load()
 			if err == nil {
-				hook.TurnAwake(r, pid, args[0], at)
+				hook.TurnAwake(r, pid, args[2], args[0], at)
 			}
 			return nil
 		},

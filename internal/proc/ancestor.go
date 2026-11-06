@@ -13,10 +13,15 @@ import (
 type Process struct {
 	Parent     int
 	Executable string
+	Started    string
 }
 
 // LookupProcess reads the parent pid and executable without starting a Harness.
 func LookupProcess(pid int) (Process, error) {
+	identity, err := SnapshotProcess(pid)
+	if err != nil {
+		return Process{}, err
+	}
 	out, err := exec.Command("/bin/ps", "-p", strconv.Itoa(pid), "-o", "ppid=", "-o", "comm=").Output()
 	if err != nil {
 		return Process{}, err
@@ -34,7 +39,7 @@ func LookupProcess(pid int) (Process, error) {
 	if path, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
 		executable = path
 	}
-	return Process{Parent: ppid, Executable: strings.TrimSpace(executable)}, nil
+	return Process{Parent: ppid, Executable: strings.TrimSpace(executable), Started: identity.Started}, nil
 }
 
 // Ancestor returns the nearest process whose executable is one of bins.

@@ -50,9 +50,9 @@ func awakeFixture(t *testing.T) (*roster.Roster, string) {
 func awakeLookup(r *roster.Roster) func(int) (proc.Process, error) {
 	return func(pid int) (proc.Process, error) {
 		if pid == 99 {
-			return proc.Process{Parent: os.Getpid(), Executable: "/bin/sh"}, nil
+			return proc.Process{Parent: os.Getpid(), Executable: "/bin/sh", Started: "shell-start"}, nil
 		}
-		return proc.Process{Parent: 1, Executable: r.Harness["codex"].Bin}, nil
+		return proc.Process{Parent: 1, Executable: r.Harness["codex"].Bin, Started: "harness-start"}, nil
 	}
 }
 
@@ -104,11 +104,13 @@ func awakeStarts(t *testing.T, path string, count int) {
 
 func TestReminderAwakeRefreshAndStop(t *testing.T) {
 	r, log := awakeFixture(t)
-	start := func(event string, parent int, at int64) { turnAwake(r, parent, event, at, awakeLookup(r)) }
-	queueAwake(r, "reminder", 99, start)
+	start := func(event string, parent int, started string, at int64) {
+		turnAwake(r, parent, started, event, at, awakeLookup(r))
+	}
+	queueAwake(r, "reminder", 99, awakeLookup(r), start)
 	awakeStarts(t, log, 1)
 	first := awakeRecord(t)
-	queueAwake(r, "reminder", 99, start)
+	queueAwake(r, "reminder", 99, awakeLookup(r), start)
 	awakeStarts(t, log, 2)
 	second := awakeRecord(t)
 	if first == second {
@@ -123,7 +125,7 @@ func TestReminderAwakeRefreshAndStop(t *testing.T) {
 	if err != nil || call.Event != "stop" {
 		t.Fatalf("Stop = %+v, %v", call, err)
 	}
-	queueAwake(r, call.Event, 99, start)
+	queueAwake(r, call.Event, 99, awakeLookup(r), start)
 	waitAwakeState(t, func() bool { return !proc.Alive(second) })
 	if got := awakeRecord(t); got != 0 {
 		t.Fatalf("Stop kept a caffeinate pid: %d", got)
@@ -135,14 +137,14 @@ func TestReminderAwakeOffAndNoAncestor(t *testing.T) {
 	off := false
 	r.Failure.KeepAwake = &off
 	called := false
-	start := func(string, int, int64) { called = true }
-	queueAwake(r, "reminder", 99, start)
+	start := func(string, int, string, int64) { called = true }
+	queueAwake(r, "reminder", 99, awakeLookup(r), start)
 	if called {
 		t.Fatal("keep_awake=false queued work")
 	}
 	r.Failure.KeepAwake = nil
-	turnAwake(r, 99, "reminder", time.Now().UnixNano(), func(int) (proc.Process, error) {
-		return proc.Process{Parent: 1, Executable: "/other/program"}, nil
+	turnAwake(r, 99, "other-start", "reminder", time.Now().UnixNano(), func(int) (proc.Process, error) {
+		return proc.Process{Parent: 1, Executable: "/other/program", Started: "other-start"}, nil
 	})
 	updateAwake(os.Getpid(), "reminder", false, time.Now().UnixNano())
 	if _, err := os.Stat(log); !os.IsNotExist(err) {
@@ -150,29 +152,84 @@ func TestReminderAwakeOffAndNoAncestor(t *testing.T) {
 	}
 }
 
-func TestQueueAwakeLeavesProcessWalkAndRecordToWorker(t *testing.T) {
+func TestQueueAwakeResolvesShellBeforeWorker(t *testing.T) {
 	r, log := awakeFixture(t)
 	var event string
 	var parent int
+	var started string
 	var at int64
-	queueAwake(r, "reminder", 99, func(e string, p int, timestamp int64) {
-		event, parent, at = e, p, timestamp
+	queueAwake(r, "reminder", 99, awakeLookup(r), func(e string, p int, s string, timestamp int64) {
+		event, parent, started, at = e, p, s, timestamp
 	})
-	if parent != 99 || event != "reminder" || at == 0 {
+	if parent != os.Getpid() || started != "harness-start" || event != "reminder" || at == 0 {
 		t.Fatalf("worker arguments = %s, %d, %d", event, parent, at)
 	}
 	if _, err := os.Stat(filepath.Join(config.Home(), "control", "awake")); !os.IsNotExist(err) {
 		t.Fatalf("hook wrote lease state before the worker: %v", err)
 	}
 	lookups := 0
-	turnAwake(r, parent, event, at, func(pid int) (proc.Process, error) {
+	turnAwake(r, parent, started, event, at, func(pid int) (proc.Process, error) {
 		lookups++
+		if pid == 99 {
+			return proc.Process{}, fmt.Errorf("shell is gone")
+		}
 		return awakeLookup(r)(pid)
 	})
 	if lookups != 2 {
 		t.Fatalf("worker process lookups = %d, want 2", lookups)
 	}
 	awakeStarts(t, log, 1)
+}
+
+func TestTurnAwakeRejectsChangedOrMissingParent(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(strconv.FormatBool(missing), func(t *testing.T) {
+			r, log := awakeFixture(t)
+			turnAwake(r, 99, "old-start", "reminder", time.Now().UnixNano(), func(int) (proc.Process, error) {
+				if missing {
+					return proc.Process{}, fmt.Errorf("parent is gone")
+				}
+				return proc.Process{Parent: 1, Executable: r.Harness["codex"].Bin, Started: "new-start"}, nil
+			})
+			dir := filepath.Join(config.Home(), "control", "awake")
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 1 || entries[0].Name() != "worker.log" {
+				t.Fatalf("worker wrote a lease record: %v", entries)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "worker.log"))
+			if err != nil || strings.Count(string(data), "\n") != 1 || !strings.Contains(string(data), "parent 99") {
+				t.Fatalf("worker log = %q, %v", data, err)
+			}
+			if _, err := os.Stat(log); !os.IsNotExist(err) {
+				t.Fatalf("worker started caffeinate: %v", err)
+			}
+		})
+	}
+}
+
+func TestQueueAwakeMakesNoPSCall(t *testing.T) {
+	r, _ := awakeFixture(t)
+	processStarted = func(int) string {
+		t.Fatal("hook called the ps start-time reader")
+		return ""
+	}
+	want, err := proc.SnapshotProcess(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	queueAwake(r, "reminder", os.Getpid(), proc.SnapshotProcess, func(event string, pid int, started string, at int64) {
+		called = true
+		if pid != os.Getpid() || started != want.Started || event != "reminder" || at == 0 {
+			t.Fatalf("worker identity = %d, %q, %s, %d", pid, started, event, at)
+		}
+	})
+	if !called {
+		t.Fatal("hook did not queue the worker")
+	}
 }
 
 func TestTurnAwakePrunesDeadOrchestratorRecords(t *testing.T) {
@@ -198,8 +255,8 @@ func TestTurnAwakePrunesDeadOrchestratorRecords(t *testing.T) {
 		}
 	}
 	// Prune even when no ancestor matches this worker's parent.
-	turnAwake(r, 99, "stop", time.Now().UnixNano(), func(int) (proc.Process, error) {
-		return proc.Process{Parent: 1, Executable: "/other/program"}, nil
+	turnAwake(r, 99, "other-start", "stop", time.Now().UnixNano(), func(int) (proc.Process, error) {
+		return proc.Process{Parent: 1, Executable: "/other/program", Started: "other-start"}, nil
 	})
 	if _, err := os.Stat(deadPath); !os.IsNotExist(err) {
 		t.Fatalf("dead Orchestrator record remains: %v", err)
