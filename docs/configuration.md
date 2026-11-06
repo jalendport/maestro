@@ -354,11 +354,11 @@ Fold any Council findings into the Plan file, then use `maestro approve <run>`. 
 
 ## Worktrees
 
-A Run uses Worktree mode when Worktrees are on, the repository has a commit, the tree is clean, and the Plan has more than one edit Task. The mode is recorded once for the Run. Other Runs use tree mode, where an edit Task waits with `tree busy`. In Worktree mode, Tasks with files that overlap wait in Plan order with `files overlap with <n>`; Routes and status show `after <n> (files overlap)`. A Task whose `touch` can write a shared dependency folder uses the tree, one at a time, and status names the folder.
+A Run uses Worktree mode when Worktrees are on, the repository has a commit, the tree is clean, and the Plan has more than one edit Task. The mode is recorded once for the Run. Other Runs use tree mode, where an edit Task waits with `tree busy`. In Worktree mode, Tasks with files that overlap wait in Plan order with `files overlap with <n>`; Routes and status show `after <n> (files overlap)`. If an edit Task's `touch` names a shared dependency folder or a path inside it, the Run starts in tree mode with the reason `task <n> touches <folder>`. A detached HEAD requires tree mode with the reason `HEAD is not on a branch`. Maestro does not check out a Task branch in the project tree.
 
 Lanes never commit. Maestro commits a verified edit Task after the gate, or an unverified edit Task with a Report and changed files. In Worktree mode, Maestro merges each Task into the Run branch. The Plan's `commit: true` keeps those commits when the Run lands on the user's branch; `commit: false` leaves the changes uncommitted. In tree mode, Maestro commits only a Task with `commit: true`.
 
-Worktrees live under `~/.maestro/worktrees/<project-key>/<run>/<task>/`. The Run branch is `maestro/<run>/run`; each Task branch is `maestro/<run>/<task>`. Maestro links existing ignored dependency folders from the project: `node_modules`, `vendor`, `.venv`, `.bundle`, and `storage/framework`. A folder that a Task's `touch` can write stays unlinked; that Task uses the tree one at a time.
+Worktrees live under `~/.maestro/worktrees/<project-key>/<run>/<task>/`. The Run branch is `maestro/<run>/run`; each Task branch is `maestro/<run>/<task>`. Maestro links existing ignored dependency folders from the project: `node_modules`, `vendor`, `.venv`, `.bundle`, and `storage/framework`. Before it makes each link, Maestro adds the folder name to the exclusion file that `git rev-parse --git-path info/exclude` returns for the Worktree. This keeps a link ignored when the project rule has a trailing slash, such as `node_modules/`. A folder stays unlinked only when `touch` names the folder or a path inside it, such as `node_modules/**`. No `touch`, an empty list, or a general pattern such as `**` permits the link.
 
 Each commit keeps the user as its git author. The commit message comes from `[commit] message` in `~/.maestro/config.toml`. A project `commit_message` in `.agents/maestro.toml` replaces it. The default is:
 
@@ -384,6 +384,8 @@ For example, this template adds a prefix and the Report summary, with no trailer
 message = "feat: {title}\n\n{summary}"
 ```
 
+After Maestro fills the template, it removes each line that a value made empty. It keeps one blank line where the template has blank lines, and it removes blank lines at the end. Thus, an empty Summary leaves no extra blank line and no trailing newline.
+
 `[commit.identities]` in `~/.maestro/config.toml` replaces `{lane}` by Family prefix. Each value is the full identity text. With no override, Maestro uses these identities:
 
 | Family prefix | Default identity |
@@ -398,11 +400,13 @@ message = "feat: {title}\n\n{summary}"
 codex = "Build assistant <assistant@example.com>"
 ```
 
-A merge conflict gets one more attempt in the same Worktree. Maestro starts the rebase onto the Run branch, the Lane edits the conflicted files, and Maestro continues the rebase after the checks and the gate. A second conflict, a conflict marker that stays in a file, or a failed attempt blocks the Task with `merge conflict in <paths>` and keeps its Worktree. To fix it by hand, rebase the Task branch onto the Run branch in that Worktree, resolve the conflicts, and complete the rebase; then `maestro resume <run> --task <n> --merge` retries the merge with no new Lane. If landing fails, the Run pauses with the error and `maestro resume <run> --finish` retries it. When the user's branch moved, rebase the Run branch onto the user's branch, or reset the user's branch to the base, before you retry. A cancelled Run removes its Worktrees and keeps the Run branch named in its report. A failed or paused Run keeps its Worktrees and branches until resume or cleanup.
+A merge conflict gets one more attempt in the same Worktree. Maestro starts the rebase onto the Run branch, the Lane edits the conflicted files, and Maestro continues the rebase after the checks and the gate. A second conflict, a conflict marker that stays in a file, or a failed attempt blocks the Task with `merge conflict in <paths>` and keeps its Worktree. To fix it by hand, rebase the Task branch onto the Run branch in that Worktree, resolve the conflicts, and complete the rebase; then `maestro resume <run> --task <n> --merge` retries the merge with no new Lane. After a successful rebase, Maestro removes the Worktree with `--force`, deletes the Task branch, and updates the Run branch only if its old head still matches. A cleanup failure keeps the Task branch for a retry.
+
+If landing fails, the Run pauses with the failed Finish step in the error, and `maestro resume <run> --finish` retries it. Finish is idempotent: it skips a merge that already landed and continues cleanup. After a squash, it continues the reset or removal step. It requires a clean user tree only before the merge step. When the user's branch moved, rebase the Run branch onto the user's branch, or reset the user's branch to the base, before you retry. A cancelled Run removes its Worktrees. Removal deletes the Run and Task branches only when the Run branch is an ancestor of the user's branch or the Run state is `finished`. When only the Run branch is an ancestor, removal also keeps each Task branch that is not an ancestor of the user's branch, because that Task branch has work that did not land. Otherwise, it keeps every branch. Removal returns the names of the kept branches for the Run report. A failed or paused Run keeps its Worktrees and branches until resume or cleanup.
 
 Worktrees are on by default. To turn them off for every project, set `[run] worktrees = false` in `~/.maestro/config.toml`. To turn them off for one project, set `worktrees = false` in `.agents/maestro.toml`. The project key cannot turn Worktrees on when the global key is off.
 
-`maestro doctor` prints `worktrees on` or `worktrees off (<where>)`, the dependency folders it would link, and a warning when the tree has uncommitted changes: `Runs use the tree one Task at a time until you commit or stash`. `maestro clean --older-than 30d` removes the Worktrees and branches of Runs that ended before that age and reports the number of Run folders removed with the other removed folders. It keeps live Runs.
+`maestro doctor` prints `worktrees on` or `worktrees off (<where>)`, the dependency folders it would link, and a warning when the tree has uncommitted changes: `Runs use the tree one Task at a time until you commit or stash`. `maestro clean --older-than 30d` removes old Worktrees and Run folders, and applies the branch removal rule above to finished, cancelled, and paused Runs. It prints each kept branch and returns them as `kept_branches` in JSON. It keeps live Runs, Runs with `finish_pending`, and Runs with a blocked Task.
 
 ### [concurrency]
 

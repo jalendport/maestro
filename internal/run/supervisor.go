@@ -1,6 +1,7 @@
 package run
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -274,7 +275,10 @@ func (sup *Supervisor) loop() error {
 	sup.consumeControl()
 	if s.Mode == "worktree" && !sup.cancelled {
 		r, err := worktree.Open(s.Project, s.Run)
-		if err != nil {
+		if errors.Is(err, worktree.ErrNoBranch) {
+			s.Mode, s.ModeReason = "tree", "HEAD is not on a branch"
+			setOrder(s)
+		} else if err != nil {
 			sup.pause(err.Error())
 		} else {
 			s.RunBranch = r.Branch
@@ -329,7 +333,7 @@ func (sup *Supervisor) schedule() {
 	caps := sup.Env.Roster.Concurrency
 	editRunning := false
 	for id := range sup.running {
-		if t, ok := s.Task(id); ok && t.Access == brief.AccessEdit && (s.Mode != "worktree" || len(t.InTree) > 0) {
+		if t, ok := s.Task(id); ok && t.Access == brief.AccessEdit && s.Mode != "worktree" {
 			editRunning = true
 		}
 	}
@@ -352,14 +356,6 @@ func (sup *Supervisor) schedule() {
 					t.Waiting = why
 					continue
 				}
-				if t.Workdir == "" {
-					links, err := worktree.Link(s.Project, "", t.Touch)
-					if err != nil {
-						sup.blockMerge(t, err)
-						continue
-					}
-					t.InTree = links.Refused
-				}
 			}
 			if len(sup.running) >= caps.MaxParallel {
 				t.Waiting = "run cap"
@@ -369,11 +365,11 @@ func (sup *Supervisor) schedule() {
 				t.Waiting = "machine cap"
 				continue
 			}
-			if access == brief.AccessEdit && editRunning && (s.Mode != "worktree" || len(t.InTree) > 0) {
+			if access == brief.AccessEdit && editRunning && s.Mode != "worktree" {
 				t.Waiting = "tree busy"
 				continue
 			}
-			if sup.start(t) && access == brief.AccessEdit && (s.Mode != "worktree" || len(t.InTree) > 0) {
+			if sup.start(t) && access == brief.AccessEdit && s.Mode != "worktree" {
 				editRunning = true
 			}
 		}
@@ -1023,7 +1019,9 @@ func (sup *Supervisor) end(state string) error {
 		}
 	}
 	if s.Mode == "worktree" && state == StateCancelled && s.RunBranch != "" {
-		if err := worktree.Cancel(s.Project, s.Run); err != nil {
+		kept, err := worktree.Cancel(s.Project, s.Run)
+		s.KeptBranches = kept
+		if err != nil {
 			s.PauseReason = err.Error()
 		}
 	}

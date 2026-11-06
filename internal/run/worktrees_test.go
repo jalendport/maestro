@@ -89,7 +89,7 @@ func worktreeSupervisor(t *testing.T) *Supervisor {
 	if err := s.Save(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = worktree.Remove(root, s.Run) })
+	t.Cleanup(func() { _, _ = worktree.Remove(root, s.Run) })
 	t.Cleanup(func() {
 		for _, cancel := range sup.running {
 			close(cancel)
@@ -120,12 +120,14 @@ func takeResult(t *testing.T, sup *Supervisor) *dispatch.Record {
 }
 
 func TestWorktreeModeReasons(t *testing.T) {
-	for _, reason := range []string{"", "tree has uncommitted changes", "worktrees off", "one edit task", "project off", "project cannot enable"} {
+	for _, reason := range []string{"", "tree has uncommitted changes", "worktrees off", "one edit task", "project off", "project cannot enable", "HEAD is not on a branch"} {
 		t.Run(reason, func(t *testing.T) {
 			sup := worktreeSupervisor(t)
 			off, on := false, true
 			want := reason
 			switch reason {
+			case "HEAD is not on a branch":
+				runGit(t, sup.Env.Root, "checkout", "--detach")
 			case "tree has uncommitted changes":
 				runWrite(t, filepath.Join(sup.Env.Root, "dirty.txt"), "dirty")
 			case "worktrees off":
@@ -150,6 +152,32 @@ func TestWorktreeModeReasons(t *testing.T) {
 			saved, err := Load(sup.State.Folder)
 			if err != nil || saved.ModeReason != want || !strings.Contains(Status(saved), ModeLine(saved)) || !strings.Contains(Report(saved), ModeLine(saved)) {
 				t.Fatalf("saved mode: %+v, %v", saved, err)
+			}
+		})
+	}
+}
+
+func TestDependencyFolderMode(t *testing.T) {
+	for _, tc := range []struct {
+		name, access, reason string
+		touch                []string
+	}{
+		{name: "no touch", access: brief.AccessEdit},
+		{name: "general pattern", access: brief.AccessEdit, touch: []string{"**"}},
+		{name: "explicit folder", access: brief.AccessEdit, touch: []string{"node_modules/**"}, reason: "task 2 touches node_modules"},
+		{name: "read Task", access: brief.AccessRead, touch: []string{"node_modules/**"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sup := worktreeSupervisor(t)
+			runWrite(t, filepath.Join(sup.Env.Root, "node_modules", "pkg", "index.js"), "dependency")
+			task := sup.State.Tasks[1]
+			task.Touch, task.Access = tc.touch, tc.access
+			if tc.access == brief.AccessRead {
+				sup.State.Tasks = append(sup.State.Tasks, &TaskState{Number: 3, ID: "third", Access: brief.AccessEdit})
+			}
+			chooseMode(sup.Env, sup.State)
+			if sup.State.ModeReason != tc.reason || (sup.State.Mode == "worktree") != (tc.reason == "") {
+				t.Fatalf("mode: %s (%s)", sup.State.Mode, sup.State.ModeReason)
 			}
 		})
 	}
@@ -462,11 +490,14 @@ func TestDependencyFolderUsesTreeAndTreeBusy(t *testing.T) {
 		pending.brief.Touch = task.Touch
 		sup.pending[task] = pending
 	}
-	setOrder(sup.State)
+	chooseMode(sup.Env, sup.State)
 	sup.schedule()
 	first, second := sup.State.Tasks[0], sup.State.Tasks[1]
-	if len(sup.running) != 1 || first.Workdir != sup.Env.Root || !reflect.DeepEqual(first.InTree, []string{"node_modules"}) || second.Waiting != "tree busy" || !strings.Contains(Status(sup.State), "in tree (touches node_modules)") {
+	if len(sup.running) != 1 || first.Workdir != "" || second.Waiting != "tree busy" || sup.State.Mode != "tree" || sup.State.ModeReason != "task 1 touches node_modules" {
 		t.Fatalf("tree fallback: %+v, %+v", first, second)
+	}
+	if branch := runGit(t, sup.Env.Root, "symbolic-ref", "--short", "HEAD"); branch != "master" {
+		t.Fatalf("user branch changed: %s", branch)
 	}
 	takeResult(t, sup)
 	sup.schedule()
@@ -486,6 +517,20 @@ func TestCancelKeepsRunBranchAndRemovesWorktrees(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	first, second := sup.State.Tasks[0], sup.State.Tasks[1]
+	runWrite(t, filepath.Join(first.Workdir, "first.txt"), "first\n")
+	w := worktree.Worktree{Root: sup.Env.Root, Dir: first.Workdir}
+	if _, err := w.Commit("Change first file", []string{"first.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sup.mergeTask(first); err != nil {
+		t.Fatal(err)
+	}
+	runWrite(t, filepath.Join(second.Workdir, "second.txt"), "second\n")
+	w = worktree.Worktree{Root: sup.Env.Root, Dir: second.Workdir}
+	if _, err := w.Commit("Change second file", []string{"second.txt"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := sup.end(StateCancelled); err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +539,17 @@ func TestCancelKeepsRunBranchAndRemovesWorktrees(t *testing.T) {
 			t.Fatalf("cancel kept Worktree: %s, %v", task.Workdir, err)
 		}
 	}
-	if got := runGit(t, sup.Env.Root, "branch", "--list", sup.State.RunBranch); got == "" || !strings.Contains(Report(sup.State), sup.State.RunBranch) {
-		t.Fatal("cancel lost the Run branch")
+	want := []string{sup.State.RunBranch, "maestro/" + sup.State.Run + "/" + second.ID}
+	if !reflect.DeepEqual(sup.State.KeptBranches, want) {
+		t.Fatalf("kept branches: %v, want %v", sup.State.KeptBranches, want)
+	}
+	for _, branch := range want {
+		if got := runGit(t, sup.Env.Root, "branch", "--list", branch); got == "" || !strings.Contains(Report(sup.State), "kept branch "+branch) {
+			t.Fatalf("cancel lost branch %s", branch)
+		}
+	}
+	saved, err := Load(sup.State.Folder)
+	if err != nil || !reflect.DeepEqual(saved.KeptBranches, want) {
+		t.Fatalf("saved kept branches: %+v, %v", saved, err)
 	}
 }

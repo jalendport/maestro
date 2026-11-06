@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jalendport/maestro/internal/config"
+	"github.com/jalendport/maestro/internal/verify"
 )
 
 func repository(t *testing.T) string {
@@ -59,7 +61,7 @@ func openRun(t *testing.T, root string) Run {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := Remove(root, r.ID); err != nil {
+		if _, err := Remove(root, r.ID); err != nil {
 			t.Error(err)
 		}
 	})
@@ -169,6 +171,7 @@ func TestLink(t *testing.T) {
 	write(t, root, "storage/framework/cache/file", "dependency")
 	write(t, root, ".venv/file", "not ignored")
 	dir := t.TempDir()
+	tgit(t, dir, "init", "-b", "master")
 	linked, err := Link(root, dir, []string{"vendor/**", "storage/framework/cache/**"})
 	if err != nil || !reflect.DeepEqual(linked.Linked, []string{"node_modules"}) || !reflect.DeepEqual(linked.Refused, []string{"vendor", "storage/framework"}) {
 		t.Fatalf("Link: %v, %v", linked, err)
@@ -181,15 +184,26 @@ func TestLink(t *testing.T) {
 			t.Fatalf("unexpected link %s: %v", name, err)
 		}
 	}
-	for _, pattern := range []string{"node_modules/**", "./node_modules/**", "node_modules/pkg/**", "**", "**/index.js", "index.js", "[!v]ode_modules/**", "node_*", "node_modules"} {
-		linked, err := Link(root, t.TempDir(), []string{pattern})
+	preview := t.TempDir()
+	if _, err := Link(root, preview); err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if _, err := os.Readlink(filepath.Join(preview, "node_modules")); err != nil {
+		t.Fatalf("preview link: %v", err)
+	}
+	for _, pattern := range []string{"node_modules/**", "./node_modules/**", "node_modules/pkg/**", "/node_modules/", "node_modules"} {
+		linked, err := Link(root, "", []string{pattern})
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, name := range linked.Linked {
-			if name == "node_modules" {
-				t.Errorf("pattern %q did not prevent link", pattern)
-			}
+		if !reflect.DeepEqual(linked.Refused, []string{"node_modules"}) {
+			t.Errorf("pattern %q: refused %v", pattern, linked.Refused)
+		}
+	}
+	for _, touch := range [][]string{nil, {}, {"**"}, {"**/index.js"}, {"index.js"}, {"[!v]ode_modules/**"}, {"node_*"}, {"!node_modules/**"}, {"src/**"}} {
+		linked, err := Link(root, "", touch)
+		if err != nil || len(linked.Refused) != 0 {
+			t.Fatalf("touch %v: %+v, %v", touch, linked, err)
 		}
 	}
 	r := openRun(t, root)
@@ -344,6 +358,9 @@ func TestFinish(t *testing.T) {
 			if err := r.Finish(commit); err != nil {
 				t.Fatal(err)
 			}
+			if err := r.Finish(commit); err != nil {
+				t.Fatalf("second Finish: %v", err)
+			}
 			if _, err := head(root, "refs/heads/"+r.Branch); err == nil {
 				t.Fatal("Run branch remains")
 			}
@@ -462,7 +479,7 @@ func TestRemove(t *testing.T) {
 	write(t, a.Dir, "pending.txt", "pending\n")
 	tgit(t, b.Dir, "checkout", "--detach")
 	tgit(t, root, "branch", "maestro/r-other/run")
-	if err := Remove(root, r.ID); err != nil {
+	if _, err := Remove(root, r.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got := tgit(t, root, "branch", "--list", "maestro/"+r.ID+"/*"); got != "" {
@@ -479,8 +496,207 @@ func TestRemove(t *testing.T) {
 	if _, err := head(root, "refs/heads/maestro/r-other/run"); err != nil {
 		t.Fatal(err)
 	}
-	if err := Remove(root, r.ID); err != nil {
+	if _, err := Remove(root, r.ID); err != nil {
 		t.Fatalf("second Remove: %v", err)
+	}
+}
+
+func TestLinkedWorktreeIsCleanAndMerges(t *testing.T) {
+	root := repository(t)
+	write(t, root, ".gitignore", "node_modules/\n")
+	tgit(t, root, "add", ".gitignore")
+	tgit(t, root, "commit", "-m", "Ignore dependencies")
+	write(t, root, "node_modules/pkg/index.js", "dependency\n")
+	r := openRun(t, root)
+	w, err := r.Add("linked", []string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Readlink(filepath.Join(w.Dir, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	if status := tgit(t, w.Dir, "status", "--porcelain"); status != "" {
+		t.Fatalf("linked Worktree is dirty: %s", status)
+	}
+	if _, err := verify.Take(w.Dir); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	second, err := r.Add("second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := tgit(t, second.Dir, "status", "--porcelain"); status != "" {
+		t.Fatalf("second linked Worktree is dirty: %s", status)
+	}
+	path := tgit(t, w.Dir, "rev-parse", "--git-path", "info/exclude")
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(w.Dir, path)
+	}
+	if data, err := os.ReadFile(path); err != nil || strings.Count(string(data), "/node_modules\n") != 1 {
+		t.Fatalf("exclusion file: %q, %v", data, err)
+	}
+	commitTask(t, w, "change.txt", "change\n")
+	mergeTask(t, r, "linked")
+}
+
+func TestRemoveKeepsUnlandedTaskOfLandedRun(t *testing.T) {
+	root := repository(t)
+	r := openRun(t, root)
+	empty := addTask(t, r, "empty")
+	left := addTask(t, r, "left")
+	commitTask(t, left, "left.txt", "left\n")
+	kept, err := Remove(root, r.ID)
+	if err != nil || !reflect.DeepEqual(kept, []string{left.Branch}) {
+		t.Fatalf("kept: %v, %v", kept, err)
+	}
+	for branch, want := range map[string]bool{r.Branch: false, empty.Branch: false, left.Branch: true} {
+		if _, err := head(root, "refs/heads/"+branch); (err == nil) != want {
+			t.Fatalf("branch %s exists %v, want %v", branch, err == nil, want)
+		}
+	}
+	tgit(t, root, "branch", "-D", left.Branch)
+}
+
+func TestMergeRemoveFailureKeepsTask(t *testing.T) {
+	root := repository(t)
+	r := openRun(t, root)
+	w := addTask(t, r, "locked")
+	taskHead := commitTask(t, w, "change.txt", "change\n")
+	tgit(t, root, "worktree", "lock", w.Dir)
+	_, err := r.Merge("locked")
+	if err == nil {
+		t.Fatal("Merge removed a locked Worktree")
+	}
+	if got := tgit(t, root, "rev-parse", r.Branch); got != r.Base {
+		t.Fatalf("Run branch moved: %s", got)
+	}
+	if got := tgit(t, w.Dir, "rev-parse", w.Branch); got != taskHead {
+		t.Fatalf("Task branch changed: %s", got)
+	}
+	tgit(t, root, "worktree", "unlock", w.Dir)
+	mergeTask(t, r, "locked")
+}
+
+func TestMergeRefFailureRestoresTask(t *testing.T) {
+	for _, ref := range []string{"task", "run"} {
+		t.Run(ref, func(t *testing.T) {
+			root := repository(t)
+			r := openRun(t, root)
+			w := addTask(t, r, "a")
+			taskHead := commitTask(t, w, "change.txt", "change\n")
+			branch := w.Branch
+			if ref == "run" {
+				branch = r.Branch
+			}
+			lock := tgit(t, root, "rev-parse", "--git-path", "refs/heads/"+branch+".lock")
+			if !filepath.IsAbs(lock) {
+				lock = filepath.Join(root, lock)
+			}
+			if err := os.WriteFile(lock, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := r.Merge("a")
+			if err == nil {
+				t.Fatal("Merge ignored the ref lock")
+			}
+			if got := tgit(t, w.Dir, "rev-parse", "HEAD"); got != taskHead {
+				t.Fatalf("Task not restored: %s", got)
+			}
+			if got := tgit(t, root, "rev-parse", r.Branch); got != r.Base {
+				t.Fatalf("Run moved: %s", got)
+			}
+			if err := os.Remove(lock); err != nil {
+				t.Fatal(err)
+			}
+			mergeTask(t, r, "a")
+		})
+	}
+}
+
+func TestFinishRetriesCleanup(t *testing.T) {
+	for _, commit := range []bool{true, false} {
+		t.Run(map[bool]string{true: "commit", false: "squash"}[commit], func(t *testing.T) {
+			root := repository(t)
+			r := openRun(t, root)
+			w := addTask(t, r, "a")
+			commitTask(t, w, "change.txt", "change\n")
+			mergeTask(t, r, "a")
+			left := addTask(t, r, "locked")
+			tgit(t, root, "worktree", "lock", left.Dir)
+			if err := r.Finish(commit); err == nil || !strings.Contains(err.Error(), "Finish remove") {
+				t.Fatalf("Finish cleanup error: %v", err)
+			}
+			if commit {
+				write(t, root, "user.txt", "new user work\n")
+			}
+			tgit(t, root, "worktree", "unlock", left.Dir)
+			again, err := Open(root, r.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := again.Finish(commit); err != nil {
+				t.Fatalf("Finish retry: %v", err)
+			}
+			if data, err := os.ReadFile(filepath.Join(root, "change.txt")); err != nil || string(data) != "change\n" {
+				t.Fatalf("landed change: %q, %v", data, err)
+			}
+		})
+	}
+}
+
+func TestRemoveAndCancelKeepUnlandedBranches(t *testing.T) {
+	for _, cancel := range []bool{false, true} {
+		t.Run(map[bool]string{false: "remove", true: "cancel"}[cancel], func(t *testing.T) {
+			root := repository(t)
+			r := openRun(t, root)
+			w := addTask(t, r, "a")
+			commitTask(t, w, "change.txt", "change\n")
+			mergeTask(t, r, "a")
+			left := addTask(t, r, "left")
+			commitTask(t, left, "left.txt", "left\n")
+			write(t, config.RunsDir(root), r.ID+"/run.json", `{"state":"paused"}`)
+			removeRun := Remove
+			if cancel {
+				removeRun = Cancel
+			}
+			kept, err := removeRun(root, r.ID)
+			want := []string{left.Branch, r.Branch}
+			if err != nil || !reflect.DeepEqual(kept, want) {
+				t.Fatalf("kept: %v, %v; want %v", kept, err, want)
+			}
+			for _, branch := range kept {
+				if _, err := head(root, "refs/heads/"+branch); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := os.Stat(left.Dir); !os.IsNotExist(err) {
+				t.Fatalf("Worktree remains: %v", err)
+			}
+		})
+	}
+}
+
+func TestMessageEmptySummary(t *testing.T) {
+	if got := Message("{title}\n\n{summary}\n\n", Vars{Title: "Title"}); got != "Title" {
+		t.Fatalf("empty summary: %q", got)
+	}
+	template := "{title}\n\n{summary}\n\nCo-Authored-By: {lane}\n"
+	if got := Message(template, Vars{Title: "Title", Lane: "Codex"}); got != "Title\n\nCo-Authored-By: Codex" {
+		t.Fatalf("empty summary with trailer: %q", got)
+	}
+	if got := Message(template, Vars{Title: "Title", Summary: "Body.", Lane: "Codex"}); got != "Title\n\nBody.\n\nCo-Authored-By: Codex" {
+		t.Fatalf("summary with trailer: %q", got)
+	}
+}
+
+func TestOpenDetachedHEAD(t *testing.T) {
+	root := repository(t)
+	r := openRun(t, root)
+	tgit(t, root, "checkout", "--detach")
+	for _, id := range []string{"detached", r.ID} {
+		if _, err := Open(root, id); !errors.Is(err, ErrNoBranch) {
+			t.Fatalf("Open %s error: %v", id, err)
+		}
 	}
 }
 

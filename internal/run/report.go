@@ -40,8 +40,8 @@ func Report(s *State) string {
 	}
 	w.WriteString("\n")
 	w.WriteString(ModeLine(s) + "\n")
-	if s.State == StateCancelled && s.RunBranch != "" {
-		fmt.Fprintf(&w, "Run branch kept: %s\n", s.RunBranch)
+	for _, branch := range s.KeptBranches {
+		fmt.Fprintf(&w, "kept branch %s\n", branch)
 	}
 	for _, t := range sortedTasks(s) {
 		fmt.Fprintf(&w, "  %-2d %-32s %-8s %-18s %d  %s\n", t.Number, cutTitle(t.Title, 32), stateWord(t), laneWord(t), t.Attempt, reportPath(s, t))

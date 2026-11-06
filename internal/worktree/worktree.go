@@ -34,13 +34,34 @@ type Links struct {
 	Refused []string
 }
 
+// ErrNoBranch means that HEAD is detached.
+var ErrNoBranch = errors.New("Open needs a user branch")
+
 type Vars struct {
 	Title, Run, Task, Family, Model, Lane, Summary string
 }
 
+// Message fills the template. It drops a line that is empty after the fill,
+// keeps one blank line where the template has blank lines, and drops blank
+// lines at the end.
 func Message(template string, v Vars) string {
-	return strings.NewReplacer("{title}", v.Title, "{run}", v.Run, "{task}", v.Task,
-		"{family}", v.Family, "{model}", v.Model, "{lane}", v.Lane, "{summary}", v.Summary).Replace(template)
+	fill := strings.NewReplacer("{title}", v.Title, "{run}", v.Run, "{task}", v.Task,
+		"{family}", v.Family, "{model}", v.Model, "{lane}", v.Lane, "{summary}", v.Summary)
+	var lines []string
+	for _, line := range strings.Split(template, "\n") {
+		filled := fill.Replace(line)
+		if strings.TrimSpace(filled) == "" {
+			if strings.TrimSpace(line) != "" || len(lines) == 0 || lines[len(lines)-1] == "" {
+				continue
+			}
+			filled = ""
+		}
+		lines = append(lines, filled)
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
 }
 
 type MergeResult struct {
@@ -89,6 +110,10 @@ func Open(root, run string) (Run, error) {
 		return Run{}, err
 	}
 	r := Run{Root: root, ID: run, Branch: "maestro/" + run + "/run", dir: dir}
+	branch, err := git(root, "", "symbolic-ref", "--quiet", "HEAD")
+	if err != nil {
+		return Run{}, fmt.Errorf("%w: %w", ErrNoBranch, err)
+	}
 	data, err := os.ReadFile(filepath.Join(dir, "run.json"))
 	if err == nil {
 		var saved Run
@@ -97,7 +122,10 @@ func Open(root, run string) (Run, error) {
 		}
 		r.Base, r.UserBranch = saved.Base, saved.UserBranch
 		if _, err := head(root, "refs/heads/"+r.Branch); err != nil {
-			return Run{}, err
+			stage, readErr := os.ReadFile(filepath.Join(dir, "finish"))
+			if readErr != nil || string(stage) != "remove" {
+				return Run{}, err
+			}
 		}
 		return r, nil
 	}
@@ -107,10 +135,6 @@ func Open(root, run string) (Run, error) {
 	r.Base, err = head(root, "HEAD")
 	if err != nil {
 		return Run{}, err
-	}
-	branch, err := git(root, "", "symbolic-ref", "--quiet", "HEAD")
-	if err != nil {
-		return Run{}, fmt.Errorf("Open needs a user branch: %w", err)
 	}
 	r.UserBranch = strings.TrimSpace(branch)
 	if _, err := head(root, "refs/heads/"+r.Branch); err != nil {
@@ -189,25 +213,6 @@ func (r Run) Add(task string, touch ...[]string) (Worktree, error) {
 
 var dependencies = []string{"node_modules", "vendor", ".venv", ".bundle", "storage/framework"}
 
-func (r Run) AddInTree(task string) (Worktree, error) {
-	w, err := r.task(task)
-	if err != nil {
-		return w, err
-	}
-	w.Dir = r.Root
-	branch, err := git(r.Root, "", "symbolic-ref", "--short", "HEAD")
-	if err == nil && strings.TrimSpace(branch) == w.Branch {
-		return w, nil
-	}
-	if _, err := head(r.Root, "refs/heads/"+w.Branch); err != nil {
-		if _, err := git(r.Root, "", "branch", w.Branch, r.Branch); err != nil {
-			return w, err
-		}
-	}
-	_, err = git(r.Root, "", "checkout", w.Branch)
-	return w, err
-}
-
 // Link leaves a dependency folder unlinked when a touch pattern can write it.
 func Link(root, dir string, touch ...[]string) (Links, error) {
 	var links Links
@@ -218,9 +223,6 @@ func Link(root, dir string, touch ...[]string) (Links, error) {
 	for _, name := range dependencies {
 		writable := false
 		for _, list := range touch {
-			if len(list) == 0 {
-				writable = true
-			}
 			for _, pattern := range list {
 				if touchesDependency(pattern, name) {
 					writable = true
@@ -261,6 +263,9 @@ func Link(root, dir string, touch ...[]string) (Links, error) {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return links, err
 		}
+		if err := exclude(root, dir, "/"+name); err != nil {
+			return links, err
+		}
 		if err := os.Symlink(source, target); err != nil {
 			return links, err
 		}
@@ -269,47 +274,51 @@ func Link(root, dir string, touch ...[]string) (Links, error) {
 	return links, nil
 }
 
+// exclude adds rule to the exclusion file of the Worktree at dir. A project
+// rule with a trailing slash, such as node_modules/, does not match a link.
+func exclude(root, dir, rule string) error {
+	// Doctor previews links in a temporary folder without a git checkout.
+	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
+		return nil
+	}
+	out, err := git(root, dir, "rev-parse", "--git-path", "info/exclude")
+	if err != nil {
+		return err
+	}
+	path := strings.TrimSpace(out)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == rule {
+			return nil
+		}
+	}
+	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
+		rule = "\n" + rule
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	_, writeErr := fmt.Fprintln(file, rule)
+	return errors.Join(writeErr, file.Close())
+}
+
 func touchesDependency(pattern, name string) bool {
 	if pattern == "" || strings.HasPrefix(pattern, "!") {
 		return false
 	}
 	pattern = strings.TrimPrefix(filepath.ToSlash(pattern), "./")
-	anchored := strings.HasPrefix(pattern, "/")
 	pattern = strings.Trim(pattern, "/")
-	if pattern == "" {
-		return false
-	}
-	// A slashless pattern can match a name anywhere inside the dependency.
-	if !anchored && !strings.Contains(pattern, "/") {
-		return true
-	}
-	chars := []byte(pattern)
-	for i := 0; i < len(chars); i++ {
-		if chars[i] == '\\' {
-			i++
-		} else if chars[i] == '[' && i+1 < len(chars) && chars[i+1] == '!' {
-			chars[i+1] = '^'
-		}
-	}
-	return overlaps(strings.Split(string(chars), "/"), strings.Split(name, "/"))
-}
-
-func overlaps(pattern, dir []string) bool {
-	if len(pattern) == 0 || len(dir) == 0 {
-		return true
-	}
-	if pattern[0] == "**" {
-		return overlaps(pattern[1:], dir) || overlaps(pattern, dir[1:])
-	}
-	if len(pattern) == 1 {
-		for _, part := range dir {
-			if ok, _ := filepath.Match(pattern[0], part); ok {
-				return true
-			}
-		}
-	}
-	ok, _ := filepath.Match(pattern[0], dir[0])
-	return ok && overlaps(pattern[1:], dir[1:])
+	return pattern == name || strings.HasPrefix(pattern, name+"/")
 }
 
 func (w Worktree) Commit(message string, paths []string) (string, error) {
@@ -367,16 +376,7 @@ func (r Run) Merge(task string) (MergeResult, error) {
 	if err != nil {
 		return MergeResult{}, err
 	}
-	return r.merge(w, false)
-}
-
-func (r Run) MergeTree(task string) (MergeResult, error) {
-	w, err := r.task(task)
-	if err != nil {
-		return MergeResult{}, err
-	}
-	w.Dir = r.Root
-	return r.merge(w, true)
+	return r.merge(w)
 }
 
 func unmerged(root, dir string) ([]string, error) {
@@ -465,7 +465,7 @@ func (w Worktree) Abort() error {
 	return err
 }
 
-func (r Run) merge(w Worktree, inTree bool) (MergeResult, error) {
+func (r Run) merge(w Worktree) (result MergeResult, mergeErr error) {
 	if w.Rebasing() {
 		return MergeResult{}, fmt.Errorf("a rebase is in progress in %s; finish it, then merge again", w.Dir)
 	}
@@ -490,92 +490,209 @@ func (r Run) merge(w Worktree, inTree bool) (MergeResult, error) {
 	if err != nil {
 		return MergeResult{}, err
 	}
+	if _, err := git(r.Root, "", "worktree", "remove", "--force", w.Dir); err != nil {
+		return MergeResult{}, err
+	}
+	// Restore the Task if branch deletion or the Run update fails.
+	defer func() {
+		if mergeErr == nil {
+			return
+		}
+		if _, err := head(r.Root, "refs/heads/"+w.Branch); err != nil {
+			_, err = git(r.Root, "", "branch", w.Branch, commit)
+			mergeErr = errors.Join(mergeErr, err)
+		}
+		// A Task ref lock can cause the deletion failure. Restore the files
+		// without writing that ref, then attach HEAD to the kept branch.
+		_, err := git(r.Root, "", "worktree", "add", "--detach", w.Dir, commit)
+		mergeErr = errors.Join(mergeErr, err)
+		if err == nil {
+			_, err = git(r.Root, w.Dir, "symbolic-ref", "HEAD", "refs/heads/"+w.Branch)
+			mergeErr = errors.Join(mergeErr, err)
+			_, err = Link(r.Root, w.Dir)
+			mergeErr = errors.Join(mergeErr, err)
+		}
+	}()
+	if _, err := git(r.Root, "", "branch", "-D", w.Branch); err != nil {
+		return MergeResult{}, err
+	}
 	// The old head makes concurrent changes fail instead of losing commits.
 	if _, err := git(r.Root, "", "update-ref", "refs/heads/"+r.Branch, commit, base); err != nil {
 		return MergeResult{}, err
 	}
-	if inTree {
-		if _, err := git(r.Root, "", "checkout", strings.TrimPrefix(r.UserBranch, "refs/heads/")); err != nil {
-			return MergeResult{Head: commit}, err
-		}
-	} else {
-		if _, err := git(r.Root, "", "worktree", "remove", w.Dir); err != nil {
-			return MergeResult{Head: commit}, err
-		}
-	}
-	_, err = git(r.Root, "", "branch", "-D", w.Branch)
-	return MergeResult{Head: commit}, err
+	return MergeResult{Head: commit}, nil
 }
 
 func (r Run) Finish(commit bool) error {
+	// Keep the last completed step until cleanup succeeds. A squash leaves a
+	// dirty tree, so a retry must not run the pre-merge check again.
+	stagePath := filepath.Join(r.dir, "finish")
+	stage, err := os.ReadFile(stagePath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("Finish read step: %w", err)
+	}
+	if string(stage) == "remove" {
+		_, err := remove(r.Root, r.ID, true)
+		if err != nil {
+			return fmt.Errorf("Finish remove: %w", err)
+		}
+		return nil
+	}
+	if _, err := head(r.Root, "refs/heads/"+r.Branch); err != nil {
+		if _, statErr := os.Stat(r.dir); os.IsNotExist(statErr) {
+			return nil
+		}
+		return fmt.Errorf("Finish read Run branch: %w", err)
+	}
 	current, err := head(r.Root, r.UserBranch)
 	if err != nil {
-		return err
+		return fmt.Errorf("Finish read user branch: %w", err)
+	}
+	landed := false
+	if _, err := git(r.Root, "", "merge-base", "--is-ancestor", "refs/heads/"+r.Branch, current); err == nil {
+		landed = true
+	}
+	if landed {
+		if err := os.WriteFile(stagePath, []byte("remove"), 0o644); err != nil {
+			return fmt.Errorf("Finish record merge: %w", err)
+		}
+		_, err := remove(r.Root, r.ID, true)
+		if err != nil {
+			return fmt.Errorf("Finish remove: %w", err)
+		}
+		return nil
+	}
+	if string(stage) == "reset" {
+		return r.finishReset(stagePath)
 	}
 	// The Run branch must contain the user's branch. A user branch that moved
 	// lands after the Run branch is rebased onto it.
 	if current != r.Base {
 		if _, err := git(r.Root, "", "merge-base", "--is-ancestor", current, "refs/heads/"+r.Branch); err != nil {
-			return fmt.Errorf("user branch moved: base %s, current %s; rebase Run branch %s onto the user branch, or reset the user branch to the base", r.Base, current, r.Branch)
+			return fmt.Errorf("Finish merge: user branch moved: base %s, current %s; rebase Run branch %s onto the user branch, or reset the user branch to the base", r.Base, current, r.Branch)
 		}
 	}
 	branch, err := git(r.Root, "", "symbolic-ref", "--quiet", "HEAD")
 	if err != nil {
-		return err
+		return fmt.Errorf("Finish check user branch: %w", err)
 	}
 	if strings.TrimSpace(branch) != r.UserBranch {
-		return fmt.Errorf("Finish needs user branch %s checked out", r.UserBranch)
+		return fmt.Errorf("Finish check user branch: needs %s checked out", r.UserBranch)
 	}
 	dirty, err := Dirty(r.Root)
 	if err != nil {
-		return err
+		return fmt.Errorf("Finish check dirty tree: %w", err)
 	}
 	if len(dirty) != 0 {
-		return fmt.Errorf("Finish needs a clean user tree: %s", strings.Join(dirty, ", "))
+		return fmt.Errorf("Finish check dirty tree: needs a clean user tree: %s", strings.Join(dirty, ", "))
 	}
 	mode := "--ff-only"
 	if !commit {
 		mode = "--squash"
 	}
 	if _, err := git(r.Root, "", "merge", mode, r.Branch); err != nil {
-		return err
+		return fmt.Errorf("Finish merge: %w", err)
 	}
 	if !commit {
-		if _, err := git(r.Root, "", "reset", "--mixed", "HEAD"); err != nil {
-			return err
+		if err := os.WriteFile(stagePath, []byte("reset"), 0o644); err != nil {
+			return fmt.Errorf("Finish record squash: %w", err)
 		}
+		return r.finishReset(stagePath)
 	}
-	return Remove(r.Root, r.ID)
+	if err := os.WriteFile(stagePath, []byte("remove"), 0o644); err != nil {
+		return fmt.Errorf("Finish record merge: %w", err)
+	}
+	_, err = remove(r.Root, r.ID, true)
+	if err != nil {
+		return fmt.Errorf("Finish remove: %w", err)
+	}
+	return nil
 }
 
-func Remove(root, run string) error {
+func (r Run) finishReset(stagePath string) error {
+	branch, err := git(r.Root, "", "symbolic-ref", "--quiet", "HEAD")
+	if err != nil || strings.TrimSpace(branch) != r.UserBranch {
+		return fmt.Errorf("Finish reset: needs user branch %s checked out: %v", r.UserBranch, err)
+	}
+	if _, err := git(r.Root, "", "reset", "--mixed", "HEAD"); err != nil {
+		return fmt.Errorf("Finish reset: %w", err)
+	}
+	if err := os.WriteFile(stagePath, []byte("remove"), 0o644); err != nil {
+		return fmt.Errorf("Finish record reset: %w", err)
+	}
+	_, err = remove(r.Root, r.ID, true)
+	if err != nil {
+		return fmt.Errorf("Finish remove: %w", err)
+	}
+	return nil
+}
+
+// Remove returns the branches it keeps when the Run did not land.
+func Remove(root, run string) ([]string, error) {
 	return remove(root, run, false)
 }
 
-func Cancel(root, run string) error {
-	return remove(root, run, true)
+func Cancel(root, run string) ([]string, error) {
+	return Remove(root, run)
 }
 
-func remove(root, run string, keepRun bool) error {
+func remove(root, run string, finished bool) ([]string, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	dir, err := runDir(root, run)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	// Read only the fields needed here to avoid a dependency on the supervisor.
+	var state struct {
+		State string `json:"state"`
+	}
+	data, err := os.ReadFile(filepath.Join(config.RunsDir(root), run, "run.json"))
+	if err == nil {
+		if err := json.Unmarshal(data, &state); err != nil {
+			return nil, err
+		}
+		finished = finished || state.State == "finished"
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	var saved Run
+	data, err = os.ReadFile(filepath.Join(dir, "run.json"))
+	if err == nil {
+		if err := json.Unmarshal(data, &saved); err != nil {
+			return nil, err
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	userBranch := saved.UserBranch
+	if userBranch == "" {
+		userBranch, err = git(root, "", "symbolic-ref", "--quiet", "HEAD")
+		if err == nil {
+			userBranch = strings.TrimSpace(userBranch)
+		}
+	}
+	landed := func(branch string) bool {
+		if userBranch == "" {
+			return false
+		}
+		_, err := git(root, "", "merge-base", "--is-ancestor", "refs/heads/"+branch, userBranch)
+		return err == nil
+	}
+	runLanded := landed("maestro/" + run + "/run")
 	// Git reports resolved paths, including the system's temporary folder.
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err == nil {
 		dir = resolved
 	} else if !os.IsNotExist(err) {
-		return err
+		return nil, err
 	}
 	prefix := "refs/heads/maestro/" + run + "/"
 	out, err := git(root, "", "worktree", "list", "--porcelain", "-z")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var path string
 	for _, field := range strings.Split(out, "\x00") {
@@ -589,30 +706,34 @@ func remove(root, run string, keepRun bool) error {
 			rel, err := filepath.Rel(dir, path)
 			if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				if _, err := git(root, "", "worktree", "remove", "--force", path); err != nil {
-					return err
+					return nil, err
 				}
 				path = ""
 			}
 		}
 		if path != "" && strings.HasPrefix(field, "branch "+prefix) {
 			if _, err := git(root, "", "worktree", "remove", "--force", path); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 	out, err = git(root, "", "for-each-ref", "--format=%(refname:short)", prefix)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	// A landed Run branch can leave a Task branch with commits that did not
+	// land, so each branch must also be on the user's branch.
+	var kept []string
 	for _, branch := range strings.Split(strings.TrimSpace(out), "\n") {
-		if keepRun && branch == "maestro/"+run+"/run" {
-			continue
-		}
 		if branch != "" {
+			if !finished && !(runLanded && landed(branch)) {
+				kept = append(kept, branch)
+				continue
+			}
 			if _, err := git(root, "", "branch", "-D", branch); err != nil {
-				return err
+				return kept, err
 			}
 		}
 	}
-	return os.RemoveAll(dir)
+	return kept, os.RemoveAll(dir)
 }

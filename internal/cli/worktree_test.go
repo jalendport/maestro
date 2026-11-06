@@ -105,10 +105,23 @@ func TestCleanRemovesEndedWorktreesAndBranches(t *testing.T) {
 	}
 	git("add", ".")
 	git("commit", "-m", "Start test repository")
-	for _, status := range []string{run.StateFinished, run.StateCancelled, run.StatePaused} {
+	for _, status := range []string{run.StateFinished, run.StateCancelled, run.StatePaused, "finish-pending", "blocked"} {
 		r, err := worktree.Open(root, "r-"+status)
 		if err != nil {
 			t.Fatal(err)
+		}
+		merged, err := r.Add("merged")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(merged.Dir, "change.txt"), []byte(status), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := merged.Commit("Change file", []string{"change.txt"}); err != nil {
+			t.Fatal(err)
+		}
+		if result, err := r.Merge("merged"); err != nil || len(result.Conflicts) != 0 {
+			t.Fatalf("Merge: %+v, %v", result, err)
 		}
 		w, err := r.Add("task")
 		if err != nil {
@@ -120,22 +133,50 @@ func TestCleanRemovesEndedWorktreesAndBranches(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := &run.State{Run: r.ID, Project: root, Mode: "worktree", State: status, Folder: folder, EndedAt: old}
+		protected := status == "finish-pending" || status == "blocked"
+		if protected {
+			s.State = run.StatePaused
+			s.FinishPending = status == "finish-pending"
+			if status == "blocked" {
+				s.Tasks = []*run.TaskState{{ID: "task", State: run.TaskBlocked}}
+			}
+		}
 		if err := s.Save(); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Chtimes(folder, old, old); err != nil {
 			t.Fatal(err)
 		}
-		if output, err := waitCommand(t, "clean", "--older-than", "1d"); err != nil {
+		output, err := waitCommand(t, "clean", "--older-than", "1d")
+		if err != nil {
 			t.Fatalf("clean: %s, %v", output, err)
-		} else if !strings.Contains(output, "removed 1 folder(s)") {
+		}
+		if protected {
+			if _, err := os.Stat(w.Dir); err != nil {
+				t.Fatalf("protected Worktree removed: %v", err)
+			}
+			if branches := strings.TrimSpace(git("branch", "--list", "maestro/"+r.ID+"/*")); !strings.Contains(branches, w.Branch) || !strings.Contains(branches, r.Branch) {
+				t.Fatalf("protected branches removed: %s", branches)
+			}
+			continue
+		}
+		if !strings.Contains(output, "removed 1 folder(s)") {
 			t.Fatalf("clean count: %s", output)
 		}
 		if _, err := os.Stat(w.Dir); !os.IsNotExist(err) {
 			t.Fatalf("Worktree remains: %s, %v", w.Dir, err)
 		}
-		if branches := strings.TrimSpace(git("branch", "--list", "maestro/"+r.ID+"/*")); branches != "" {
-			t.Fatalf("branches remain: %s", branches)
+		branches := strings.TrimSpace(git("branch", "--list", "maestro/"+r.ID+"/*"))
+		if status == run.StateFinished {
+			if branches != "" {
+				t.Fatalf("finished branches remain: %s", branches)
+			}
+		} else {
+			for _, branch := range []string{w.Branch, r.Branch} {
+				if !strings.Contains(branches, branch) || !strings.Contains(output, "kept branch "+branch) {
+					t.Fatalf("missing kept branch %s: %s, %s", branch, branches, output)
+				}
+			}
 		}
 	}
 }

@@ -47,7 +47,6 @@ type TaskState struct {
 	Touch             []string      `json:"touch,omitempty"`
 	After             []int         `json:"after,omitempty"`
 	Workdir           string        `json:"workdir,omitempty"`
-	InTree            []string      `json:"in_tree,omitempty"`
 	Conflicts         []string      `json:"conflicts,omitempty"`
 	ConflictAttempt   bool          `json:"conflict_attempt,omitempty"`
 	ConflictRebase    bool          `json:"conflict_rebase,omitempty"` // the supervisor started a rebase in the Worktree
@@ -90,6 +89,7 @@ type State struct {
 	ModeReason    string       `json:"mode_reason,omitempty"`
 	Commit        bool         `json:"commit"`
 	RunBranch     string       `json:"run_branch,omitempty"`
+	KeptBranches  []string     `json:"kept_branches,omitempty"`
 	FinishPending bool         `json:"finish_pending,omitempty"`
 	Run           string       `json:"run"`
 	Project       string       `json:"project"`

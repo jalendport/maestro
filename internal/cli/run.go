@@ -533,6 +533,7 @@ func (a *app) cleanCmd() *cobra.Command {
 			}
 			cutoff := time.Now().Add(-d)
 			removed := 0
+			var keptBranches []string
 			for _, dir := range []string{config.RunsDir(root), config.CouncilsDir(root)} {
 				entries, _ := os.ReadDir(dir)
 				if dir == config.RunsDir(root) {
@@ -552,15 +553,21 @@ func (a *app) cleanCmd() *cobra.Command {
 						continue
 					}
 					if state, err := run.Load(p); err == nil && state.Mode == "worktree" {
+						_, blocked, _, _, _, _ := state.Counts()
+						if state.FinishPending || blocked > 0 {
+							continue
+						}
 						if state.State != run.StateFinished && state.State != run.StateCancelled && state.State != run.StatePaused {
 							continue
 						}
 						if state.EndedAt.IsZero() || !state.EndedAt.Before(cutoff) {
 							continue
 						}
-						if err := worktree.Remove(state.Project, state.Run); err != nil {
+						kept, err := worktree.Remove(state.Project, state.Run)
+						if err != nil {
 							return err
 						}
+						keptBranches = append(keptBranches, kept...)
 					}
 					control, err := config.ControlDirForFolder(p)
 					if err != nil {
@@ -588,7 +595,12 @@ func (a *app) cleanCmd() *cobra.Command {
 				return err
 			}
 			removed += controls + cached
-			return a.result(map[string]any{"removed": removed, "older_than": olderThan}, "removed %d folder(s) older than %s", removed, olderThan)
+			if !a.json {
+				for _, branch := range keptBranches {
+					ui.Outf("kept branch %s", branch)
+				}
+			}
+			return a.result(map[string]any{"removed": removed, "older_than": olderThan, "kept_branches": keptBranches}, "removed %d folder(s) older than %s", removed, olderThan)
 		},
 	}
 	c.Flags().StringVar(&olderThan, "older-than", "30d", "age threshold, for example 30d or 12h")

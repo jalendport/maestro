@@ -1,6 +1,7 @@
 package run
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,7 +40,31 @@ func chooseMode(env *dispatch.Env, s *State) {
 		} else if len(dirty) > 0 {
 			s.ModeReason = "tree has uncommitted changes"
 		} else {
-			s.Mode = "worktree"
+			for _, task := range s.Tasks {
+				if task.Access != brief.AccessEdit {
+					continue
+				}
+				links, err := worktree.Link(s.Project, "", task.Touch)
+				if err != nil {
+					s.ModeReason = "cannot read dependencies: " + err.Error()
+					break
+				}
+				if len(links.Refused) > 0 {
+					s.ModeReason = fmt.Sprintf("task %d touches %s", task.Number, links.Refused[0])
+					break
+				}
+			}
+			if s.ModeReason == "" {
+				r, err := worktree.Open(s.Project, s.Run)
+				switch {
+				case errors.Is(err, worktree.ErrNoBranch):
+					s.ModeReason = "HEAD is not on a branch"
+				case err != nil:
+					s.ModeReason = "cannot open Worktrees: " + err.Error()
+				default:
+					s.Mode, s.RunBranch = "worktree", r.Branch
+				}
+			}
 		}
 	}
 	setOrder(s)
@@ -112,9 +137,6 @@ func OrderLine(task *TaskState) string {
 	for _, n := range task.After {
 		lines = append(lines, fmt.Sprintf("after %d (files overlap)", n))
 	}
-	if len(task.InTree) > 0 {
-		lines = append(lines, "in tree (touches "+strings.Join(task.InTree, ", ")+")")
-	}
 	return strings.Join(lines, "; ")
 }
 
@@ -140,12 +162,7 @@ func (sup *Supervisor) taskWorkdir(task *TaskState, b *brief.Brief) error {
 		return err
 	}
 	sup.State.RunBranch = r.Branch
-	var w worktree.Worktree
-	if len(task.InTree) > 0 {
-		w, err = r.AddInTree(task.ID)
-	} else {
-		w, err = r.Add(task.ID, b.Touch)
-	}
+	w, err := r.Add(task.ID, b.Touch)
 	if err == nil {
 		task.Workdir = w.Dir
 	}
@@ -240,12 +257,7 @@ func (sup *Supervisor) mergeTask(task *TaskState) error {
 	if err != nil {
 		return err
 	}
-	var merged worktree.MergeResult
-	if len(task.InTree) > 0 {
-		merged, err = r.MergeTree(task.ID)
-	} else {
-		merged, err = r.Merge(task.ID)
-	}
+	merged, err := r.Merge(task.ID)
 	if err != nil {
 		return err
 	}
