@@ -121,6 +121,7 @@ type Failure struct {
 type Run struct {
 	CouncilTasks *int  `toml:"council_tasks"`
 	Worktrees    *bool `toml:"worktrees"`
+	PlanCheck    *bool `toml:"plan_check"`
 }
 
 type Commit struct {

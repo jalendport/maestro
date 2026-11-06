@@ -246,6 +246,7 @@ run_pause_after_same_error = 2
 [run]
 council_tasks = 10
 worktrees = true
+plan_check = true
 
 [commit]
 # message = "{title}\n\nCo-Authored-By: {lane}"

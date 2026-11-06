@@ -25,7 +25,7 @@ import (
 
 func (a *app) runCmd() *cobra.Command {
 	var lane, level, floor, ceiling string
-	var wait, council, noCouncil bool
+	var wait, council, noCouncil, noPlanCheck bool
 	c := &cobra.Command{
 		Use:     "run <plan.md>",
 		Short:   "Run every Task of a Plan file",
@@ -49,7 +49,7 @@ func (a *app) runCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			s, err := run.Create(env, args[0], run.CreateOpts{Lane: lane, Level: lv, Floor: fl, Ceiling: ce, Council: council, NoCouncil: noCouncil})
+			s, err := run.Create(env, args[0], run.CreateOpts{Lane: lane, Level: lv, Floor: fl, Ceiling: ce, Council: council, NoCouncil: noCouncil, NoPlanCheck: noPlanCheck})
 			if err != nil {
 				return err
 			}
@@ -57,6 +57,9 @@ func (a *app) runCmd() *cobra.Command {
 				printPlan(s)
 			}
 			if s.State == run.StateHeld {
+				if s.PlanCheck == "running" && wait {
+					return a.waitRun(s.Folder)
+				}
 				if a.json {
 					if err := a.result(s, ""); err != nil {
 						return err
@@ -79,6 +82,7 @@ func (a *app) runCmd() *cobra.Command {
 	c.Flags().BoolVar(&wait, "wait", false, "keep the supervisor in this process and print the report at the end")
 	c.Flags().BoolVar(&council, "council", false, "start a plan Council when the Run holds for approval")
 	c.Flags().BoolVar(&noCouncil, "no-council", false, "skip the plan Council in every case")
+	c.Flags().BoolVar(&noPlanCheck, "no-plan-check", false, "skip the Plan check for this Run")
 	return c
 }
 
@@ -663,6 +667,16 @@ func (a *app) waitRun(folder string) error {
 		switch s.State {
 		case run.StateFinished, run.StateCancelled:
 			return a.printRunReport(folder)
+		}
+		if s.PlanCheck == "running" {
+			if time.Since(started) > waitProcessGrace && !run.SupervisorAlive(s) {
+				return fmt.Errorf("run %s: Plan check supervisor is gone; see %s", s.Run, filepath.Join(folder, "supervisor.log"))
+			}
+			waitSleep(waitPollInterval)
+			continue
+		}
+		if s.State == run.StateHeld {
+			return a.printWaitItem(&waitItem{Kind: "run_held", Run: s.Run, Reason: strings.Join(s.Approval, "; "), NextCommand: "maestro approve " + s.Run})
 		}
 		if item, err := runWaitItem(s); err != nil {
 			return err

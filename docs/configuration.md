@@ -350,9 +350,23 @@ These keys control Runs. The approval hold rules are separate: more than four Ta
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `council_tasks` | integer | `10` | Starts a plan Council when a held Plan has at least this many Tasks. `0` disables the size rule. |
+| `plan_check` | boolean | `true` | Starts a Plan check before a Run with two or more edit Tasks. `maestro run --no-plan-check` skips it for one Run. |
 | `worktrees` | boolean | `true` | Permits Worktree mode. A project can turn it off, but cannot turn it on when this key is `false`. See [Worktrees](#worktrees). |
 
 `maestro run --council <plan>` requests a plan Council for a held Run. A Router question or Council signal for any Task also starts it. `--no-council` stops the plan Council in every case, including when `--council` is set. A hold alone does not start a Council.
+
+The Plan check is one detached read Dispatch in `<run>/plan-check/`, with category `review`, a Daily Tier ceiling, and a five-minute Wall limit. It checks these six questions against the project tree by reading and searching only:
+
+1. Does a Task name a path in Files, touch, or text that does not exist, without saying it creates that path?
+2. Does a Task name an existing function, type, flag, or config key that a search cannot find?
+3. Does a Task remove or rename an exported symbol with a caller outside its touch?
+4. Does a Task say it changes a path outside its touch, or do shared rules require a doc outside its touch to agree with the code?
+5. Do two Tasks with no blocked_by between them change the same file in their text, without showing the overlap in Files?
+6. Does a Task have a Done item that its touch or the shared rules make impossible?
+
+While the Plan check runs, the Run is held with `plan check running`; `maestro wait <run>` waits for the result. No findings and no other approval trigger starts the Run without approval, and wait continues into the Run. Each finding becomes an approval line with the prefix `plan check: task <n>:`. Wait exits 2 with the findings and `maestro approve <run>`. Approval reads the corrected Plan and starts the Run without a second check. A failed or timed-out check, or an unshaped Report, permits the Run to continue without findings; status shows `plan check: no result (<reason>)`.
+
+The plan Council is a separate, deeper review for a big Plan. It keeps its `council_tasks` and `--council` rules. When both reviews apply, both run. `--no-plan-check` does not disable the Council, and `--no-council` does not disable the Plan check.
 
 Fold any Council findings into the Plan file, then use `maestro approve <run>`. Approval reads the file at the recorded path again, parses it, prints new provisional Routes, and starts the current Tasks under the same Run id. It reuses the held Task ids in Plan order and removes folders for Tasks that the Plan no longer has. It starts no second plan Council. A parse error leaves the Run held.
 

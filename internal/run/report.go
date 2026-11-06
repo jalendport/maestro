@@ -40,6 +40,9 @@ func Report(s *State) string {
 	}
 	w.WriteString("\n")
 	w.WriteString(ModeLine(s) + "\n")
+	if s.PlanCheckNote != "" {
+		w.WriteString(s.PlanCheckNote + "\n")
+	}
 	for _, branch := range s.KeptBranches {
 		fmt.Fprintf(&w, "kept branch %s\n", branch)
 	}
@@ -167,6 +170,9 @@ func Status(s *State) string {
 	}
 	fmt.Fprintf(&w, "run %s  %s  started %s  %s  %d of %d done%s\n", s.Run, s.Title, s.StartedAt.Format("15:04"), state, done, len(s.Tasks), awake)
 	w.WriteString(ModeLine(s) + "\n")
+	if s.PlanCheckNote != "" {
+		w.WriteString(s.PlanCheckNote + "\n")
+	}
 	if s.State == StateHeld {
 		for _, a := range s.Approval {
 			fmt.Fprintf(&w, "approval needed: %s\n", a)

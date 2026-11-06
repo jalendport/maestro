@@ -16,6 +16,7 @@ The glossary for Maestro. Terms only; no implementation detail. Code, docs, and 
 - **Router** — the part of Maestro that makes Routes: Jev, with a rules fallback.
 - **Dispatch** — starting a Lane on a Task and collecting its result.
 - **Council** — several Lanes answering the same question in parallel. The Orchestrator synthesizes; Maestro returns a Merge.
+- **Plan check** — one read Dispatch before a Run with two or more edit Tasks that checks the Plan against the project tree for defects in paths, symbols, scope, and order.
 - **Adapter** — the small per-Harness piece that connects an Orchestrator to Maestro: one shared skill file, one hook file, and the Carrier of the Reminder. Maestro itself works without any Adapter. `maestro adapter install` writes it.
 - **Run** — one invocation of Maestro on a plan: its Tasks, their Routes and Dispatches, the checks, and the report back to the Orchestrator.
 - **Worktree** — a separate git checkout for one Task, outside the project tree. An edit Task uses a Task branch; a read Task uses a detached checkout at the Run branch head.

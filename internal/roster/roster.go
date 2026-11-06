@@ -329,6 +329,9 @@ func Merge(d, u *config.File) *Roster {
 	if u.Run.Worktrees != nil {
 		r.Run.Worktrees = u.Run.Worktrees
 	}
+	if u.Run.PlanCheck != nil {
+		r.Run.PlanCheck = u.Run.PlanCheck
+	}
 	if u.Commit.Message != nil {
 		r.Commit.Message = u.Commit.Message
 	}

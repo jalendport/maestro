@@ -34,6 +34,8 @@ ceiling:, or maestro run --floor and --ceiling, set hard Tier bounds.
 An edit never goes Light. The Reason line shows when Jev's score is below
 the estimate, for example: jev some, orchestrator estimated expert.
 
+For a single Dispatch, commit: true lands one commit on your branch after the gate; commit: false lands the changes uncommitted.
+
 ## Goal
 What to do, as definitions, not commands.
 
@@ -57,6 +59,8 @@ The text after the front matter or optional "# title" and before the first
 "## <task title>" is the Plan's introduction. Maestro adds it to the start
 of every Task's Context under "Shared context of the Plan:", before the
 Task's own "### Context" text. An empty introduction adds nothing.
+
+A Plan with two or more edit Tasks gets a Plan check before it starts; --no-plan-check skips it for one Run.
 
 In Worktree mode, Maestro commits each verified edit Task with the user's
 commit message template (default: the title and a Co-Authored-By trailer

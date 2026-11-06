@@ -35,7 +35,25 @@ func TestLifecycleHarness(t *testing.T) {
 	}
 	runID := os.Getenv("MAESTRO_RUN")
 	report := "## Answer\nThe fixture review is complete.\n\n## Findings\n- none\n\n## Concerns\n- none\n\nPOSITION: confirmed\n"
-	if strings.HasSuffix(runID, "-plan") || strings.HasSuffix(runID, "-review") {
+	if os.Getenv("MAESTRO_TASK") == "plan-check" {
+		if marker := os.Getenv("MAESTRO_PLAN_CHECK_RELEASE"); marker != "" {
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				if _, err := os.Stat(marker); err == nil {
+					break
+				}
+				if time.Now().After(deadline) {
+					os.Exit(1)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+		findings := os.Getenv("MAESTRO_PLAN_CHECK_FINDINGS")
+		if findings == "" {
+			findings = "none"
+		}
+		report = "## Answer\nChecked the Plan.\n\n## Findings\n" + findings + "\n\n## Concerns\nnone\n\nSTATUS: done\n"
+	} else if strings.HasSuffix(runID, "-plan") || strings.HasSuffix(runID, "-review") {
 		marker := filepath.Join(os.Getenv("MAESTRO_LIFECYCLE_MARKERS"), runID)
 		deadline := time.Now().Add(30 * time.Second)
 		for {
@@ -67,11 +85,23 @@ func TestLifecycleHarness(t *testing.T) {
 }
 
 func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
+	for _, key := range []string{"GOPATH", "GOCACHE"} {
+		value, err := exec.Command("go", "env", key).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(key, strings.TrimSpace(string(value)))
+	}
 	fixture := t.TempDir()
 	project := filepath.Join(fixture, "project")
 	markers := filepath.Join(fixture, "markers")
 	maestro := filepath.Join(fixture, "maestro")
 	t.Setenv("MAESTRO_HOME", filepath.Join(fixture, "state"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GIT_AUTHOR_NAME", "Test User")
+	t.Setenv("GIT_AUTHOR_EMAIL", "user@example.test")
+	t.Setenv("GIT_COMMITTER_NAME", "Test User")
+	t.Setenv("GIT_COMMITTER_EMAIL", "user@example.test")
 	t.Setenv("SOLO_PROCESS_ID", "")
 	t.Setenv("TYPESAFE_API_KEY", "")
 	t.Setenv("MAESTRO_LIFECYCLE_MARKERS", markers)
@@ -166,7 +196,7 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 	defer server.Close()
 	write(config.ProjectFile(project), "router = \"jev\"\ncouncils = \"always\"\n", 0o644)
 	write(config.UserFile(), strings.Replace(settings, "backend = \"rules\"", "backend = \"jev\"\nbase_url = "+fmt.Sprintf("%q", server.URL), 1), 0o644)
-	invokeWith(t, 2, project, []string{"TYPESAFE_API_KEY=fixture-key"}, "run", "plan.md", "--council", "--level", "significant", "--floor", "heavy", "--ceiling", "heavy")
+	invokeWith(t, 2, project, []string{"TYPESAFE_API_KEY=fixture-key"}, "run", "plan.md", "--no-plan-check", "--council", "--level", "significant", "--floor", "heavy", "--ceiling", "heavy")
 	write(config.ProjectFile(project), "router = \"rules\"\ncouncils = \"always\"\n", 0o644)
 	write(config.UserFile(), settings, 0o644)
 	runFolder := filepath.Join(config.RunsDir(project), "r-0001")
@@ -262,17 +292,84 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 		t.Fatalf("collected end Council = %+v, error = %v", review, err)
 	}
 
+	for _, findings := range []string{"none", "task 2: missing path; fix: correct the path"} {
+		t.Run("detached Plan check "+findings, func(t *testing.T) {
+			root := t.TempDir()
+			marker := filepath.Join(root, ".agents", "release-check")
+			git := exec.Command("git", "init", root)
+			if out, err := git.CombinedOutput(); err != nil {
+				t.Fatalf("init: %v: %s", err, out)
+			}
+			write(filepath.Join(root, ".gitignore"), ".agents/\n", 0o644)
+			if err := os.MkdirAll(filepath.Join(root, ".agents"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			write(config.ProjectFile(root), "router = \"rules\"\n", 0o644)
+			source := "---\naccess: edit\ncategory: implement\nlevel: some\nlane: codex-sol:medium\ntouch: ['*.txt']\n---\n# Plan check fixture\n"
+			for i := range 2 {
+				source += fmt.Sprintf("\n## Task %d\n### Goal\nCreate a fixture file.\n### Done\nThe file exists.\n", i+1)
+			}
+			write(filepath.Join(root, "plan.md"), source, 0o644)
+			env := []string{"MAESTRO_PLAN_CHECK_RELEASE=" + marker, "MAESTRO_PLAN_CHECK_FINDINGS=" + findings}
+			invokeCheck := func(code int, args ...string) string { t.Helper(); return invokeWith(t, code, root, env, args...) }
+			t.Cleanup(func() { _ = os.WriteFile(marker, nil, 0o644) })
+			out := invokeCheck(2, "run", "plan.md")
+			if !strings.Contains(out, "plan check running") {
+				t.Fatalf("missing running hold: %s", out)
+			}
+			folder := filepath.Join(config.RunsDir(root), "r-0001")
+			held, err := run.Load(folder)
+			if err != nil || held.State != run.StateHeld || held.PlanCheck != "running" {
+				t.Fatalf("held check: %+v, %v", held, err)
+			}
+			write(marker, "", 0o644)
+			if findings == "none" {
+				invokeCheck(0, "wait", held.Run)
+			} else {
+				out := invokeCheck(2, "wait", held.Run)
+				if !strings.Contains(out, "plan check: "+findings) || !strings.Contains(out, "maestro approve "+held.Run) {
+					t.Fatalf("missing finding: %s", out)
+				}
+				write(filepath.Join(root, "plan.md"), strings.Replace(source, "Plan check fixture", "Corrected Plan", 1), 0o644)
+				invokeCheck(0, "approve", held.Run, "--wait")
+			}
+			finished, err := run.Load(folder)
+			if err != nil || finished.State != run.StateFinished || finished.PlanCheck != "done" {
+				t.Fatalf("finished check Run: %+v, %v", finished, err)
+			}
+			if findings != "none" && finished.Title != "Corrected Plan" {
+				t.Fatalf("Plan not reread: %s", finished.Title)
+			}
+			rows, err := os.ReadFile(config.LedgerFile())
+			if err != nil {
+				t.Fatal(err)
+			}
+			checks := 0
+			for _, line := range strings.Split(string(rows), "\n") {
+				var row struct{ Project, Task, Kind string }
+				if json.Unmarshal([]byte(line), &row) == nil && row.Project == finished.Project && row.Task == "plan-check" && row.Kind == "dispatch" {
+					checks++
+				}
+			}
+			if checks != 1 {
+				t.Fatalf("Plan check Dispatches in Ledger: %d", checks)
+			}
+		})
+	}
+
 	for _, tc := range []struct {
 		name, config, response string
 		tasks                  int
 		flags                  []string
 		council                bool
+		planCheck              bool
 	}{
 		{name: "six Tasks", tasks: 6},
 		{name: "explicit Council", tasks: 6, flags: []string{"--council"}, council: true},
 		{name: "size disabled by flag", tasks: 12, flags: []string{"--no-council"}},
 		{name: "no Council flag wins", tasks: 12, flags: []string{"--council", "--no-council"}},
 		{name: "default threshold", tasks: 10, council: true},
+		{name: "Council and Plan check", tasks: 10, council: true, planCheck: true},
 		{name: "custom threshold", tasks: 6, config: "[run]\ncouncil_tasks = 6\n", council: true},
 		{name: "below custom threshold", tasks: 6, config: "[run]\ncouncil_tasks = 7\n"},
 		{name: "size rule off", tasks: 12, config: "[run]\ncouncil_tasks = 0\n"},
@@ -330,7 +427,11 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 				t.Helper()
 				return invokeWith(t, want, root, env, args...)
 			}
-			args := append([]string{"run", "plan.md"}, tc.flags...)
+			args := []string{"run", "plan.md"}
+			if !tc.planCheck {
+				args = append(args, "--no-plan-check")
+			}
+			args = append(args, tc.flags...)
 			out := invokeAt(2, root, args...)
 			wantHeld := "run r-0001 held.  Fold any findings into the Plan file, then: maestro approve r-0001"
 			if !strings.Contains(out, wantHeld) {
@@ -351,6 +452,13 @@ func TestCLIRunCouncilsSurviveAndCollectSeparately(t *testing.T) {
 				invokeAt(0, root, "wait", held.Councils[0])
 			} else if entries, err := os.ReadDir(config.CouncilsDir(root)); err == nil && len(entries) != 0 {
 				t.Fatalf("unexpected Council folders: %v", entries)
+			}
+			if tc.planCheck {
+				invokeAt(2, root, "wait", held.Run)
+				checked, err := run.Load(held.Folder)
+				if err != nil || checked.PlanCheck != "done" || checked.State != run.StateHeld || len(checked.Councils) == 0 {
+					t.Fatalf("combined reviews: %+v, %v", checked, err)
+				}
 			}
 		})
 	}

@@ -39,12 +39,13 @@ func SetPollIntervalForTest(interval time.Duration) (restore func()) {
 
 // CreateOpts are the run verb's flags.
 type CreateOpts struct {
-	Lane      string
-	Level     roster.Level
-	Floor     roster.Tier
-	Ceiling   roster.Tier
-	Council   bool
-	NoCouncil bool
+	Lane        string
+	Level       roster.Level
+	Floor       roster.Tier
+	Ceiling     roster.Tier
+	Council     bool
+	NoCouncil   bool
+	NoPlanCheck bool
 }
 
 // Create parses the Plan file, lays out the Run folder with one Brief file
@@ -97,9 +98,17 @@ func Create(env *dispatch.Env, planPath string, o CreateOpts) (*State, error) {
 			_ = s.Save()
 			if err := council.Detach(c.Path); err != nil {
 				ui.Warnf("plan council: %v", err)
-				return s, nil
 			}
 			ui.Eventf("council", "plan council %s started (%d seats); maestro wait %s", c.Slug, len(c.Seats), c.Slug)
+		}
+	}
+	if needsPlanCheck(env, plan, o) {
+		if err := preparePlanCheck(env, s); err != nil {
+			finishPlanCheck(s, nil, err)
+			_ = s.Save()
+		} else if err := detachPlanCheck(s.Folder); err != nil {
+			finishPlanCheck(s, nil, err)
+			_ = s.Save()
 		}
 	}
 	return s, nil
@@ -166,6 +175,9 @@ func routePlan(env *dispatch.Env, s *State, plan *brief.Plan) (bool, error) {
 // Approve routes the current Plan file under the held Run's id, without
 // another Council. A failed parse or Route leaves the saved Run held.
 func Approve(env *dispatch.Env, s *State) error {
+	if s.PlanCheck == "running" {
+		return fmt.Errorf("run %s: plan check running; use maestro wait %s", s.Run, s.Run)
+	}
 	if s.State != StateHeld {
 		return fmt.Errorf("run %s is %s, not held", s.Run, s.State)
 	}
@@ -233,6 +245,14 @@ func Start(env *dispatch.Env, folder string) error {
 	s, err := Load(folder)
 	if err != nil {
 		return err
+	}
+	if s.PlanCheck == "running" {
+		if err := executePlanCheck(env, s); err != nil {
+			return err
+		}
+		if s.State == StateHeld {
+			return nil
+		}
 	}
 	if err := withControlLock(folder, func() error {
 		var err error

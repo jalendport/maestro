@@ -110,6 +110,8 @@ type State struct {
 	Floor         roster.Tier  `json:"floor,omitempty"`
 	Ceiling       roster.Tier  `json:"ceiling,omitempty"`
 	CouncilSkip   string       `json:"council_skip,omitempty"`
+	PlanCheck     string       `json:"plan_check,omitempty"` // running | done
+	PlanCheckNote string       `json:"plan_check_note,omitempty"`
 }
 
 const FileState = "run.json"
