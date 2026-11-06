@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Deprecated
 - Deprecated the keys `close_tabs` and `solo_tool`: old user files still load, the keys have no effect, and `maestro doctor` reports them
+- Deprecated the Brief and Plan field `tab`: old Brief and Plan files still parse, and the field has no effect
 
 ### Removed
 - Removed Lane tabs in Solo, tab Budget Harvest, and Solo agent tool discovery
