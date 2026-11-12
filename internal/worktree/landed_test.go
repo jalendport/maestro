@@ -34,6 +34,66 @@ func TestLandedBranchHistory(t *testing.T) {
 	assertLanded(t, root, r.ID, true, "")
 }
 
+func TestLandedDetachedHead(t *testing.T) {
+	for _, kind := range []string{"read", "landing"} {
+		t.Run(kind, func(t *testing.T) {
+			root := repository(t)
+			r := openRun(t, root)
+			w := addTask(t, r, "task")
+			read, err := r.Read("read")
+			if err != nil {
+				t.Fatal(err)
+			}
+			landing, _, err := r.LandingWorktree()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tree := read.Dir
+			if kind == "landing" {
+				tree = landing
+			}
+			commit := commitTask(t, Worktree{Root: root, Dir: tree}, "detached.txt", "unlanded\n")
+			resolvedTree, err := filepath.EvalSymlinks(tree)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantReason := "Worktree " + resolvedTree + " has commits that did not land"
+			if landed, reason, err := Landed(root, r.ID, "master"); err != nil || landed || reason != wantReason {
+				t.Fatalf("Landed = %v, %q, %v; want false, %q, nil", landed, reason, err, wantReason)
+			}
+			beforeTrees := tgit(t, root, "worktree", "list", "--porcelain")
+			beforeRefs := tgit(t, root, "show-ref")
+			if err := RemoveLanded(root, r.ID, "master"); err == nil || !strings.Contains(err.Error(), wantReason) {
+				t.Fatalf("RemoveLanded = %v; want refusal containing %q", err, wantReason)
+			}
+			if beforeTrees != tgit(t, root, "worktree", "list", "--porcelain") || beforeRefs != tgit(t, root, "show-ref") {
+				t.Fatal("refusal changed Worktrees or branches")
+			}
+			for _, path := range []string{r.dir, w.Dir, read.Dir, landing} {
+				if _, err := os.Stat(path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := tgit(t, tree, "rev-parse", "HEAD"); got != commit {
+				t.Fatalf("refusal changed HEAD to %s; want %s", got, commit)
+			}
+			tgit(t, root, "merge", "--ff-only", commit)
+			write(t, root, "later.txt", "later\n")
+			tgit(t, root, "add", "later.txt")
+			tgit(t, root, "commit", "-m", "Advance user branch")
+			assertLanded(t, root, r.ID, true, "")
+			if err := RemoveLanded(root, r.ID, "master"); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{r.dir, w.Dir, read.Dir, landing} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("path remains: %s: %v", path, err)
+				}
+			}
+		})
+	}
+}
+
 func TestLandedUncommittedPaths(t *testing.T) {
 	for _, kind := range []string{"edit", "staged", "untracked", "delete", "rename", "symlink", "mode", "index differs"} {
 		t.Run(kind, func(t *testing.T) {

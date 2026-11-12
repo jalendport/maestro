@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// Landed reports whether all branches and uncommitted work of an identity
+// Landed reports whether all branches, Worktree HEADs, and uncommitted work of an identity
 // are already on userBranch. It does not change the repository.
 func Landed(root, id, userBranch string) (landed bool, reason string, err error) {
 	_, _, reason, err = landedIdentity(root, id, userBranch)
@@ -111,6 +111,13 @@ func landedIdentity(root, id, userBranch string) (dir string, trees []string, re
 	}
 	sort.Strings(trees)
 	for _, tree := range trees {
+		if _, err := git(root, tree, "merge-base", "--is-ancestor", "HEAD", target); err != nil {
+			var exit *exec.ExitError
+			if errors.As(err, &exit) && exit.ExitCode() == 1 {
+				return dir, nil, "Worktree " + tree + " has commits that did not land", nil
+			}
+			return dir, nil, "", err
+		}
 		paths, err := Dirty(tree)
 		if err != nil {
 			return dir, nil, "", err
