@@ -23,7 +23,7 @@ Keys of `accounts.<id>`:
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `harness` | string | none | Binds the Account to one Harness, and so to every Family of that Harness. |
-| `billing` | string | `"subscription"` | Sets the billing kind: `subscription` reads a usage window, `metered` counts money against a cap. An automatic Route gives a `metered` Account read work only, and only when no subscription Lane serves the level; a requested Lane on a `metered` Account takes edit work with a warning. |
+| <a id="billing"></a>`billing` | string | `"subscription"` | Sets the billing kind. `subscription` reads a usage window and removes vendor API credentials from Lanes. If you pay by API key, set `billing = "metered"` under `[accounts.<id>]` in `~/.maestro/config.toml`. `metered` keeps vendor API credentials and counts spend against the Account's `budget` cap; without a cap, Maestro reports an unknown Budget with no spend limit. An automatic Route gives a `metered` Account read work only, and only when no subscription Lane serves the level. Token-billed Lanes get edit work only when named, with a warning. |
 | `plan_price` | float | none | Gives the plan price in USD, which Maestro multiplies by Headroom to break a tie between equally fit subscription Lanes. |
 | `block_at` | float | `0.90` | Sets the used share of a window at which the Account's Lanes leave the Route list. |
 | `reserve` | float | none | Keeps this share of the weekly window for the Orchestrator, so automatic Dispatches cannot use it. The reserve applies to any Account. |

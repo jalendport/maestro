@@ -15,6 +15,7 @@ import (
 	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/jev"
 	"github.com/jalendport/maestro/internal/proc"
+	"github.com/jalendport/maestro/internal/roster"
 	"github.com/jalendport/maestro/internal/worktree"
 	"github.com/spf13/cobra"
 )
@@ -97,6 +98,9 @@ func (a *app) doctorCmd() *cobra.Command {
 					}
 				}
 				rows = append(rows, row)
+				if rec.Path != "" {
+					rows = append(rows, billingDoctorWarnings(env.Roster, name)...)
+				}
 			}
 			rows = append(rows, jevRow())
 			rows = append(rows, orchestratorRow(env.Roster.Router.Orchestrator))
@@ -176,6 +180,25 @@ func (a *app) doctorCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&canary, "canary", false, "Run one Canary per installed Harness, or for the named Harness (uses your Account)")
 	return c
+}
+
+func billingDoctorWarnings(r *roster.Roster, harness string) []doctorRow {
+	var rows []doctorRow
+	for id, account := range r.Accounts {
+		if account.Harness != harness || account.Billing != "subscription" {
+			continue
+		}
+		for _, name := range r.StripEnv(harness) {
+			if name == "TYPESAFE_API_KEY" || (!strings.Contains(name, "API_KEY") && !strings.Contains(name, "AUTH_TOKEN")) || os.Getenv(name) == "" {
+				continue
+			}
+			rows = append(rows, doctorRow{
+				Name: harness, Detail: config.UserFile(),
+				State: fmt.Sprintf("warning: %s is set, but Account %s is a subscription, so Lanes do not get it; if you pay by API key, set billing = \"metered\" under [accounts.%s] in ~/.maestro/config.toml", name, id, id),
+			})
+		}
+	}
+	return rows
 }
 
 func projectDoctorWarnings(root string, project *config.Project) []doctorRow {
