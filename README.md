@@ -7,9 +7,9 @@ Maestro is a command-line tool that takes the Tasks of an approved plan, routes 
 ## Features
 
 - **Councils** — put one question to several Lanes, let them challenge each other in a second Round, and get every finding side by side
-- **Routing with a reason** — each Task goes to a Lane that is strong enough for it, chosen by [Jev](https://typesafe.ai) or a rules table, with one line saying why
+- **Routing with a reason** — each Task goes to a Lane that is strong enough for it, chosen by [Jev](https://typesafe.ai) or a rules table, with one line saying why; [without a Jev key](docs/reference.md#without-a-jev-key) the rules table decides every Route
 - **Runs** — a Plan file becomes ordered Tasks that run in parallel where they can, with a live status view and a report at the end
-- **Checks and a gate** — your project's checks run after every edit, and Jev reads the diff against the Brief before a Task closes
+- **Checks and a gate** — your project's checks run after every edit, and Jev reads the diff against the Brief before a Task closes; [without a Jev key](docs/reference.md#without-a-jev-key) edit Tasks end unverified and you read the diff
 - **Subscriptions first** — work spreads across the subscriptions you already pay for; token-billed Lanes get edit work only when you name them
 - **Budgets that bind** — usage windows are read from every Dispatch, with a block point, a warning, and a reserve for your own session
 - **An Access contract** — a Lane gets `read` or `edit` Access, held by a sandbox, a tool allowlist, or the Maestro hook
@@ -19,7 +19,7 @@ Maestro is a command-line tool that takes the Tasks of an approved plan, routes 
 
 ## Installation
 
-Prerequisites: [git](https://git-scm.com), at least one of the four Harness CLIs ([Claude Code](https://code.claude.com/docs/en/quickstart), [Codex](https://developers.openai.com/codex/cli), [Grok](https://docs.x.ai/build/overview), or [Antigravity](https://antigravity.google/docs/getting-started?tab=cli)), and optionally [Solo](https://soloterm.com).
+Prerequisites: [git](https://git-scm.com), at least one of the four Harness CLIs ([Claude Code](https://code.claude.com/docs/en/quickstart), [Codex](https://developers.openai.com/codex/cli), [Grok](https://docs.x.ai/build/overview), or [Antigravity](https://antigravity.google/docs/getting-started?tab=cli)), and optionally [Solo](https://soloterm.com). The defaults assume a subscription login; if you pay by API key, set [`billing = "metered"`](docs/configuration.md#billing) for the Account.
 
 Install with [Homebrew](https://brew.sh) (macOS), by the full tap path:
 
@@ -43,7 +43,7 @@ Then check the machine and connect the Harnesses:
 
 ```sh
 maestro doctor           # harness versions, logins, the Jev key, Solo
-maestro key set          # store the Jev key in ~/.maestro/env (optional; the rules table works without it)
+maestro key set          # store the Jev key in ~/.maestro/env (optional; without it the rules table routes and edits end unverified)
 maestro adapter install  # connect every harness found on this machine
 maestro init             # in each project: write .agents/maestro.toml
 ```

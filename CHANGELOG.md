@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+- Added `maestro resume <run> --task <n> --accept` to close a blocked or failed Task after you read its diff; Maestro commits and merges it as a verified Task and starts its dependents
+- Added a `maestro doctor` warning when a subscription Account removes a set vendor API key, such as `ANTHROPIC_API_KEY`, from Lanes; set `billing = "metered"` if you pay by API key
+- Added a "Without a Jev key" section to the reference that lists what changes without a Jev key
+
+### Changed
+- Changed a skipped Task to count as done for `blocked_by` and the overlap order, so its dependents start
+- Changed Brief files and Plan Tasks to refuse an unknown heading, so the text under it is no longer dropped silently; headings inside fenced code blocks stay text
+- Changed the Lane rules to define Blocked as a command the Harness denied or a Done item the Lane could not make true; a failed command that the Lane replaced belongs under Deviations
+- Changed pause notices to repeat only when the Tasks that need an answer change or an answer starts new work
+- Changed the Orchestrator skill to put a Done item that a command can verify into `checks:`
+
+### Fixed
+- Fixed resume answers that were lost when they arrived while Maestro routed or started the Task; an answer for a running, done, or skipped Task is now an error
+- Fixed the gate reading "No command was denied." and similar lines as Blocked items
+
 ## 2.0.0 - 2026-11-12
 
 ### Added
