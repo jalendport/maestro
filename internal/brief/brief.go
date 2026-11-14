@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jalendport/maestro/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,6 +45,7 @@ type Fields struct {
 	Level     string            `yaml:"level"`
 	Access    string            `yaml:"access"`
 	Dirs      []string          `yaml:"dirs"`
+	ReadDirs  []string          `yaml:"read_dirs,omitempty"`
 	Touch     []string          `yaml:"touch"`
 	Checks    []string          `yaml:"checks"`
 	Commit    *bool             `yaml:"commit"`
@@ -142,6 +144,30 @@ func (b *Brief) Validate() error {
 	if b.WallLimit != "" {
 		if _, err := time.ParseDuration(b.WallLimit); err != nil {
 			return fmt.Errorf("wall_limit: %w", err)
+		}
+	}
+	return ValidateDirs(b.Dirs, b.ReadDirs)
+}
+
+// ValidateDirs rejects overlapping read-only and writable folders.
+func ValidateDirs(dirs, readDirs []string) error {
+	resolve := func(path string) string {
+		path, _ = filepath.Abs(config.ExpandHome(path))
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return resolved
+		}
+		return path
+	}
+	contains := func(parent, child string) bool {
+		rel, err := filepath.Rel(parent, child)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	for _, read := range readDirs {
+		for _, write := range dirs {
+			r, w := resolve(read), resolve(write)
+			if contains(r, w) || contains(w, r) {
+				return fmt.Errorf("read_dirs entry %q overlaps dirs entry %q", read, write)
+			}
 		}
 	}
 	return nil

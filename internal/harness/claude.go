@@ -69,9 +69,36 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 		args = append(args, "--effort", l.Effort)
 	}
 	var flags []string
+	var referenceRules, referenceDenials []string
+	absoluteRule := func(path string) string {
+		path = filepath.ToSlash(path)
+		path = strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`, `]`, `\]`).Replace(path)
+		return "//" + strings.TrimPrefix(path, "/")
+	}
+	// Claude checks both the written and resolved paths for a read grant.
+	withResolved := func(paths []string) []string {
+		out := append([]string{}, paths...)
+		for _, path := range paths {
+			if resolved, err := filepath.EvalSymlinks(path); err == nil && resolved != path {
+				out = append(out, resolved)
+			}
+		}
+		return out
+	}
+	for _, dir := range withResolved(l.ReadDirs) {
+		pattern := absoluteRule(filepath.Clean(dir))
+		referenceRules = append(referenceRules, "Read("+pattern+")", "Read("+pattern+"/**)")
+		referenceDenials = append(referenceDenials, "Edit("+pattern+")", "Edit("+pattern+"/**)")
+	}
+	for _, file := range withResolved(l.ReadFiles) {
+		pattern := absoluteRule(file)
+		referenceRules = append(referenceRules, "Read("+pattern+")")
+		referenceDenials = append(referenceDenials, "Edit("+pattern+")")
+	}
 	switch l.Access {
 	case "read":
 		tools := append([]string{}, readTools...)
+		tools = append(tools, referenceRules...)
 		tools = append(tools, fmt.Sprintf("Write(//%s/**)", l.RunFolder), fmt.Sprintf("Edit(//%s/**)", l.RunFolder))
 		if l.SoloMCPCommand != "" {
 			tools = append(tools, solo.LaneTools()...)
@@ -84,6 +111,7 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 			mode = "auto"
 		}
 		tools := []string{"Bash(git diff *)", "Bash(git log *)", "Bash(git show *)", "Bash(git status *)", "Bash(git blame *)", "Bash(git status)", "Bash(git diff)", "Bash(ls *)", "Bash(cat *)", "WebFetch", "WebSearch"}
+		tools = append(tools, referenceRules...)
 		for _, rule := range l.AllowRules {
 			if rule != "mcp__solo" && !strings.HasPrefix(rule, "mcp__solo__") {
 				tools = append(tools, rule)
@@ -124,14 +152,16 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 	}
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 	filesystem := map[string]any{}
+	denyWrite := append(append([]string{}, l.ReadDirs...), l.ReadFiles...)
 	enforcement := Enforced
 	if l.Access == "edit" {
 		filesystem["allowWrite"] = append([]string{l.RunFolder}, l.Dirs...)
-		filesystem["denyWrite"] = []string{filepath.Join(l.Root, ".git", "config"), filepath.Join(l.Root, ".git", "hooks")}
+		denyWrite = append(denyWrite, filepath.Join(l.Root, ".git", "config"), filepath.Join(l.Root, ".git", "hooks"))
 		if l.ClaudeAuto {
 			enforcement = BestEffort
 		}
 	}
+	filesystem["denyWrite"] = denyWrite
 	hookSpec, _ := adapter.Spec("claude")
 	var matchers []string
 	for _, matcher := range strings.Split(hookSpec.Matcher, "|") {
@@ -140,6 +170,7 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 		}
 	}
 	matchers = append(matchers, "mcp__solo__.*")
+	matchers = append(matchers, "Read", "Glob", "Grep", "LS")
 	settings, err := json.Marshal(map[string]any{
 		"env": map[string]string{"MAESTRO_TASK_FOLDER": l.RunFolder},
 		"sandbox": map[string]any{
@@ -161,7 +192,9 @@ func (c *Claude) Build(l Launch) (*Command, error) {
 	if err != nil {
 		return nil, err
 	}
-	flags = append(flags, "--disallowedTools", fmt.Sprintf("Edit(//%s/.git/**)", l.Root), fmt.Sprintf("Write(//%s/.git/**)", l.Root), "--settings", string(settings))
+	flags = append(flags, "--disallowedTools", fmt.Sprintf("Edit(//%s/.git/**)", l.Root), fmt.Sprintf("Write(//%s/.git/**)", l.Root))
+	flags = append(flags, referenceDenials...)
+	flags = append(flags, "--settings", string(settings))
 	args = append(args, flags...)
 	cmd := exec.Command(c.bin, args...)
 	cmd.Dir = l.Root

@@ -518,16 +518,18 @@ func TestRunOnceWritesLaneForEveryHarnessAndAccess(t *testing.T) {
 				project := &config.Project{Allow: []string{"Bash(go run *)"}, Checks: []string{"git status --short"}}
 				env := &Env{Root: root, Roster: &roster.Roster{}, Project: project, Reg: harness.New(map[string]string{name: bin})}
 				task := &Task{Project: root, Folder: folder, Run: "r-test", Task: "abcd", Access: access,
-					Dirs: []string{t.TempDir()}, Checks: []string{"git diff --name-only"}, Commit: access == brief.AccessEdit,
+					Dirs: []string{t.TempDir()}, ReadDirs: []string{t.TempDir()}, Checks: []string{"git diff --name-only"}, Commit: access == brief.AccessEdit,
 					Route: &router.Route{Harness: name}, WallLimit: "1m", IdleLimit: "1m"}
+				readFile := filepath.Join(t.TempDir(), "reference.go")
 				for attempt := 1; attempt <= 2; attempt++ {
 					want := &hook.Lane{Task: task.Task, Harness: name, Access: access, Root: root, Dirs: task.Dirs,
+						ReadDirs: task.ReadDirs, ReadFiles: []string{readFile},
 						RunFolder: folder, Allow: []string{}, Checks: []string{}}
 					if access == brief.AccessEdit {
 						want.Allow = project.Allow
 						want.Checks = []string{"git status --short", "git diff --name-only"}
 					}
-					rec := runOnce(env, task, &brief.Brief{}, attempt, nil)
+					rec := runOnce(env, task, &brief.Brief{Files: []string{readFile, "local.go", filepath.Join(root, "local.go")}}, attempt, nil)
 					if rec.Outcome.Outcome != OutcomeAnswered && rec.Outcome.Outcome != OutcomeUnverified {
 						t.Fatalf("outcome: %+v", rec.Outcome)
 					}

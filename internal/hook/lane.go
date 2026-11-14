@@ -22,6 +22,8 @@ type Lane struct {
 	Access    string   `json:"access"`
 	Root      string   `json:"root"`
 	Dirs      []string `json:"dirs"`
+	ReadDirs  []string `json:"read_dirs,omitempty"`
+	ReadFiles []string `json:"read_files,omitempty"`
 	RunFolder string   `json:"run_folder"`
 	Allow     []string `json:"allow"`
 	Checks    []string `json:"checks"`
@@ -338,6 +340,9 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 		if !filepath.IsAbs(target) {
 			target = cmp.Or(action.cwd, lane.Root) + string(filepath.Separator) + target
 		}
+		if referencePath(target, lane) {
+			return Verdict{Kind: "deny", Reason: "read-only reference: " + target}
+		}
 		if lane.Access == "edit" && insideGitDir(target, lane.Root) {
 			return Verdict{Kind: "deny", Reason: "writes to the project's .git directory are not allowed"}
 		}
@@ -361,6 +366,9 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 			return Verdict{Kind: "deny", Reason: reason}
 		}
 		cwd := cmp.Or(action.cwd, c.CWD, lane.Root)
+		if !filepath.IsAbs(cwd) {
+			cwd = filepath.Join(lane.Root, cwd)
+		}
 		allowedCwd := false
 		for _, dir := range append([]string{lane.Root, lane.RunFolder}, lane.Dirs...) {
 			if inside(cwd, dir) {
@@ -368,17 +376,43 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 				break
 			}
 		}
-		if !allowedCwd {
+		referenceCwd := false
+		if c.Harness == "claude" || c.Harness == "grok" {
+			for _, dir := range lane.ReadDirs {
+				if inside(cwd, dir) {
+					referenceCwd = true
+				}
+			}
+		}
+		if !allowedCwd && !referenceCwd {
 			return Verdict{Kind: "deny", Reason: "outside the Lane's working directories: " + cwd}
 		}
+		approveRead, allReadOnly := false, true
 		for _, segment := range commandSegments(command) {
 			if flag := unsafeReadFlag(segment); flag != "" {
 				return Verdict{Kind: "deny", Reason: "read-only command carries a write flag or form: " + flag}
 			}
+			matched, variable := stripEnvironmentPrefix(strings.TrimSpace(segment))
+			name, _ := readCommand(commandWords(matched))
+			_, readOnly := readOnlyCommands[name]
+			readOnly = readOnly && variable == ""
+			allReadOnly = allReadOnly && readOnly
+			touchesReference := referenceCwd || referencePath(cwd, lane)
+			for _, path := range commandPaths(matched, cwd) {
+				if referencePath(path, lane) {
+					touchesReference = true
+				}
+				if c.Harness == "claude" && readOnly && (len(lane.ReadDirs) > 0 || len(lane.ReadFiles) > 0) && !readablePath(path, lane) {
+					return Verdict{Kind: "deny", Reason: "outside the Lane's readable paths: " + path}
+				}
+			}
+			if touchesReference && !readOnly {
+				return Verdict{Kind: "deny", Reason: "read-only reference: only read-only commands are allowed"}
+			}
+			approveRead = approveRead || touchesReference
 			if commandAllowed(strings.TrimSpace(segment), lane) {
 				continue
 			}
-			_, variable := stripEnvironmentPrefix(strings.TrimSpace(segment))
 			environmentReason := ""
 			if variable != "" {
 				environmentReason = "environment variable is not on the harmless list: " + variable + "; "
@@ -391,6 +425,9 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 			}
 			return Verdict{Kind: "deny", Reason: environmentReason + "outside the Lane's allow list; add it to `checks` or the project `allow` list; accepted read-only commands: " + readOnlyCommandNames()}
 		}
+		if approveRead && allReadOnly && c.Harness == "claude" {
+			return Verdict{Kind: "approve_read"}
+		}
 		return Verdict{Kind: "auto_approve"}
 	default:
 		// A Solo spawn inside a Lane still meets the spawn rule.
@@ -398,10 +435,108 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 			return Decide(c, "all").verdict()
 		}
 		if readTool(c.Tool) {
+			if c.Harness == "claude" && (len(lane.ReadDirs) > 0 || len(lane.ReadFiles) > 0) {
+				if target := claudeReadTarget(c, lane); target != "" && !readablePath(target, lane) {
+					return Verdict{Kind: "deny", Reason: "outside the Lane's readable paths: " + target}
+				}
+				if c.Tool == "Glob" {
+					if pattern, _ := c.Input["pattern"].(string); filepath.IsAbs(pattern) && !readablePath(pattern, lane) {
+						return Verdict{Kind: "deny", Reason: "outside the Lane's readable paths: " + pattern}
+					}
+				}
+			}
 			return Verdict{Kind: "allow"}
 		}
 		return Verdict{Kind: "deny", Reason: "unknown Lane tool: " + c.Tool}
 	}
+}
+
+func referencePath(path string, lane *Lane) bool {
+	for _, dir := range lane.ReadDirs {
+		if inside(path, dir) {
+			return true
+		}
+	}
+	for _, file := range lane.ReadFiles {
+		p, pErr := resolvePath(path)
+		f, fErr := resolvePath(file)
+		if pErr == nil && fErr == nil && p == f {
+			return true
+		}
+	}
+	return false
+}
+
+func readablePath(path string, lane *Lane) bool {
+	for _, dir := range append([]string{lane.Root, lane.RunFolder}, lane.Dirs...) {
+		if inside(path, dir) {
+			return true
+		}
+	}
+	return referencePath(path, lane)
+}
+
+func claudeReadTarget(c *Call, lane *Lane) string {
+	var target string
+	switch c.Tool {
+	case "Read":
+		target, _ = c.Input["file_path"].(string)
+	case "Glob", "Grep", "LS":
+		target, _ = c.Input["path"].(string)
+		if target == "" {
+			target = cmp.Or(c.CWD, lane.Root)
+		}
+	default:
+		return ""
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(cmp.Or(c.CWD, lane.Root), target)
+	}
+	return target
+}
+
+// commandPaths finds explicit paths, including git's working-directory flags.
+// Non-path operands, such as search text, stay with the existing command judge.
+func commandPaths(command, cwd string) []string {
+	words := commandWords(command)
+	var paths []string
+	gitCwd := cwd
+	for i, word := range words {
+		if i == 0 {
+			continue
+		}
+		gitDir := words[0] == "git" && (words[i-1] == "-C" || strings.HasPrefix(word, "-C") && len(word) > 2)
+		if strings.HasPrefix(word, "-C") && gitDir {
+			word = strings.TrimPrefix(word, "-C")
+		} else if strings.HasPrefix(word, "-") {
+			_, value, ok := strings.Cut(word, "=")
+			if !ok {
+				continue
+			}
+			word = value
+		}
+		path := word
+		if path == "~" || strings.HasPrefix(path, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+			}
+		}
+		base := cwd
+		if words[0] == "git" {
+			base = gitCwd
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(base, path)
+		}
+		_, exists := os.Stat(path)
+		if gitDir || filepath.IsAbs(word) || strings.HasPrefix(word, "~") || strings.HasPrefix(word, ".") || strings.Contains(word, "/") || exists == nil {
+			paths = append(paths, path)
+		}
+		if gitDir {
+			gitCwd = path
+		}
+	}
+	return paths
 }
 
 func readTool(tool string) bool {
@@ -555,6 +690,21 @@ func readOnlyCommandNames() string {
 func readCommand(words []string) (string, int) {
 	if len(words) == 0 {
 		return "", 0
+	}
+	if words[0] == "git" {
+		i := 1
+		for i < len(words) {
+			if words[i] == "-C" && i+1 < len(words) {
+				i += 2
+			} else if strings.HasPrefix(words[i], "-C") && len(words[i]) > 2 {
+				i++
+			} else {
+				break
+			}
+		}
+		if i < len(words) {
+			return "git " + words[i], i + 1
+		}
 	}
 	if len(words) >= 3 && words[0] == "composer" && words[1] == "--no-plugins" && words[2] == "show" {
 		return "composer show", 3

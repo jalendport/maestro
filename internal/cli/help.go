@@ -17,6 +17,7 @@ category: implement          # implement | fix | refactor | spec | research | re
 level: some                  # Orchestrator's estimate: none | some | significant | expert
 access: edit                 # read | edit; category default when absent (code categories edit, the rest read)
 dirs: [../shared-fixtures]   # extra writable directories
+read_dirs: [../boilerplate]  # reference folders; read only, ~ expands as in dirs
 touch: [internal/probe/**]   # scope guard; a diff outside it is a Bad result
 checks: ["go test ./internal/probe/..."]   # added to the project checks in .agents/maestro.toml
 # Project .agents/maestro.toml: allow = ["Bash(go run *)"] adds tool rules to edit Lanes only.
@@ -35,6 +36,7 @@ An edit never goes Light. The Reason line shows when Jev's score is below
 the estimate, for example: jev some, orchestrator estimated expert.
 
 For a single Dispatch, commit: true lands one commit on your branch after the gate; commit: false lands the changes uncommitted.
+read_dirs and dirs must not overlap. An absolute Files path outside the project grants read access to that file only.
 
 ## Goal
 What to do, as definitions, not commands.
@@ -54,6 +56,7 @@ defaults (any Brief field), an optional "# title", then one "## <task title>"
 section per Task. Each section may start with a "- key: value" list of the
 same fields as a Brief plus blocked_by (plan numbers or titles), then
 "### Goal", "### Done", "### Context", "### Files".
+read_dirs lists reference folders with read access only. Run and Task lists add together, as dirs does; ~ expands. read_dirs and dirs must not overlap.
 
 The text after the front matter or optional "# title" and before the first
 "## <task title>" is the Plan's introduction. Maestro adds it to the start
@@ -73,6 +76,7 @@ uncommitted.
 ---
 access: edit
 commit: false
+read_dirs: [../boilerplate]
 ---
 # Probe feature
 

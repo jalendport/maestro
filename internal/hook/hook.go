@@ -165,10 +165,16 @@ func readOnlyArgs(in map[string]any) bool {
 	return strings.Contains(joined, " dontAsk ") || strings.Contains(joined, " read-only ") || strings.Contains(joined, " --deny Write ")
 }
 
-// Render writes the answer in the Harness's shape. An allow is written
-// explicitly for Grok, whose hooks fail open on silence.
+// Render writes the answer in the Harness's shape. Claude gets an explicit
+// approval only for read-only commands that use named references.
 func Render(harness string, d interface{ verdict() Verdict }) []byte {
 	v := d.verdict()
+	if harness == "claude" && v.Kind == "approve_read" {
+		out, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]any{
+			"hookEventName": "PreToolUse", "permissionDecision": "allow",
+		}})
+		return out
+	}
 	if harness == "claude" && v.Kind != "deny" {
 		return nil
 	}

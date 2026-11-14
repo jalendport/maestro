@@ -52,6 +52,9 @@ func ParsePlanText(src string) (*Plan, error) {
 		if err := decodeFields(front, &p.Defaults); err != nil {
 			return nil, fmt.Errorf("front matter: %w", err)
 		}
+		if err := ValidateDirs(p.Defaults.Dirs, p.Defaults.ReadDirs); err != nil {
+			return nil, fmt.Errorf("front matter: %w", err)
+		}
 	}
 	p.Title = firstH1(body)
 	locs := headingLocations(body, headingRe)
@@ -218,6 +221,9 @@ func mergeFields(d, t Fields) Fields {
 	}
 	if t.Dirs != nil {
 		out.Dirs = append(append([]string{}, d.Dirs...), t.Dirs...)
+	}
+	if t.ReadDirs != nil {
+		out.ReadDirs = append(append([]string{}, d.ReadDirs...), t.ReadDirs...)
 	}
 	if t.Touch != nil {
 		out.Touch = t.Touch

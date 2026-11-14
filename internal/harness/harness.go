@@ -36,6 +36,8 @@ type Launch struct {
 	Access          string
 	Root            string
 	Dirs            []string
+	ReadDirs        []string
+	ReadFiles       []string // absolute Files outside the project; no folder grant
 	AllowRules      []string // project tool rules, edit only
 	TaskID          string
 	AllowedCommands []string // verification commands, allowed per edit Dispatch

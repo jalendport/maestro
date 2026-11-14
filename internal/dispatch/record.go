@@ -51,6 +51,7 @@ type Task struct {
 	Commit     bool            `json:"commit"`
 	Touch      []string        `json:"touch,omitempty"`
 	Dirs       []string        `json:"dirs,omitempty"`
+	ReadDirs   []string        `json:"read_dirs,omitempty"`
 	Checks     []string        `json:"checks,omitempty"`
 	WallLimit  string          `json:"wall_limit"`
 	IdleLimit  string          `json:"idle_limit"`

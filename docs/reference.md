@@ -16,7 +16,7 @@ Two settings make an edit Lane `best-effort`: `claude_auto` for Claude edit Lane
 
 ### The hook
 
-The hook is the set of `maestro hook` entries that each Adapter installs in a Harness: a `PreToolUse` entry, and for Claude Code, Codex, and Antigravity a second entry for the Reminder event (Antigravity's runs `maestro hook agy`). For Antigravity, Grok, and Claude Code the `PreToolUse` entry also holds each Lane's permissions, because those harnesses' own permission rules cannot hold the Access on their own. For Claude Code the hook can only deny, and the Claude sandbox holds the rest.
+The hook is the set of `maestro hook` entries that each Adapter installs in a Harness: a `PreToolUse` entry, and for Claude Code, Codex, and Antigravity a second entry for the Reminder event (Antigravity's runs `maestro hook agy`). For Antigravity, Grok, and Claude Code the `PreToolUse` entry also holds each Lane's permissions, because those harnesses' own permission rules cannot hold the Access on their own. For Claude Code the hook denies disallowed calls and approves read-only commands that use named references; the Claude sandbox holds shell writes.
 
 The hook applies only inside its [`scope`](configuration.md#hook), for both the deny rule and the Reminder. The hook probe in the README denies only where the hook is in scope. In Grok, the rules file loads at the start of each session, so there the scope is best-effort.
 
@@ -90,6 +90,8 @@ An Adapter is one shared skill file, one hook file, and the Carrier of the Remin
 
 Every Claude Lane ignores the user, project, and local settings files. `CLAUDE.md` still loads. Maestro supplies the Lane hook and sandbox settings at launch. A Claude edit Lane runs shell commands in the Claude sandbox: writes stay in the project, the Run folder, the project's `dirs`, and the per-user temp directory.
 
+`read_dirs` adds read-only reference folders without `--add-dir`. Maestro uses absolute `Read` permission rules for Read, Glob, and Grep, `Edit` deny rules for file changes, and sandbox `denyWrite` paths for shell commands. Absolute paths in Files outside the Lane's project get exact file rules; sibling files get no grant. The hook denies edits to references and approves only commands on its read-only list when they use references, including `ls <folder>` and `git -C <folder> status`. Write forms are denied before Relay. Other hook approvals still pass through Claude's own permission flow. See [Claude's path rules](https://code.claude.com/docs/en/permissions#read-and-edit).
+
 Shell commands have no outbound network, so a check that must download something fails inside a Claude Lane. Caches already on disk are readable; a check that writes a cache needs that cache in `dirs`. A shell command that names a network host is denied without a prompt in every Claude Lane (`sandbox.network.strictAllowlist`, Claude Code 2.1.219 or later); a check that needs a module download must find it in the caches first.
 
 `claude_auto = true` makes Claude edit Lanes `best-effort`: Claude's own classifier decides whether to allow a command outside the allow list. For the Solo tools of a Claude Lane, see [Solo](#solo).
@@ -97,6 +99,8 @@ Shell commands have no outbound network, so a check that must download something
 ### Codex
 
 The Codex sandbox holds the Access of a Codex Lane. For which Lanes relay, see [Relay](#relay).
+
+Codex already reads outside the project in both Access values. `read_dirs` and absolute Files need no launch change and add no writable roots. These read grants do not restrict Codex's existing read access.
 
 ### Grok
 
@@ -118,6 +122,8 @@ Maestro cannot detect three limits. Grok warns and continues without the kernel 
 
 Grok's `hashline` file toolset is not supported in a Lane: its write tools are denied as unknown.
 
+Grok file tools already read outside the project. The hook also permits read-only commands to use a `read_dirs` working folder; the workspace sandbox keeps external reference folders read-only. `read_dirs` adds no writable folder and does not disable the sandbox. When an edit Lane already runs without that sandbox because of writable `dirs`, shell protection stays best-effort. Grok cannot add a read-only exception inside a folder that its sandbox already makes writable, such as the project, temp folders, or `~/.grok`; the hook denies direct file edits there, but has no kernel boundary for a permitted shell command that writes there indirectly.
+
 ### Antigravity
 
 Antigravity takes read and edit work, like the other Harnesses. The Maestro hook entry that `maestro adapter install agy` installs carries each Lane's permissions:
@@ -127,6 +133,8 @@ Antigravity takes read and edit work, like the other Harnesses. The Maestro hook
 - An edit Lane relays other commands; a read Lane denies them
 
 Antigravity has no kernel sandbox, so the hook is the only boundary of an Antigravity Lane. The hook judges each command by the [read-only command judgment](#read-only-command-judgment).
+
+Antigravity file tools already read outside the project. `read_dirs` and absolute Files add no launch folders. Antigravity cannot express read-only folders in a kernel sandbox, so commands with an external reference working folder remain denied. Use file tools or a read-only command from the project folder. The hook denies direct reference edits; an allowed shell command that writes indirectly has no kernel boundary.
 
 ## Routing and the gate
 
@@ -191,6 +199,8 @@ When Jev's score is below the Orchestrator's estimate, the Reason line says, for
 ### Plan file and Brief file format
 
 A Brief file has a front matter of short fields and fixed headings for the Goal and the Done. A Plan file holds every Task of a Run, each as a section with the same fields as a Brief file plus `blocked_by`. `maestro help brief` and `maestro help plan` print the formats.
+
+`read_dirs: [../boilerplate]` lists read-only reference folders. A leading `~` expands as in `dirs`. Plan front matter and Task sections both accept it; their lists add together. A `read_dirs` entry must not equal, contain, or sit inside a `dirs` entry. Parsing reports both entries on overlap, including inherited Plan entries. Absolute paths in Files outside the project grant access to each file, not its parent folder. Harness support and limits are listed above.
 
 Only Goal, Done, Context, and Files are allowed as `##` headings in a Brief file or `###` headings in a Plan Task; matching is case-insensitive, and an unknown heading is an error.
 

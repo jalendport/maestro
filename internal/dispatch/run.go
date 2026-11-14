@@ -268,13 +268,24 @@ func prepareRouted(env *Env, b *brief.Brief, route *router.Route, runID, taskID,
 	for _, d := range b.Dirs {
 		dirs = append(dirs, config.ExpandHome(d))
 	}
+	var readDirs []string
+	for _, d := range b.ReadDirs {
+		d = config.ExpandHome(d)
+		if !filepath.IsAbs(d) {
+			d = filepath.Join(env.Root, d)
+		}
+		readDirs = append(readDirs, filepath.Clean(d))
+	}
+	if err := brief.ValidateDirs(dirs, readDirs); err != nil {
+		return nil, err
+	}
 	wall := env.Roster.WallLimit(route.Tier).Duration
 	if d := b.WallLimitDuration(); d > wall {
 		wall = d
 	}
 	t := &Task{
 		Project: env.Root, Run: runID, Task: taskID, BriefPath: b.Path, Title: b.Title,
-		Category: route.Category, Access: b.EffectiveAccess(), Commit: b.WantsCommit(), Touch: b.Touch, Dirs: dirs,
+		Category: route.Category, Access: b.EffectiveAccess(), Commit: b.WantsCommit(), Touch: b.Touch, Dirs: dirs, ReadDirs: readDirs,
 		Checks: b.Checks, WallLimit: wall.String(), IdleLimit: env.Roster.Failure.IdleLimit.Duration.String(),
 		Route: route, Folder: folder, ClaudeAuto: env.Project != nil && env.Project.ClaudeAuto, InSolo: solo.InSolo(),
 		MaxAttempt: 2,
@@ -537,6 +548,15 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	briefRel, _ := filepath.Rel(t.workdir(), filepath.Join(t.Folder, FileBrief))
 	reportRel, _ := filepath.Rel(t.workdir(), reportPath)
 	dirs := append([]string{}, t.Dirs...)
+	var readFiles []string
+	for _, path := range b.Files {
+		if filepath.IsAbs(path) {
+			rel, err := filepath.Rel(t.workdir(), path)
+			if err == nil && (rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+				readFiles = append(readFiles, filepath.Clean(path))
+			}
+		}
+	}
 	if t.Workdir != "" && t.Workdir != t.Project {
 		briefRel = filepath.Join(t.Folder, FileBrief)
 		reportRel = reportPath
@@ -569,6 +589,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	}
 	launch := harness.Launch{
 		Model: t.Route.Model, Effort: t.Route.Effort, Access: t.Access, Root: t.workdir(), Dirs: dirs,
+		ReadDirs: t.ReadDirs, ReadFiles: readFiles,
 		TaskID: t.Task, AllowRules: allowRules, AllowedCommands: allChecks, RunFolder: t.Folder, ReportPath: reportPath,
 		Pointer: brief.Pointer(briefRel), ClaudeAuto: t.ClaudeAuto, WallLimit: wallOf(t.WallLimit),
 		Env: harness.Env(stripEnv, map[string]string{
@@ -623,6 +644,7 @@ func runOnce(env *Env, t *Task, b *brief.Brief, attempt int, retry *brief.Retry)
 	}
 	lane, err := json.MarshalIndent(hook.Lane{
 		Task: t.Task, Harness: h.Name(), Access: t.Access, Root: t.workdir(), Dirs: dirs,
+		ReadDirs: t.ReadDirs, ReadFiles: readFiles,
 		RunFolder: t.Folder, Allow: append([]string{}, allowRules...), Checks: allChecks,
 	}, "", "  ")
 	if err != nil {
