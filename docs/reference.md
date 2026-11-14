@@ -136,15 +136,15 @@ The Router makes the Routes. The backend is Jev (a hosted routing and judging se
 
 ### Without a Jev key
 
-Maestro reads the key from `TYPESAFE_API_KEY`, else from `~/.maestro/env` (`maestro key set` writes it). `router = "rules"` in the user or project config has the same effect as no key. Without it, these behaviors change:
+Maestro reads the key from `TYPESAFE_API_KEY`, else from `~/.maestro/env` (`maestro key set` writes it). `backend = "rules"` under `[router]` in the user config, or `router = "rules"` in the Project file, has the same effect as no key. Without it, these behaviors change:
 
 - **Routes:** the rules table decides every Task from the Brief's `level` or `--level` (`some` when neither is set); there is no Jev score and no confidence band.
 - **Approval holds:** the vague-Brief question, the Router Council signal, and the `medium` or `fallback` confidence hold cannot fire, because only Jev raises them; the other [approval holds](#approval-holds) still apply, including the Router question when no Lane passes the hard rules.
-- **Gate:** it does not run; the Task's gate is `skipped` and the error text is `gate skipped: <reason>`.
+- **Gate:** it does not run; the Task's gate is `skipped`. When the checks pass, the error text is `gate skipped: <reason>`; a failed check keeps its error text `check failed: ...`.
 - **Edit Tasks:** they end `unverified`, never `verified`, even when every check passes; Maestro still commits an `unverified` edit Task that has a Report and changed files.
 - **Scores:** there is no `satisfies`, `verdict`, `risk`, or `done_items` score.
 - **Nudge:** there is none, because it needs a gate score.
-- **Cause:** a rule supplies it (see [Causes](#causes)), so a failed check is `capability` and re-Routes one Tier up, unless it is a failed Docker pre-flight (`environment`) or a touch violation or blocked Report (`brief`).
+- **Cause:** a rule supplies it (see [Causes](#causes)), so a failed check is `capability` and re-Routes one Tier up, unless it is a failed Docker pre-flight or a partial Report with Blocked items (`environment`), or a touch violation or blocked Report (`brief`); these do not re-Route.
 - **End-of-Run Council:** it starts only for a Heavy or Frontier Task or `councils = "always"`; a gate risk of `high` or `critical` cannot start it.
 - **Council findings:** none is marked or filtered; each counts as probability `1` and stays in the findings list, and the Merge prints `filter skipped`. A Council with no `--level` or automatic Tier runs at the Daily Tier.
 
@@ -369,7 +369,7 @@ A Cause tells why a Task went wrong. `capability` means the Lane's work is wrong
 
 A touch violation has Cause `brief` without a Jev call. Otherwise Jev answers the `cause` choice question with the gate's `satisfies`, `verdict`, and `risk` questions, or answers `cause` alone for a blocked or partial Report or failed checks. The state includes the Brief's title, Goal, and Done, the Report's Blocked section and Status, failed check output, and the diff when present. Each text field is limited to 60 KiB.
 
-If `router = "rules"`, no key is available, or Jev fails, a rule supplies the Cause: a touch violation or blocked Report is `brief`; a partial Report with Blocked items or a failed Docker pre-flight is `environment`; other failures are `capability`. The Ledger stores `cause` and `cause_source` (`jev` or `rule`) under `verification.gate`, and `decision` under `outcome`.
+If the user config sets `backend = "rules"` under `[router]`, the Project file sets `router = "rules"`, no key is available, or Jev fails, a rule supplies the Cause: a touch violation or blocked Report is `brief`; a partial Report with Blocked items or a failed Docker pre-flight is `environment`; other failures are `capability`. The Ledger stores `cause` and `cause_source` (`jev` or `rule`) under `verification.gate`, and `decision` under `outcome`.
 
 A partial Report with Blocked items keeps its Bad result and Cause when a later check reaches its Idle limit or Wall limit. The check still records its Stall. Without Blocked items, the Stall replaces the Report's outcome. This rule applies only to a Stall. A failed Docker pre-flight still sets the outcome's error text to the check failure and keeps Cause `environment` under the rule.
 
