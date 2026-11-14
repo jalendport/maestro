@@ -54,7 +54,7 @@ func ParsePlanText(src string) (*Plan, error) {
 		}
 	}
 	p.Title = firstH1(body)
-	locs := headingRe.FindAllStringSubmatchIndex(body, -1)
+	locs := headingLocations(body, headingRe)
 	if len(locs) == 0 {
 		return nil, fmt.Errorf("plan has no \"## <task>\" sections")
 	}
@@ -157,8 +157,9 @@ func parseTaskSection(title, section string, defaults Fields) (*Brief, error) {
 	b.Fields.BlockedBy = nil
 	// Field list: leading "- key: value" lines before the first subheading.
 	head := section
-	if m := subHeadingRe.FindStringIndex(section); m != nil {
-		head = section[:m[0]]
+	subs := headingLocations(section, subHeadingRe)
+	if len(subs) > 0 {
+		head = section[:subs[0][0]]
 	}
 	var fieldLines []string
 	for _, line := range strings.Split(head, "\n") {
@@ -176,7 +177,6 @@ func parseTaskSection(title, section string, defaults Fields) (*Brief, error) {
 		b.Fields.Title = title
 	}
 	// Subsections.
-	subs := subHeadingRe.FindAllStringSubmatchIndex(section, -1)
 	for i, loc := range subs {
 		name := section[loc[2]:loc[3]]
 		end := len(section)

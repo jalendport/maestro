@@ -83,3 +83,70 @@ func TestRenderedRulesMatchReportShape(t *testing.T) {
 		}
 	}
 }
+
+func TestContextGlossaryFixture(t *testing.T) {
+	b, err := Parse("testdata/context-glossary.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.Goal, "```md\n## {Group}\n\n### {Term}\n{Definition}\n```") || !strings.HasSuffix(b.Goal, "Keep the example in the Goal.") {
+		t.Fatalf("Goal lost fenced text: %q", b.Goal)
+	}
+}
+
+func TestParsersKeepFencedHeadings(t *testing.T) {
+	for _, fence := range []struct{ name, open, middle, close string }{
+		{"backticks", "```md", "", "```"},
+		{"tildes", "~~~md", "", "~~~"},
+		{"long fence", "````md", "```\n## Still fenced\n", "`````"},
+		{"different marker", "~~~md", "```\n## Still fenced\n", "~~~"},
+		{"indented fence", "   ```md", "", "   ```  "},
+		{"closing info", "```md", "```text\n## Still fenced\n", "```"},
+	} {
+		t.Run(fence.name, func(t *testing.T) {
+			example := fence.open + "\n## Example\n### Checks\n" + fence.middle + fence.close
+			goal := "Before.\n" + example + "\nAfter."
+			b, err := ParseText("# Brief\n## Goal\n" + goal + "\n## Done\nDone.\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := ParsePlanText("# Plan\n## Task\n### Goal\n" + goal + "\n### Done\nDone.\n## Next\n### Goal\nNext.\n### Done\nDone.\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(p.Tasks) != 2 || p.Tasks[0].Goal != goal || b.Goal != goal || b.Done != "Done." || p.Tasks[0].Done != "Done." {
+				t.Fatalf("sections changed: Brief %+v, Plan %+v", b, p)
+			}
+			r := ParseReport("## Summary\n" + goal + "\n## Blocked\nnone\nSTATUS: done\n")
+			if r.Status != StatusDone || r.Sections["Summary"] != goal || strings.Join(r.Order, ",") != "Summary,Blocked" || len(r.Blocked) != 0 {
+				t.Fatalf("Report changed: %+v", r)
+			}
+		})
+	}
+}
+
+func TestUnknownHeadingErrorsFollowFileOrder(t *testing.T) {
+	for range 50 {
+		_, err := ParseText("# Brief\n## Goal\ng\n## Done\nd\n## Zebra\nfirst\n## Alpha\nsecond\n")
+		want := `unknown heading "## Zebra" (one of: Goal, Done, Context, Files)`
+		if err == nil || err.Error() != want {
+			t.Fatalf("error = %v, want %s", err, want)
+		}
+		_, err = ParsePlanText("# Plan\n## Task\n### Goal\ng\n### Done\nd\n### Zebra\nfirst\n### Alpha\nsecond\n")
+		want = `task "Task": unknown heading "### Zebra" (one of: Goal, Done, Context, Files)`
+		if err == nil || err.Error() != want {
+			t.Fatalf("error = %v, want %s", err, want)
+		}
+	}
+}
+
+func TestUnclosedFenceKeepsRemainingText(t *testing.T) {
+	text := "# Brief\n## Goal\ng\n## Done\nDone.\n~~~md\n## Checks\n### Unknown\n"
+	b, err := ParseText(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Done != "Done.\n~~~md\n## Checks\n### Unknown" {
+		t.Fatalf("Done = %q", b.Done)
+	}
+}

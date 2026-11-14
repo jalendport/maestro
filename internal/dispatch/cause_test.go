@@ -115,11 +115,11 @@ func assertCauseOnlyGate(t *testing.T, rec *Record, cause, source string) {
 
 func TestBadResultAsksCauseAlone(t *testing.T) {
 	for _, tc := range []struct {
-		name, text, check, cause string
+		name, text, check, cause, blocked string
 	}{
-		{"failed check", "STATUS: done", "printf 'missing module\\n'; false", CauseEnvironment},
-		{"blocked Report", "## Blocked\n- required.go is outside touch\n\nSTATUS: blocked", "", CauseBrief},
-		{"partial empty diff", "## Blocked\n- sandbox denied the tool\n\nSTATUS: partial", "", CauseEnvironment},
+		{"failed check", "STATUS: done", "printf 'missing module\\n'; false", CauseEnvironment, ""},
+		{"blocked Report", "## Blocked\n- required.go is outside touch\n\nSTATUS: blocked", "", CauseBrief, "required.go is outside touch"},
+		{"partial empty diff", "## Blocked\n- sandbox denied the tool\n\nSTATUS: partial", "", CauseEnvironment, "sandbox denied the tool"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("MAESTRO_HOME", t.TempDir())
@@ -148,7 +148,7 @@ func TestBadResultAsksCauseAlone(t *testing.T) {
 				t.Fatalf("cause requests: %+v", requests)
 			}
 			state := requests[0].State
-			if state.Brief.Title != task.Title || state.Brief.Goal != "Task goal" || state.Brief.Done != "Task Done" || state.Status != report.Status || state.Blocked != report.Sections["Blocked"] {
+			if state.Brief.Title != task.Title || state.Brief.Goal != "Task goal" || state.Brief.Done != "Task Done" || state.Status != report.Status || state.Blocked != tc.blocked {
 				t.Fatalf("state: %+v", state)
 			}
 			if tc.check != "" && !strings.Contains(state.FailedChecks, "missing module\n") {

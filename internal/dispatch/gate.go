@@ -87,7 +87,7 @@ func askGate(env *Env, t *Task, rec *Record, b *brief.Brief, report *brief.Repor
 	blocked := strings.Join(rec.Permission.Blocked, "\n")
 	status := rec.Outcome.Status
 	if report != nil {
-		blocked = report.Sections["Blocked"]
+		blocked = strings.Join(report.Blocked, "\n")
 		status = report.Status
 	}
 	var failedChecks strings.Builder

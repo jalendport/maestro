@@ -76,6 +76,45 @@ func TestGateWithoutKeyIsSkipped(t *testing.T) {
 	}
 }
 
+func TestGateReceivesCleanedBlockedList(t *testing.T) {
+	t.Setenv("TYPESAFE_API_KEY", "test-key")
+	requests := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			State struct{ Blocked string }
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		requests <- payload.State.Blocked
+		_, _ = io.WriteString(w, `{"answers":{}}`)
+	}))
+	defer server.Close()
+	root, folder := diffRepo(t), t.TempDir()
+	snap, err := takeBaseline(root, folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := &Env{Roster: &roster.Roster{Router: config.Router{Backend: "jev", BaseURL: server.URL}}}
+	for _, tc := range []struct{ text, want string }{
+		{"No command was denied.\n- none", ""},
+		{"- No command was denied.\n- none\n- command one denied\n- command two denied", "command one denied\ncommand two denied"},
+	} {
+		report := brief.ParseReport("## Blocked\n" + tc.text + "\nSTATUS: partial\n")
+		rec := &Record{Verification: Verification{Changed: []string{"tracked.txt"}}, Permission: Permission{Blocked: []string{"stale item"}}}
+		gate := runGate(env, &Task{Project: root, Title: "Test"}, rec, &brief.Brief{Goal: "goal", Done: "done"}, report, snap)
+		if gate.Skipped != "" {
+			t.Fatal(gate.Skipped)
+		}
+		if got := <-requests; got != tc.want {
+			t.Fatalf("blocked = %q, want %q", got, tc.want)
+		}
+	}
+}
+
 func TestCollectDiffDoesNotRunConfiguredHelpers(t *testing.T) {
 	for _, helper := range []string{"diff.external", "diff.test.textconv", "core.fsmonitor"} {
 		t.Run(helper, func(t *testing.T) {

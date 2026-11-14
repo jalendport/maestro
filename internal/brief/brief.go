@@ -91,7 +91,9 @@ func ParseText(src string) (*Brief, error) {
 			return nil, fmt.Errorf("front matter: %w", err)
 		}
 	}
-	for name, text := range SplitSections(body) {
+	sections := SplitSections(body)
+	for _, name := range SectionOrder(body) {
+		text := sections[name]
 		b.Sections[name] = text
 		switch strings.ToLower(name) {
 		case "goal":
@@ -178,10 +180,43 @@ func SplitFrontMatter(src string) (front, body string) {
 
 var headingRe = regexp.MustCompile(`(?m)^## +(.+?)[ \t]*$`)
 
+func headingLocations(body string, heading *regexp.Regexp) [][]int {
+	var out [][]int
+	var fence byte
+	fenceLength := 0
+	offset := 0
+	for _, line := range strings.SplitAfter(body, "\n") {
+		text := strings.TrimRight(line, "\r\n")
+		trimmed := strings.TrimLeft(text, " ")
+		if len(text)-len(trimmed) <= 3 && len(trimmed) >= 3 && (trimmed[0] == '`' || trimmed[0] == '~') {
+			marker := trimmed[0]
+			length := 0
+			for length < len(trimmed) && trimmed[length] == marker {
+				length++
+			}
+			rest := trimmed[length:]
+			if fence == 0 && length >= 3 && (marker != '`' || !strings.Contains(rest, "`")) {
+				fence, fenceLength = marker, length
+			} else if fence == marker && length >= fenceLength && strings.TrimSpace(rest) == "" {
+				fence, fenceLength = 0, 0
+			}
+		} else if fence == 0 {
+			if loc := heading.FindStringSubmatchIndex(strings.TrimSuffix(line, "\n")); loc != nil {
+				for i := range loc {
+					loc[i] += offset
+				}
+				out = append(out, loc)
+			}
+		}
+		offset += len(line)
+	}
+	return out
+}
+
 // SplitSections maps each "## " heading to the trimmed text under it.
 func SplitSections(body string) map[string]string {
 	out := map[string]string{}
-	locs := headingRe.FindAllStringSubmatchIndex(body, -1)
+	locs := headingLocations(body, headingRe)
 	for i, loc := range locs {
 		name := body[loc[2]:loc[3]]
 		start := loc[1]
@@ -197,8 +232,8 @@ func SplitSections(body string) map[string]string {
 // SectionOrder returns the headings in file order.
 func SectionOrder(body string) []string {
 	var out []string
-	for _, m := range headingRe.FindAllStringSubmatch(body, -1) {
-		out = append(out, m[1])
+	for _, loc := range headingLocations(body, headingRe) {
+		out = append(out, body[loc[2]:loc[3]])
 	}
 	return out
 }
