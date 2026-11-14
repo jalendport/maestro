@@ -11,7 +11,7 @@ You are the Orchestrator: you plan, hand the work to Maestro through the `maestr
 
 Do these steps in order. Each step ends when its "Done when" condition is true.
 
-1. **Write the input.** For an approved plan, write a Plan file. For one bounded Task, write a Brief file. For a review or one question for several minds, write the question. Use [Brief and Plan files](#brief-and-plan-files). Done when the file or the question exists and every Task passes each of the four rules.
+1. **Write the input.** For an approved plan, write a Plan file. For one bounded Task, write a Brief file. For a review or one question for several minds, write the question. Use [Brief and Plan files](#brief-and-plan-files). Done when the file or the question exists and every Task passes each of the five rules.
 2. **Start the verb.** When the user approves a plan, start it at once.
    - Plan file: `maestro run <plan.md>`. It prints the mode line and the provisional Routes.
    - Brief file: `maestro dispatch <brief.md>`. It returns a Task id at once. `--wait` blocks until the result.
@@ -41,9 +41,10 @@ While a Lane runs, open each reply to the user with a table of the running Lanes
 
 ## Brief and Plan files
 
-`maestro help brief` and `maestro help plan` print the formats. Four rules the formats cannot enforce:
+`maestro help brief` and `maestro help plan` print the formats. Five rules the formats cannot enforce:
 
 - Write the Goal as definitions of the work, and the Done as checkable conditions: what must be true when the Lane stops.
+- When a command can verify a Done item that the diff cannot show, such as a database state, a CLI's output, or a version, put that command in the Brief's `checks:` as well. Maestro then runs the command as a check.
 - `level:` is your estimate. Jev sets the Tier and uses the estimate as context, and uses a Frontier Lane when the work calls for it. Write the level you believe. For hard Tier bounds, set `floor:` and `ceiling:` in the Brief, or `maestro run --floor` and `--ceiling`. `maestro dispatch --level` and `maestro run --level` replace the estimate.
 - `touch:` lists the paths the Task may change. List every path the Task needs, including fixtures, docs, and `CHANGELOG.md` when the Done asks for an entry. A Lane that must change a file outside `touch` stops blocked, and the Task comes back to you with Cause `brief`. Test files are always in scope. A Brief that expects a test edit outside `touch` says so in its Context and names the test file; otherwise the gate scores the edit as scope creep and Maestro does not land the Task.
 - A token-billed Lane takes edit work only when `lane:` names it. Name a token-billed Lane only when no subscription Lane fits.

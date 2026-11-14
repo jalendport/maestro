@@ -18,7 +18,7 @@ func TestSoloAndEnforcementDocumentation(t *testing.T) {
 	}
 	skill := read("skills/maestro/SKILL.md")
 	rules := strings.SplitN(strings.SplitN(skill, "rules the formats cannot enforce:\n", 2)[1], "\n## ", 2)[0]
-	if !strings.Contains(skill, "Four rules") || strings.Count(rules, "\n- ") != 4 || strings.Contains(rules, "`tab:`") {
+	if !strings.Contains(skill, "Five rules") || strings.Count(rules, "\n- ") != 5 || strings.Contains(rules, "`tab:`") {
 		t.Fatalf("Brief rules are incomplete: %s", rules)
 	}
 	reference := read("docs/reference.md")

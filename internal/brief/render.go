@@ -86,9 +86,9 @@ func Render(b *Brief, o RenderOpts) string {
 		w.WriteString("- Edit files with your editor tools (Write, Edit), not with shell scripts or heredocs; run the checks exactly as listed, without pipes.\n")
 	}
 	if o.Access == AccessRead || o.Council {
-		w.WriteString("- Report every blocked or denied command in `## Concerns`.\n")
+		w.WriteString("- In `## Concerns`, list only a command that the Harness denied, a Done item that you could not make true and why, or something the answer rests on that you could not verify. A failed command that you replaced with one that worked is not a concern; put it under `## Findings` when it matters. Write `none` when there are no concerns.\n")
 	} else {
-		w.WriteString("- Report every blocked or denied command in `## Blocked`.\n")
+		w.WriteString("- In `## Blocked`, list only a command that the Harness denied, or a Done item that you could not make true and why. A failed command that you replaced with one that worked is not Blocked; put it under `## Deviations` when it matters. Write `none` when nothing is Blocked.\n")
 	}
 	if !o.Council {
 		w.WriteString("- When the Done cannot be met, stop and report `STATUS: blocked` or `STATUS: partial`.\n")
@@ -131,9 +131,9 @@ func ReportShape(access, reportPath string, byMessage bool) string {
 		fmt.Fprintf(&w, "## Report\n\nWhen you finish, write the file `%s` with exactly these headings, in this order, and end with the status line.\n\n", reportPath)
 	}
 	if access == AccessRead {
-		w.WriteString("```markdown\n## Answer\n(your answer)\n\n## Findings\n- `file:line` — one finding, with a confidence word (high, medium, low)\n\n## Concerns\n- (anything the answer rests on that you could not verify)\n\nSTATUS: done\n```\n")
+		w.WriteString("```markdown\n## Answer\n(your answer)\n\n## Findings\n- `file:line` — one finding, with a confidence word (high, medium, low)\n\n## Concerns\n- (a command the Harness denied, an unmet Done item and why, or something the answer rests on that you could not verify; or \"none\")\n\nSTATUS: done\n```\n")
 	} else {
-		w.WriteString("```markdown\n## Summary\n(what you did, two to five lines)\n\n## Changed\n- path/to/file\n\n## Checks\n- `command` — ok | failed: (one line)\n\n## Blocked\n- (denied or impossible commands; or \"none\")\n\n## Deviations\n- (where you departed from the brief; or \"none\")\n\n## Open\n- (questions; or \"none\")\n\nSTATUS: done\n```\n")
+		w.WriteString("```markdown\n## Summary\n(what you did, two to five lines)\n\n## Changed\n- path/to/file\n\n## Checks\n- `command` — ok | failed: (one line)\n\n## Blocked\n- (a command the Harness denied, or an unmet Done item and why; or \"none\")\n\n## Deviations\n- (where you departed from the brief; or \"none\")\n\n## Open\n- (questions; or \"none\")\n\nSTATUS: done\n```\n")
 	}
 	w.WriteString("\nThe status line is one of `STATUS: done` (the Done is met), `STATUS: partial` (some of it), or `STATUS: blocked` (you cannot continue without a person).\n")
 	return w.String()
@@ -155,7 +155,7 @@ func CouncilShape(reportPath string, byMessage bool) string {
 	} else {
 		fmt.Fprintf(&w, "## Report\n\nWhen you finish, write the file `%s` with exactly these headings, in this order, and end with the position line.\n\n", reportPath)
 	}
-	w.WriteString("```markdown\n## Answer\n(your answer; when nothing real is wrong, say so)\n\n## Findings\n- `file:line` — one finding, with a confidence word (high, medium, low)\n\n## Concerns\n- (anything the answer rests on that you could not verify)\n\nPOSITION: confirmed\n```\n")
+	w.WriteString("```markdown\n## Answer\n(your answer; when nothing real is wrong, say so)\n\n## Findings\n- `file:line` — one finding, with a confidence word (high, medium, low)\n\n## Concerns\n- (a command the Harness denied, an unmet Done item and why, or something the answer rests on that you could not verify; or \"none\")\n\nPOSITION: confirmed\n```\n")
 	w.WriteString("\nThe position line is one of `POSITION: confirmed` (you stand by your answer), `POSITION: changed` (you refined it after reading the other answers), or `POSITION: withdrawn` (you no longer hold it).\n")
 	return w.String()
 }

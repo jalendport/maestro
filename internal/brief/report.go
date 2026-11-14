@@ -41,11 +41,13 @@ func ParseReport(text string) *Report {
 	return r
 }
 
-// cleanList drops "none" placeholders.
+var noCommandBlockedRe = regexp.MustCompile(`^no (command was|commands were) (denied|blocked)\.?$`)
+
+// cleanList drops placeholders and statements that no command was denied or blocked.
 func cleanList(items []string) []string {
 	var out []string
 	for _, it := range items {
-		if l := strings.ToLower(strings.TrimSpace(it)); l == "none" || l == "(none)" || l == "n/a" {
+		if l := strings.ToLower(strings.TrimSpace(it)); l == "none" || l == "(none)" || l == "n/a" || noCommandBlockedRe.MatchString(l) {
 			continue
 		}
 		out = append(out, it)
