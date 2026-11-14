@@ -1,12 +1,37 @@
 package run
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// pauseNoticeChanged keeps the last set across supervisor restarts without
+// changing run.json. Queued answers do not change the set until applied.
+func pauseNoticeChanged(s *State) (bool, error) {
+	tasks := []string{}
+	for _, task := range sortedTasks(s) {
+		if !task.DependencyBlocked && (task.State == TaskBlocked || task.State == TaskFailed) {
+			tasks = append(tasks, task.ID)
+		}
+	}
+	data, err := json.Marshal(tasks)
+	if err != nil {
+		return false, err
+	}
+	path := filepath.Join(s.Folder, "pause-notice.json")
+	previous, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	if bytes.Equal(previous, data) {
+		return false, nil
+	}
+	return true, os.WriteFile(path, data, 0o644)
+}
 
 // PendingResume includes answers queued before the supervisor updates run.json.
 func PendingResume(folder, task string) bool {

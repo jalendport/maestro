@@ -50,6 +50,8 @@ While a Lane runs, open each reply to the user with a table of the running Lanes
 
 Size each Task for ten to twenty Lane minutes. Four to six independent Tasks with disjoint `Files` end a Run in 20 to 40 minutes; fifteen small Tasks do not. Keep work on the same files in one Task, or chain the Tasks with `blocked_by`. In `Files`, give the precise list of code files that the Task changes, so that Maestro can order Tasks whose `Files` overlap.
 
+A Task in `blocked_by` must be `done` or `skipped` before its dependent starts. A `failed`, `blocked`, or `cancelled` Task still blocks its dependents.
+
 ## Plans for Worktree mode
 
 Parallel Tasks in Worktrees merge at the end of each Task. Write the Plan so that they do not conflict:
@@ -129,6 +131,12 @@ Answer a paused Run or a blocked Task with one command:
 - `maestro resume <run> --task <n> --brief <corrected file>`
 - `maestro resume <run> --task <n> --skip`
 - `maestro resume <run> --task <n> --accept`
+
+Answer only the Task that needs the correction. Its answer can release dependent Tasks; other blocked Tasks keep their state until answered. The CLI refuses answers for `running`, `done`, and `skipped` Tasks with an error that names the state. Read a supervisor warning if a queued answer cannot be applied.
+
+Use `--skip` when you choose to omit the Task. A skipped Task counts as done for `blocked_by` and overlap order. Its dependents can start; skip a dependent too when needed.
+
+A new pause notice is sent only when the set of Tasks that need an answer changes. An answer that leaves this set unchanged sends no new notice. A skipped Task is excluded from the notice.
 
 Use `--accept` only after you read the diff of a blocked or failed Task with a Report and a diff. It closes the Task with your acceptance, applies the normal commit and merge rules, and releases dependent Tasks. A Task blocked only by a dependency cannot be accepted.
 

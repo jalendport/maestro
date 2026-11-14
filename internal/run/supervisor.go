@@ -446,7 +446,7 @@ func (sup *Supervisor) dependencyReason(t *TaskState, visiting map[*TaskState]bo
 		if !ok {
 			return fmt.Sprintf("missing dependency %q", ref), true
 		}
-		if b.State == TaskDone {
+		if b.State == TaskDone || b.State == TaskSkipped {
 			continue
 		}
 		if b.DependencyBlocked || b.State == TaskWaiting || b.State == TaskRunning {
@@ -455,7 +455,7 @@ func (sup *Supervisor) dependencyReason(t *TaskState, visiting map[*TaskState]bo
 			}
 		} else {
 			switch b.State {
-			case TaskFailed, TaskBlocked, TaskSkipped, TaskCancelled:
+			case TaskFailed, TaskBlocked, TaskCancelled:
 				return fmt.Sprintf("blocked by %d (%s)", b.Number, b.State), true
 			}
 		}
@@ -480,7 +480,7 @@ func (sup *Supervisor) updateDependencies() {
 		why, terminal := sup.dependencyReason(t, map[*TaskState]bool{})
 		if !terminal {
 			for _, n := range t.After {
-				if prior, ok := sup.State.Task(fmt.Sprint(n)); ok && (prior.State == TaskBlocked || prior.State == TaskFailed || prior.State == TaskSkipped || prior.State == TaskCancelled) {
+				if prior, ok := sup.State.Task(fmt.Sprint(n)); ok && (prior.State == TaskBlocked || prior.State == TaskFailed || prior.State == TaskCancelled) {
 					why, terminal = fmt.Sprintf("files overlap with %d (%s)", n, prior.State), true
 					break
 				}
@@ -1021,7 +1021,11 @@ type Resume struct {
 func (sup *Supervisor) applyResume(path string) {
 	var r Resume
 	b, err := os.ReadFile(path)
-	if err != nil || json.Unmarshal(b, &r) != nil {
+	if err == nil {
+		err = json.Unmarshal(b, &r)
+	}
+	if err != nil {
+		ui.Warnf("resume %s: %v", path, err)
 		return
 	}
 	if r.Finish {
@@ -1035,6 +1039,7 @@ func (sup *Supervisor) applyResume(path string) {
 		return
 	}
 	if t.State == TaskRunning || t.State == TaskDone || t.State == TaskSkipped || sup.running[t.ID] != nil {
+		ui.Warnf("resume: Task %s is %s; answer refused", t.ID, t.State)
 		return
 	}
 	delete(sup.pending, t)
@@ -1110,6 +1115,9 @@ func (sup *Supervisor) applyResume(path string) {
 		t.State = TaskWaiting
 		t.Waiting = "resumed on " + r.Lane
 		t.Excluded = nil
+	default:
+		ui.Warnf("resume: Task %s has no answer", t.ID)
+		return
 	}
 	if !r.Skip && (r.Brief != "" || r.Lane != "") {
 		t.Decision = ""
@@ -1187,11 +1195,21 @@ func (sup *Supervisor) end(state string) error {
 		summary += "; council " + review.Slug + " (maestro wait " + review.Slug + ")"
 	}
 	ui.Eventf(state, "%s  → %s", summary, filepath.Join(s.Folder, FileReport))
-	notify(filepath.Base(s.Project) + ": " + summary)
 	if err := s.Save(); err != nil {
 		return err
 	}
-	if sup.Env.Solo != nil {
+	postNotice := true
+	if state == StatePaused {
+		var err error
+		postNotice, err = pauseNoticeChanged(s)
+		if err != nil {
+			return err
+		}
+	}
+	if postNotice {
+		notify(filepath.Base(s.Project) + ": " + summary)
+	}
+	if postNotice && sup.Env.Solo != nil {
 		title := s.Title
 		if review != nil {
 			title += "; council " + review.Slug

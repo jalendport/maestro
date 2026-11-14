@@ -192,6 +192,8 @@ When Jev's score is below the Orchestrator's estimate, the Reason line says, for
 
 A Brief file has a front matter of short fields and fixed headings for the Goal and the Done. A Plan file holds every Task of a Run, each as a section with the same fields as a Brief file plus `blocked_by`. `maestro help brief` and `maestro help plan` print the formats.
 
+Each Task in `blocked_by` must be `done` or `skipped` before its dependent Task starts. A `failed`, `blocked`, or `cancelled` Task blocks its dependents until the Orchestrator answers it.
+
 ### Plan introduction
 
 In a Plan file, text after the front matter or optional `# title` and before the first `## <task title>` is the introduction. Maestro adds it to the start of every Task's Context under `Shared context of the Plan:`, before the Task's own `### Context` text. An empty introduction adds nothing.
@@ -266,6 +268,8 @@ A path stays unlinked when `touch` names it or a path inside it, such as `node_m
 ### Overlap order
 
 In Worktree mode, Tasks with files that overlap wait in Plan order with `files overlap with <n>`; Routes and status show `after <n> (files overlap)`. Overlap uses the Brief's declared `Files` and `touch` patterns. The [scope guard](#scope-guard)'s test-file rule does not add overlap between Tasks.
+
+A `skipped` Task counts as done for this order. A `failed`, `blocked`, or `cancelled` Task still blocks later Tasks with files that overlap.
 
 In tree mode, an edit Task waits with `tree busy` while another edit Task runs.
 
@@ -439,6 +443,8 @@ Maestro wakes the Orchestrator once for each item that needs it:
 
 Each wake-up gives the same next command as `maestro wait`. An item resolved during the wake-up delay sends no wake-up. A Task of a Run uses the Run's pause or end wake-up. A single Dispatch that ends verified, answered, or unverified with a shaped Report sends no wake-up.
 
+A Run sends a new pause notice only when the set of Tasks that need an answer changes. A resume answer that leaves this set unchanged sends no new notice, including after a supervisor restart. A pause notice never names a `skipped` Task as needing an answer.
+
 With a Solo link, Maestro passes Solo's MCP server to a Claude Lane through `--mcp-config`. Read and edit Lanes get the same read-only set, which also permits a todo comment:
 
 - `mcp__solo__list_processes`
@@ -483,6 +489,10 @@ Answer a Relay with `maestro answer <task> allow|deny --relay <id>`. Use the id 
 ### Resume
 
 Use `maestro resume <run> --task <n>` with one answer: `--lane <family[:effort]>` to re-Route, `--brief <file>` to restart with a corrected Brief, `--skip` to skip the Task, `--merge` to retry a merge after a hand fix, or `--accept` to accept the Lane result after you read its diff. Use `maestro resume <run> --finish` to retry landing the Run branch.
+
+An answer applies only to the Task it names and can release its dependents. Other blocked Tasks keep their state until they receive an answer. The CLI refuses an answer for a `running`, `done`, or `skipped` Task with an error that names its state. If a queued answer cannot be applied, the supervisor prints a warning.
+
+`--skip` records the Orchestrator's choice to skip the Task. It counts as done for `blocked_by` and overlap order, so Tasks that wait on it can start. The Orchestrator can skip a dependent Task too.
 
 `--accept` needs a Task in state `blocked` or `failed` with a Report and a diff. A Task blocked only by a dependency cannot be accepted. An error names the state when the Task cannot be accepted. Combine no other answer with `--accept`.
 

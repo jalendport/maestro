@@ -1,6 +1,7 @@
 package run
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,6 +50,34 @@ func TestResumeDoesNotRestartRunningTask(t *testing.T) {
 	sup.consumeControl()
 	if s.Tasks[0].State != TaskRunning {
 		t.Fatalf("second answer restarted Task: %+v", s.Tasks[0])
+	}
+}
+
+func TestSupervisorReportsRefusedResumeAnswers(t *testing.T) {
+	for _, state := range []string{TaskRunning, TaskDone, TaskSkipped} {
+		t.Run(state, func(t *testing.T) {
+			env := quietRunEnv(t)
+			s := saveRun(t, env, &TaskState{Number: 1, ID: "abcd", State: state})
+			resumeFile(t, s.Folder, Resume{Task: "abcd", Lane: "codex-sol"})
+			reader, writer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reader.Close()
+			previous := os.Stderr
+			os.Stderr = writer
+			defer func() { os.Stderr = previous }()
+			sup := &Supervisor{Env: env, State: s}
+			sup.consumeControl()
+			writer.Close()
+			output, err := io.ReadAll(reader)
+			if err != nil || !strings.Contains(string(output), "Task abcd is "+state) {
+				t.Fatalf("answer was dropped silently: %s, %v", output, err)
+			}
+			if s.Tasks[0].State != state {
+				t.Fatalf("refused answer changed Task: %+v", s.Tasks[0])
+			}
+		})
 	}
 }
 

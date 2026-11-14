@@ -192,7 +192,7 @@ func OrderLine(task *TaskState) string {
 
 func (sup *Supervisor) overlapReason(task *TaskState) string {
 	for _, n := range task.After {
-		if prior, ok := sup.State.Task(fmt.Sprint(n)); ok && prior.State != TaskDone {
+		if prior, ok := sup.State.Task(fmt.Sprint(n)); ok && prior.State != TaskDone && prior.State != TaskSkipped {
 			return fmt.Sprintf("files overlap with %d", n)
 		}
 	}

@@ -56,7 +56,7 @@ func resumeFile(t *testing.T, folder string, r Resume) string {
 }
 
 func TestFailedChainEndsPaused(t *testing.T) {
-	for _, terminal := range []string{TaskFailed, TaskBlocked, TaskSkipped, TaskCancelled} {
+	for _, terminal := range []string{TaskFailed, TaskBlocked, TaskCancelled} {
 		t.Run(terminal, func(t *testing.T) {
 			env := quietRunEnv(t)
 			s := saveRun(t, env,
@@ -121,7 +121,7 @@ func TestDependenciesNeedCompletedTasks(t *testing.T) {
 				{Number: 2, ID: "second", State: TaskWaiting, BlockedBy: []string{"first"}},
 			}}
 			sup := &Supervisor{State: s}
-			if ready := sup.blockedReason(s.Tasks[1]) == ""; ready != (state == TaskDone) {
+			if ready := sup.blockedReason(s.Tasks[1]) == ""; ready != (state == TaskDone || state == TaskSkipped) {
 				t.Fatalf("ready = %v", ready)
 			}
 		})

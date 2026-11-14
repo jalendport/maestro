@@ -246,7 +246,8 @@ func TestAcceptUsesExistingMergeConflictFlow(t *testing.T) {
 	if merged, err := r.Merge("other"); err != nil || len(merged.Conflicts) != 0 {
 		t.Fatalf("merge other Task: %+v, %v", merged, err)
 	}
-	sup.applyResume(resumeFile(t, sup.State.Folder, Resume{Task: task.ID, Accept: true}))
+	resumeFile(t, sup.State.Folder, Resume{Task: task.ID, Accept: true})
+	sup.consumeControl()
 	if task.State != TaskWaiting || !task.ConflictAttempt || len(task.Conflicts) != 1 || task.Conflicts[0] != "base.txt" || task.Decision != "accepted" {
 		t.Fatalf("accepted merge did not use conflict flow: %+v", task)
 	}

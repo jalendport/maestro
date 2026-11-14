@@ -35,17 +35,27 @@ func (sup *Supervisor) claim(t *TaskState, route *router.Route) (bool, error) {
 		t.Waiting = "account cap " + acct
 		return false, nil
 	}
-	previous := *t
-	t.State = TaskRunning
-	t.Waiting = ""
-	t.Route = route
-	t.Provisional = false
-	t.StartedAt = time.Now()
-	t.LastOutput = t.StartedAt
-	t.ResumeLane = ""
-	if err := sup.State.Save(); err != nil {
-		*t = previous
-		return false, err
-	}
-	return true, nil
+	claimed := false
+	err = withControlLock(sup.State.Folder, func() error {
+		// QueueResume checks the saved Task state under this same lock. An
+		// answer that arrived since the last poll must be applied first.
+		if PendingResume(sup.State.Folder, t.ID) {
+			return nil
+		}
+		previous := *t
+		t.State = TaskRunning
+		t.Waiting = ""
+		t.Route = route
+		t.Provisional = false
+		t.StartedAt = time.Now()
+		t.LastOutput = t.StartedAt
+		t.ResumeLane = ""
+		if err := sup.State.Save(); err != nil {
+			*t = previous
+			return err
+		}
+		claimed = true
+		return nil
+	})
+	return claimed, err
 }

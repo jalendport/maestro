@@ -345,3 +345,21 @@ func TestClaimSaveFailureDoesNotTakeSlot(t *testing.T) {
 		t.Fatalf("failed claim changed the saved Run: %+v, %v", saved, err)
 	}
 }
+
+func TestClaimWaitsForQueuedResumeAnswer(t *testing.T) {
+	env := quietRunEnv(t)
+	task := &TaskState{Number: 1, ID: "next", State: TaskWaiting}
+	s := saveRun(t, env, task)
+	sup := &Supervisor{Env: env, State: s}
+	// An answer arrives after the last control poll but before the claim.
+	if _, err := QueueResume(s.Folder, Resume{Task: task.ID, Skip: true}); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := sup.claim(task, &router.Route{Account: "codex"}); err != nil || claimed {
+		t.Fatalf("Task started before its answer was applied: claimed=%v, %v", claimed, err)
+	}
+	sup.consumeControl()
+	if task.State != TaskSkipped || PendingResume(s.Folder, task.ID) {
+		t.Fatalf("answer was lost: %+v", task)
+	}
+}

@@ -34,6 +34,94 @@ func TestSoloEnvironmentBlockNamesCauseAndBlockedItem(t *testing.T) {
 	testSoloRunWake(t, "partial", false, "module is missing")
 }
 
+func TestSoloRunPauseWakesOnlyForChangedAnswerSet(t *testing.T) {
+	t.Setenv("MAESTRO_HOME", t.TempDir())
+	t.Setenv("SOLO_PROCESS_ID", "42")
+	t.Setenv("MAESTRO_TEST_SOLO_HELPER", "1")
+	callsPath := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("MAESTRO_TEST_CALLS", callsPath)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MAESTRO_TEST_BINARY", self)
+	helper := filepath.Join(t.TempDir(), "solo-helper")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nexec \"$MAESTRO_TEST_BINARY\" -test.run=^TestSoloHelper$\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MAESTRO_SOLO_MCP", helper)
+	client, err := solo.Connect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	t.Cleanup(dispatch.SetSoloWakeForTest(time.Millisecond, func(time.Duration) {}))
+	off := false
+	r := &roster.Roster{}
+	r.Failure.KeepAwake = &off
+	root := t.TempDir()
+	env := &dispatch.Env{Root: root, Roster: r, Solo: &dispatch.SoloLink{Client: client, ProjectID: 1, Orchestrator: 42}}
+	s := &run.State{Run: "r-0001", Project: root, Folder: filepath.Join(config.RunsDir(root), "r-0001"), State: run.StatePaused, Mode: "tree", Tasks: []*run.TaskState{
+		{Number: 1, ID: "first", State: run.TaskBlocked},
+		{Number: 2, ID: "second", State: run.TaskBlocked, DependencyBlocked: true, BlockedBy: []string{"first"}},
+		{Number: 3, ID: "third", State: run.TaskBlocked},
+	}}
+	if err := os.MkdirAll(filepath.Join(s.Folder, "control"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	start := func() {
+		t.Helper()
+		if err := run.Start(env, s.Folder); err != nil {
+			t.Fatal(err)
+		}
+	}
+	answer := func(a run.Resume) {
+		t.Helper()
+		if _, err := run.QueueResume(s.Folder, a); err != nil {
+			t.Fatal(err)
+		}
+		start()
+	}
+	wakes := func() []string {
+		t.Helper()
+		data, err := os.ReadFile(callsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var bodies []string
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			var call struct {
+				Params struct {
+					Name      string
+					Arguments struct{ Body string }
+				}
+			}
+			if err := json.Unmarshal([]byte(line), &call); err != nil {
+				t.Fatal(err)
+			}
+			if call.Params.Name == "timer_set" {
+				bodies = append(bodies, call.Params.Arguments.Body)
+			}
+		}
+		return bodies
+	}
+	start()
+	for range 2 {
+		answer(run.Resume{Task: "second", Lane: "codex-sol"})
+	}
+	if bodies := wakes(); len(bodies) != 1 {
+		t.Fatalf("unchanged set repeated wake-up: %q", bodies)
+	}
+	answer(run.Resume{Task: "second", Skip: true})
+	answer(run.Resume{Task: "first", Skip: true})
+	if bodies := wakes(); len(bodies) != 2 || strings.Contains(bodies[1], "task 1") || !strings.Contains(bodies[1], "--task 3") {
+		t.Fatalf("changed set or skipped Task: %q", bodies)
+	}
+}
+
 func testSoloRunWake(t *testing.T, status string, answered bool, blocked string) {
 	t.Helper()
 	t.Setenv("MAESTRO_HOME", t.TempDir())

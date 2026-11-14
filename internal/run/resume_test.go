@@ -56,7 +56,8 @@ printf 'STATUS: done\n' > "$MAESTRO_TASK_FOLDER/result.md"
 	s := saveRun(t, env, task)
 	task.Folder = filepath.Join(s.Folder, task.ID)
 	sup := &Supervisor{Env: env, State: s, running: map[string]chan struct{}{}, results: make(chan result, 1), errorTexts: map[string]int{}}
-	sup.applyResume(resumeFile(t, s.Folder, Resume{Task: task.ID, Brief: b.Path}))
+	resumeFile(t, s.Folder, Resume{Task: task.ID, Brief: b.Path})
+	sup.consumeControl()
 	if task.State != TaskWaiting || task.AnswerAttempt != 2 || task.Escalations != 0 {
 		t.Fatalf("resumed Task: %+v", task)
 	}
