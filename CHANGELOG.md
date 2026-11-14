@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `maestro resume <run> --task <n> --accept` to close a blocked or failed Task after you read its diff; Maestro commits and merges it as a verified Task and starts its dependents
 - Added a `maestro doctor` warning when a subscription Account removes a set vendor API key, such as `ANTHROPIC_API_KEY`, from Lanes; set `billing = "metered"` if you pay by API key
 - Added a "Without a Jev key" section to the reference that lists what changes without a Jev key
+- Added the Brief and Plan field `read_dirs` for folders that a Lane can read but not write; a Claude Lane reads them, and absolute `## Files` paths outside the project, without a Relay
 
 ### Changed
 - Changed a skipped Task to count as done for `blocked_by` and the overlap order, so its dependents start
