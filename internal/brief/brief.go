@@ -63,7 +63,7 @@ type Brief struct {
 	Context string
 	Files   []string
 	Path    string
-	// Sections keeps every heading as written, for headings the format does not name.
+	// Sections keeps each accepted heading as written.
 	Sections map[string]string
 }
 
@@ -102,6 +102,8 @@ func ParseText(src string) (*Brief, error) {
 			b.Context = text
 		case "files":
 			b.Files = listItems(text)
+		default:
+			return nil, fmt.Errorf("unknown heading %q (one of: Goal, Done, Context, Files)", "## "+name)
 		}
 	}
 	if b.Title == "" {

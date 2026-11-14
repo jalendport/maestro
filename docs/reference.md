@@ -192,6 +192,8 @@ When Jev's score is below the Orchestrator's estimate, the Reason line says, for
 
 A Brief file has a front matter of short fields and fixed headings for the Goal and the Done. A Plan file holds every Task of a Run, each as a section with the same fields as a Brief file plus `blocked_by`. `maestro help brief` and `maestro help plan` print the formats.
 
+Only Goal, Done, Context, and Files are allowed as `##` headings in a Brief file or `###` headings in a Plan Task; matching is case-insensitive, and an unknown heading is an error.
+
 Each Task in `blocked_by` must be `done` or `skipped` before its dependent Task starts. A `failed`, `blocked`, or `cancelled` Task blocks its dependents until the Orchestrator answers it.
 
 ### Plan introduction

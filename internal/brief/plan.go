@@ -194,6 +194,8 @@ func parseTaskSection(title, section string, defaults Fields) (*Brief, error) {
 			b.Context = text
 		case "files":
 			b.Files = listItems(text)
+		default:
+			return nil, fmt.Errorf("unknown heading %q (one of: Goal, Done, Context, Files)", "### "+name)
 		}
 	}
 	return b, b.Validate()

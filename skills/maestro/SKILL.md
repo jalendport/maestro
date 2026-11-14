@@ -41,6 +41,8 @@ While a Lane runs, open each reply to the user with a table of the running Lanes
 
 ## Brief and Plan files
 
+Use only Goal, Done, Context, and Files as `##` headings in a Brief file or `###` headings in a Plan Task; matching is case-insensitive, and an unknown heading is an error.
+
 `maestro help brief` and `maestro help plan` print the formats. Five rules the formats cannot enforce:
 
 - Write the Goal as definitions of the work, and the Done as checkable conditions: what must be true when the Lane stops.
