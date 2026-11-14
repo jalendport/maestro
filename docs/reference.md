@@ -439,13 +439,13 @@ Every Lane runs as a headless child process, inside Solo and outside it. This in
 Maestro wakes the Orchestrator once for each item that needs it:
 
 - A Relay opens: `maestro answer <task> allow|deny --relay <id>`.
-- A Run pauses: `maestro resume <run> --task <n> (--lane <family[:effort]> | --brief <file> | --skip)`.
+- A Run pauses: `maestro resume <run> --task <n> (--lane <family[:effort]> | --brief <file> | --skip | --accept)`. `--accept` is offered only for a blocked or failed Task with a Lane result. A merge conflict offers `--merge`, and a pending Finish offers `--finish`.
 - A single Dispatch ends failed, blocked, timed out, or with an unshaped Report: `maestro wait <task>`.
 - A Run ends: `maestro wait <run>`.
 
 Each wake-up gives the same next command as `maestro wait`. An item resolved during the wake-up delay sends no wake-up. A Task of a Run uses the Run's pause or end wake-up. A single Dispatch that ends verified, answered, or unverified with a shaped Report sends no wake-up.
 
-A Run sends a new pause notice only when the set of Tasks that need an answer changes. A resume answer that leaves this set unchanged sends no new notice, including after a supervisor restart. A pause notice never names a `skipped` Task as needing an answer.
+A Run sends a new pause notice when the set of Tasks that need an answer changes, or when an applied answer started work since the last notice: a new Dispatch attempt, a merge retry, an accept, or a Finish retry. If that work pauses again, the notice is sent even when the set is unchanged, including after a supervisor restart. A refused answer or an answer that starts nothing sends no new notice. A pause notice never names a `skipped` Task as needing an answer.
 
 With a Solo link, Maestro passes Solo's MCP server to a Claude Lane through `--mcp-config`. Read and edit Lanes get the same read-only set, which also permits a todo comment:
 
@@ -494,13 +494,15 @@ Use `maestro resume <run> --task <n>` with one answer: `--lane <family[:effort]>
 
 An answer applies only to the Task it names and can release its dependents. Other blocked Tasks keep their state until they receive an answer. The CLI refuses an answer for a `running`, `done`, or `skipped` Task with an error that names its state. If a queued answer cannot be applied, the supervisor prints a warning.
 
+An answer applied during routing discards the Route for the old input. The next Dispatch uses the corrected Brief or new Lane.
+
 `--skip` records the Orchestrator's choice to skip the Task. It counts as done for `blocked_by` and overlap order, so Tasks that wait on it can start. The Orchestrator can skip a dependent Task too.
 
 `--accept` needs a Task in state `blocked` or `failed` with a Report and a diff. A Task blocked only by a dependency cannot be accepted. An error names the state when the Task cannot be accepted. Combine no other answer with `--accept`.
 
-Acceptance closes the Task as `done`, releases its dependent Tasks, and continues the Run. In tree mode, the Brief's `commit: true` commits the changed paths with the commit message template; `commit: false` leaves them uncommitted. In Worktree mode, Maestro commits and merges through the same path as a verified Task, with the existing merge conflict rules.
+Acceptance closes the Task as `done`, releases its dependent Tasks, and continues the Run. In tree mode, the Brief's `commit: true` commits the changed paths with the commit message template; `commit: false` leaves them uncommitted. In Worktree mode, Maestro commits and merges through the same path as a verified Task, with the existing merge conflict rules. Acceptance waits until the Task reaches `done`. A merge conflict attempt that fails leaves the Task `blocked` with no acceptance written.
 
-The Task state and Dispatch record store `decision: accepted`. Status and the Run report show `accepted`. The Ledger appends an `acceptance` row and includes the Task's decision in the Run row. The original Dispatch row and gate result stay in the Ledger, so acceptance does not count as a gate pass or a second Route in Route statistics.
+The Task state and the original Lane result's Dispatch record store `decision: accepted`. If a conflict attempt follows, the original record is under `attempts/<n>/`; the conflict-attempt Dispatch keeps its own outcome and decision. Status and the Run report show `accepted`. The Ledger appends an `acceptance` row only when the Task is `done` and includes the Task's decision in the Run row. The original Dispatch row and gate result stay in the Ledger, so acceptance does not count as a gate pass or a second Route in Route statistics.
 
 ### Init
 

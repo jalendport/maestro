@@ -1,12 +1,16 @@
 package run
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jalendport/maestro/internal/brief"
+	"github.com/jalendport/maestro/internal/discovery"
+	"github.com/jalendport/maestro/internal/harness"
 )
 
 func TestSkipReleasesThreeTaskChain(t *testing.T) {
@@ -105,7 +109,7 @@ func TestAnswerDoesNotReleaseOtherBlockedTask(t *testing.T) {
 	}
 }
 
-func TestPauseNoticeChangesOnlyWithAnswerSet(t *testing.T) {
+func TestPauseNoticeSuppressesAnswersThatStartNothing(t *testing.T) {
 	env := quietRunEnv(t)
 	first := &TaskState{Number: 1, ID: "first", State: TaskBlocked}
 	second := &TaskState{Number: 2, ID: "second", State: TaskBlocked, DependencyBlocked: true, BlockedBy: []string{first.ID}}
@@ -150,5 +154,164 @@ func TestPauseNoticeChangesOnlyWithAnswerSet(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.Folder, FileReport)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func countPauseNotices(t *testing.T) *int {
+	t.Helper()
+	previous := notify
+	t.Cleanup(func() { notify = previous })
+	count := new(int)
+	notify = func(string) { *count++ }
+	return count
+}
+
+func TestPauseNoticeAfterResumedDispatchBlocksAgain(t *testing.T) {
+	for _, answer := range []string{"lane", "brief"} {
+		t.Run(answer, func(t *testing.T) {
+			sup := worktreeSupervisor(t)
+			sup.State.Mode, sup.State.Lane = "tree", "codex-sol"
+			sup.State.Tasks = sup.State.Tasks[:1]
+			task := sup.State.Tasks[0]
+			task.State = TaskBlocked
+			bin := filepath.Join(t.TempDir(), "blocked")
+			runWrite(t, bin, "#!/bin/sh\nread pointer\nprintf '## Blocked\\nNeeds a correction.\\n\\nSTATUS: blocked\\n' > \"$MAESTRO_TASK_FOLDER/result.md\"\n")
+			if err := os.Chmod(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			sup.Env.Reg = harness.New(map[string]string{"codex": bin})
+			sup.Env.Disc = &discovery.Cache{RefreshedAt: time.Now(), Harness: map[string]discovery.Record{
+				"codex": {Path: bin, Version: "0.162.0", Models: []harness.Model{{ID: "gpt-6.1-sol"}}},
+			}}
+			count := countPauseNotices(t)
+			if err := sup.end(StatePaused); err != nil {
+				t.Fatal(err)
+			}
+			for attempt := 1; attempt <= 2; attempt++ {
+				r := Resume{Task: task.ID, Lane: "codex-sol:medium"}
+				if answer == "brief" {
+					r.Lane, r.Brief = "", task.BriefPath
+				}
+				resumeFile(t, sup.State.Folder, r)
+				sup.consumeControl()
+				loaded, err := Load(sup.State.Folder)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sup.State, task = loaded, loaded.Tasks[0]
+				if !sup.start(task) {
+					t.Fatalf("resumed Dispatch did not start: %+v", task)
+				}
+				takeResult(t, sup)
+				if task.State != TaskBlocked || task.Attempt != attempt {
+					t.Fatalf("resumed Dispatch did not block: %+v", task)
+				}
+				loaded, err = Load(sup.State.Folder)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sup.State, task = loaded, loaded.Tasks[0]
+				if err := sup.end(StatePaused); err != nil {
+					t.Fatal(err)
+				}
+				if *count != attempt+1 {
+					t.Fatalf("pause notices: got %d, want %d", *count, attempt+1)
+				}
+			}
+		})
+	}
+}
+
+func TestPauseNoticeAfterRepeatedFailedFinish(t *testing.T) {
+	sup := worktreeSupervisor(t)
+	sup.schedule()
+	for range 2 {
+		takeResult(t, sup)
+	}
+	runGit(t, sup.State.Project, "checkout", "--detach")
+	count := countPauseNotices(t)
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			if _, err := QueueResume(sup.State.Folder, Resume{Finish: true}); err != nil {
+				t.Fatal(err)
+			}
+			sup.consumeControl()
+		}
+		if err := sup.end(StateFinished); err != nil {
+			t.Fatal(err)
+		}
+		if !sup.State.FinishPending || sup.State.State != StatePaused || *count != attempt+1 {
+			t.Fatalf("Finish pause %d: notices=%d state=%+v", attempt, *count, sup.State)
+		}
+	}
+}
+
+func TestPauseNoticeSuppressesRefusedAnswers(t *testing.T) {
+	for _, answer := range []Resume{
+		{Task: "first"},
+		{Task: "first", Brief: "/missing/brief.md"},
+		{Task: "first", Accept: true},
+		{Task: "first", Merge: true},
+		{Finish: true},
+		{Task: "running", Lane: "codex-sol"},
+	} {
+		t.Run(fmt.Sprint(answer), func(t *testing.T) {
+			env := quietRunEnv(t)
+			s := saveRun(t, env, &TaskState{Number: 1, ID: "first", State: TaskBlocked}, &TaskState{Number: 2, ID: "running", State: TaskRunning})
+			sup := &Supervisor{Env: env, State: s}
+			count := countPauseNotices(t)
+			if err := sup.end(StatePaused); err != nil {
+				t.Fatal(err)
+			}
+			resumeFile(t, s.Folder, answer)
+			sup.consumeControl()
+			if err := sup.end(StatePaused); err != nil {
+				t.Fatal(err)
+			}
+			if *count != 1 {
+				t.Fatalf("refused answer sent %d notices", *count)
+			}
+		})
+	}
+}
+
+func TestPauseNoticeAfterFailedMergeRetry(t *testing.T) {
+	sup, _ := acceptanceConflictFixture(t)
+	task := sup.State.Tasks[0]
+	task.State = TaskBlocked
+	count := countPauseNotices(t)
+	if err := sup.end(StatePaused); err != nil {
+		t.Fatal(err)
+	}
+	resumeFile(t, sup.State.Folder, Resume{Task: task.ID, Merge: true})
+	sup.consumeControl()
+	if err := sup.end(StatePaused); err != nil {
+		t.Fatal(err)
+	}
+	if task.State != TaskBlocked || *count != 2 {
+		t.Fatalf("merge retry: notices=%d Task=%+v", *count, task)
+	}
+}
+
+func TestRefusedAnswerDoesNotResetNoticeForOtherDispatch(t *testing.T) {
+	sup := worktreeSupervisor(t)
+	sup.State.Mode = "tree"
+	first, second := sup.State.Tasks[0], sup.State.Tasks[1]
+	first.State = TaskBlocked
+	count := countPauseNotices(t)
+	if err := sup.end(StatePaused); err != nil {
+		t.Fatal(err)
+	}
+	resumeFile(t, sup.State.Folder, Resume{Task: first.ID, Accept: true})
+	sup.consumeControl()
+	if !sup.start(second) {
+		t.Fatal("independent Task did not start")
+	}
+	takeResult(t, sup)
+	if err := sup.end(StatePaused); err != nil {
+		t.Fatal(err)
+	}
+	if *count != 1 {
+		t.Fatalf("refused answer and unrelated Dispatch sent %d notices", *count)
 	}
 }

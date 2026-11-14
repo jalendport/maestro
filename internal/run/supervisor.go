@@ -606,19 +606,24 @@ func (sup *Supervisor) start(t *TaskState) (started bool) {
 				req.Floor = next
 			}
 		}
+		if sup.pending == nil {
+			sup.pending = map[*TaskState]pendingDispatch{}
+		}
+		// An answer can invalidate this input while the Router works, even
+		// when it replaces a Brief at the same path or selects the same Lane.
+		sup.pending[t] = pendingDispatch{brief: b}
 		route, err := dispatch.RouteBrief(sup.Env, b, req)
 		sup.consumeControl()
-		if sup.cancelled || t.State != TaskWaiting {
+		if _, current := sup.pending[t]; !current || sup.cancelled || t.State != TaskWaiting {
+			delete(sup.pending, t)
 			return false
 		}
 		if err != nil {
+			delete(sup.pending, t)
 			sup.escalate(t, nil, err.Error())
 			return false
 		}
 		pending = pendingDispatch{brief: b, route: route}
-		if sup.pending == nil {
-			sup.pending = map[*TaskState]pendingDispatch{}
-		}
 		sup.pending[t] = pending
 	}
 	claimed, err := sup.claim(t, pending.route)
@@ -640,6 +645,9 @@ func (sup *Supervisor) start(t *TaskState) (started bool) {
 		if err == nil && !needed {
 			// The Run branch changed and the rebase is clean: merge with no Lane.
 			err = sup.mergeTask(t)
+			if err == nil {
+				err = sup.completeAcceptance(t)
+			}
 		}
 		if err != nil {
 			sup.blockMerge(t, err)
@@ -803,8 +811,10 @@ func (sup *Supervisor) handle(r result) {
 			sup.escalate(t, rec, rec.Outcome.ErrorText)
 		}
 	}
-	if t.State == TaskDone && t.Decision == "accepted" {
-		rec.Outcome.Decision = "accepted"
+	if t.State == TaskDone {
+		if err := sup.completeAcceptance(t); err != nil {
+			sup.blockMerge(t, err)
+		}
 	}
 	_ = sup.State.Save()
 }
@@ -1029,6 +1039,13 @@ func (sup *Supervisor) applyResume(path string) {
 		return
 	}
 	if r.Finish {
+		if !sup.State.FinishPending {
+			ui.Warnf("resume: Run %s has no pending Finish", sup.State.Run)
+			return
+		}
+		if err := resetPauseNotice(sup.State); err != nil {
+			ui.Warnf("pause notice: %v", err)
+		}
 		sup.paused = false
 		sup.State.PauseReason = ""
 		return
@@ -1050,6 +1067,9 @@ func (sup *Supervisor) applyResume(path string) {
 			ui.Warnf("resume: %v", err)
 			return
 		}
+		if err := resetPauseNotice(sup.State); err != nil {
+			ui.Warnf("pause notice: %v", err)
+		}
 		t.State = TaskDone
 		if err := sup.commitTask(t, rec); err != nil {
 			sup.blockMerge(t, err)
@@ -1059,35 +1079,34 @@ func (sup *Supervisor) applyResume(path string) {
 			}
 			return
 		}
-		t.Decision = "accepted"
-		t.Error, t.Cause = "", ""
-		if t.State == TaskDone {
-			t.Waiting = ""
-		}
-		t.EndedAt = time.Now()
-		rec.Outcome.Decision = "accepted"
 		if err := rec.Save(); err != nil {
 			sup.blockMerge(t, err)
 			return
 		}
-		// Acceptance is a decision about an existing Dispatch, not a new Route.
-		accepted := *rec
-		accepted.Kind = "acceptance"
-		if err := ledger.Append(&accepted); err != nil {
-			ui.Warnf("ledger: %v", err)
+		if err := config.WriteJSONAtomic(t.Folder, filePendingAcceptance, rec); err != nil {
+			sup.blockMerge(t, err)
+			return
+		}
+		if err := sup.completeAcceptance(t); err != nil {
+			sup.blockMerge(t, err)
+			return
 		}
 	case r.Merge:
+		if sup.State.Mode != "worktree" || t.Workdir == "" || len(t.Conflicts) == 0 {
+			ui.Warnf("resume: Task %s has no merge conflict", t.ID)
+			return
+		}
+		if (worktree.Worktree{Root: sup.State.Project, Dir: t.Workdir}).Rebasing() {
+			ui.Warnf("resume: a rebase is in progress in %s; finish it with git rebase --continue, then resume with --merge", t.Workdir)
+			return
+		}
+		if err := resetPauseNotice(sup.State); err != nil {
+			ui.Warnf("pause notice: %v", err)
+		}
 		if err := sup.mergeTask(t); err != nil {
 			sup.blockMerge(t, err)
-		} else if t.State == TaskDone && t.Decision == "accepted" {
-			rec, err := dispatch.LoadRecord(t.Folder)
-			if err == nil {
-				rec.Outcome.Decision = "accepted"
-				err = rec.Save()
-			}
-			if err != nil {
-				sup.blockMerge(t, err)
-			}
+		} else if err := sup.completeAcceptance(t); err != nil {
+			sup.blockMerge(t, err)
 		}
 	case r.Skip:
 		t.State = TaskSkipped
@@ -1123,6 +1142,19 @@ func (sup *Supervisor) applyResume(path string) {
 		t.Decision = ""
 		t.AnswerAttempt = t.Attempt
 		t.Escalations = 0
+		if err := os.WriteFile(resumeWorkPath(sup.State, t), nil, 0o644); err != nil {
+			ui.Warnf("pause notice: %v", err)
+		}
+	}
+	if r.Skip {
+		if err := os.Remove(resumeWorkPath(sup.State, t)); err != nil && !os.IsNotExist(err) {
+			ui.Warnf("pause notice: %v", err)
+		}
+	}
+	if r.Skip || r.Brief != "" || r.Lane != "" {
+		if err := os.Remove(filepath.Join(t.Folder, filePendingAcceptance)); err != nil && !os.IsNotExist(err) {
+			ui.Warnf("acceptance: %v", err)
+		}
 	}
 	t.DependencyBlocked = false
 	sup.updateDependencies()

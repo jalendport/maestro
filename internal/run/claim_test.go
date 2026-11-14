@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -361,5 +362,89 @@ func TestClaimWaitsForQueuedResumeAnswer(t *testing.T) {
 	sup.consumeControl()
 	if task.State != TaskSkipped || PendingResume(s.Folder, task.ID) {
 		t.Fatalf("answer was lost: %+v", task)
+	}
+}
+
+func TestRoutingDropsInputChangedByResume(t *testing.T) {
+	for _, answer := range []string{"lane", "brief", "same Brief path", "skip"} {
+		t.Run(answer, func(t *testing.T) {
+			sup := worktreeSupervisor(t)
+			sup.State.Mode = "tree"
+			sup.State.Tasks = sup.State.Tasks[:1]
+			task := sup.State.Tasks[0]
+			delete(sup.pending, task)
+			t.Setenv("TYPESAFE_API_KEY", "fixture-key")
+			h, _ := sup.Env.Reg.Get("codex")
+			sup.Env.Disc = &discovery.Cache{RefreshedAt: time.Now(), Harness: map[string]discovery.Record{
+				"codex": {Path: h.Bin(), Version: "0.162.0", Models: []harness.Model{{ID: "gpt-6.1-sol"}}},
+			}}
+			sup.Env.Roster.Families = map[string]*roster.Family{"codex-sol": sup.Env.Roster.Families["codex-sol"]}
+			corrected := filepath.Join(sup.State.Folder, "corrected.md")
+			if answer == "same Brief path" {
+				corrected = task.BriefPath
+			}
+			var routes atomic.Int32
+			queued := make(chan error, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if routes.Add(1) == 1 {
+					resume := Resume{Task: task.ID, Lane: "codex-sol:high"}
+					if answer == "brief" || answer == "same Brief path" {
+						b := &brief.Brief{Fields: brief.Fields{Title: "Use the corrected Brief", Access: brief.AccessEdit, Lane: "codex-sol:high", Touch: []string{"/first.txt"}}, Goal: "Use the corrected input.", Done: "Return a Report."}
+						if err := brief.Write(b, corrected); err != nil {
+							queued <- err
+							return
+						}
+						resume.Lane, resume.Brief = "", corrected
+					} else if answer == "skip" {
+						resume.Lane, resume.Skip = "", true
+					}
+					_, err := QueueResume(sup.State.Folder, resume)
+					queued <- err
+				}
+				http.Error(w, "use the rules fallback", http.StatusBadRequest)
+			}))
+			defer server.Close()
+			sup.Env.Roster.Router.Backend, sup.Env.Roster.Router.BaseURL = "jev", server.URL
+			if err := sup.State.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if sup.start(task) {
+				t.Fatal("Dispatch used input from before the answer")
+			}
+			select {
+			case err := <-queued:
+				if err != nil {
+					t.Fatal(err)
+				}
+			default:
+				t.Fatal("the Router did not queue the answer")
+			}
+			if _, stale := sup.pending[task]; stale || PendingResume(sup.State.Folder, task.ID) {
+				t.Fatal("stale Route or consumed answer remains pending")
+			}
+			if _, err := os.Stat(filepath.Join(task.Folder, dispatch.FileTask)); !os.IsNotExist(err) {
+				t.Fatalf("old Dispatch was prepared: %v", err)
+			}
+			if answer == "skip" {
+				if task.State != TaskSkipped {
+					t.Fatalf("skip was lost: %+v", task)
+				}
+				return
+			}
+			if !sup.start(task) {
+				t.Fatalf("corrected input did not start: %+v", task)
+			}
+			takeResult(t, sup)
+			input, err := dispatch.LoadTask(task.Folder)
+			if err != nil || input.Route.Effort != "high" {
+				t.Fatalf("Dispatch lost the new Lane: %+v, %v", input, err)
+			}
+			if answer != "lane" {
+				body, err := os.ReadFile(filepath.Join(task.Folder, dispatch.FileBrief))
+				if err != nil || !strings.Contains(string(body), "Use the corrected input.") {
+					t.Fatalf("Dispatch lost the new Brief: %s, %v", body, err)
+				}
+			}
+		})
 	}
 }

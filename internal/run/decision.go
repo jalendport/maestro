@@ -10,7 +10,7 @@ import (
 )
 
 // pauseNoticeChanged keeps the last set across supervisor restarts without
-// changing run.json. Queued answers do not change the set until applied.
+// changing run.json. Answers that start work reset the saved notice.
 func pauseNoticeChanged(s *State) (bool, error) {
 	tasks := []string{}
 	for _, task := range sortedTasks(s) {
@@ -31,6 +31,18 @@ func pauseNoticeChanged(s *State) (bool, error) {
 		return false, nil
 	}
 	return true, os.WriteFile(path, data, 0o644)
+}
+
+func resetPauseNotice(s *State) error {
+	err := os.Remove(filepath.Join(s.Folder, "pause-notice.json"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+func resumeWorkPath(s *State, task *TaskState) string {
+	return filepath.Join(s.Folder, "control", "work-resume-"+task.ID)
 }
 
 // PendingResume includes answers queued before the supervisor updates run.json.
@@ -90,5 +102,11 @@ func ResumeCommand(s *State, task *TaskState) string {
 	if task != nil {
 		ref = fmt.Sprint(task.Number)
 	}
-	return fmt.Sprintf("maestro resume %s --task %s (--lane <family[:effort]> | --brief <file> | --skip)", s.Run, ref)
+	answers := "--lane <family[:effort]> | --brief <file> | --skip"
+	if task != nil {
+		if _, err := acceptanceRecord(s, task); err == nil {
+			answers += " | --accept"
+		}
+	}
+	return fmt.Sprintf("maestro resume %s --task %s (%s)", s.Run, ref, answers)
 }

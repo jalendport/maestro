@@ -8,6 +8,7 @@ import (
 
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/router"
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 // claim checks the machine and Account caps and saves the Dispatch Route under
@@ -53,6 +54,15 @@ func (sup *Supervisor) claim(t *TaskState, route *router.Route) (bool, error) {
 		if err := sup.State.Save(); err != nil {
 			*t = previous
 			return err
+		}
+		// Keep an applied answer across restarts, but reset the notice only
+		// once that answer takes a slot. Other Tasks can still be waiting.
+		if path := resumeWorkPath(sup.State, t); fileExists(path) {
+			if err := resetPauseNotice(sup.State); err != nil {
+				ui.Warnf("pause notice: %v", err)
+			} else if err := os.Remove(path); err != nil {
+				ui.Warnf("pause notice: %v", err)
+			}
 		}
 		claimed = true
 		return nil

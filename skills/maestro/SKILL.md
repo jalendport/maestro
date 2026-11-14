@@ -139,7 +139,7 @@ Answer only the Task that needs the correction. Its answer can release dependent
 
 Use `--skip` when you choose to omit the Task. A skipped Task counts as done for `blocked_by` and overlap order. Its dependents can start; skip a dependent too when needed.
 
-A new pause notice is sent only when the set of Tasks that need an answer changes. An answer that leaves this set unchanged sends no new notice. A skipped Task is excluded from the notice.
+A new pause notice is sent when the set of Tasks that need an answer changes, or when an applied answer started work since the last notice: a new Dispatch attempt, a merge retry, an accept, or a Finish retry. If that work pauses again, a notice is sent even when the set is unchanged. A refused answer or an answer that starts nothing sends no new notice. A skipped Task is excluded from the notice.
 
 Use `--accept` only after you read the diff of a blocked or failed Task with a Report and a diff. It closes the Task with your acceptance, applies the normal commit and merge rules, and releases dependent Tasks. A Task blocked only by a dependency cannot be accepted.
 

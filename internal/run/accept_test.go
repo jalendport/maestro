@@ -11,6 +11,7 @@ import (
 	"github.com/jalendport/maestro/internal/brief"
 	"github.com/jalendport/maestro/internal/config"
 	"github.com/jalendport/maestro/internal/dispatch"
+	"github.com/jalendport/maestro/internal/harness"
 	"github.com/jalendport/maestro/internal/ledger"
 	"github.com/jalendport/maestro/internal/worktree"
 )
@@ -66,6 +67,9 @@ func TestAcceptCommitsByModeAndBrief(t *testing.T) {
 					sup, original := acceptanceFixture(t, mode, commit, state)
 					sup.State.Tasks = sup.State.Tasks[:1]
 					task := sup.State.Tasks[0]
+					if !strings.Contains(ResumeCommand(sup.State, task), "--accept") {
+						t.Fatal("resume command omits acceptance for a Lane result")
+					}
 					template := "{title}\n\n{summary}"
 					sup.Env.Project = &config.Project{CommitMessage: &template}
 					runWrite(t, filepath.Join(sup.State.Project, "user.txt"), "user work\n")
@@ -169,6 +173,9 @@ func TestAcceptRejectsStatesAndMissingResults(t *testing.T) {
 			if _, err := QueueResume(s.Folder, Resume{Task: task.ID, Accept: true}); err == nil || !strings.Contains(err.Error(), state) {
 				t.Fatalf("accepted state %s: %v", state, err)
 			}
+			if strings.Contains(ResumeCommand(s, task), "--accept") {
+				t.Fatal("resume command offers acceptance without a Lane result")
+			}
 		})
 	}
 	for _, missing := range []string{"dependency", "Report", "changed paths", "diff"} {
@@ -198,6 +205,9 @@ func TestAcceptRejectsStatesAndMissingResults(t *testing.T) {
 			if _, err := QueueResume(sup.State.Folder, Resume{Task: task.ID, Accept: true}); err == nil || !strings.Contains(err.Error(), TaskBlocked) {
 				t.Fatalf("accepted without %s: %v", missing, err)
 			}
+			if strings.Contains(ResumeCommand(sup.State, task), "--accept") {
+				t.Fatalf("resume command offers acceptance without %s", missing)
+			}
 			sup.applyResume(resumeFile(t, sup.State.Folder, Resume{Task: task.ID, Accept: true}))
 			if task.State != TaskBlocked || task.Decision != "" {
 				t.Fatalf("invalid acceptance applied: %+v", task)
@@ -209,6 +219,10 @@ func TestAcceptRejectsStatesAndMissingResults(t *testing.T) {
 func TestAcceptCommitFailureKeepsTaskBlocked(t *testing.T) {
 	sup, _ := acceptanceFixture(t, "tree", true, TaskBlocked)
 	task := sup.State.Tasks[0]
+	count := countPauseNotices(t)
+	if err := sup.end(StatePaused); err != nil {
+		t.Fatal(err)
+	}
 	runWrite(t, filepath.Join(sup.State.Project, ".git", "hooks", "pre-commit"), "#!/bin/sh\nexit 1\n")
 	if err := os.Chmod(filepath.Join(sup.State.Project, ".git", "hooks", "pre-commit"), 0o755); err != nil {
 		t.Fatal(err)
@@ -219,12 +233,24 @@ func TestAcceptCommitFailureKeepsTaskBlocked(t *testing.T) {
 	if task.State != TaskBlocked || task.Decision == "accepted" || task.Error == "" {
 		t.Fatalf("commit failure: %+v", task)
 	}
+	if err := sup.end(StatePaused); err != nil {
+		t.Fatal(err)
+	}
+	if *count != 2 {
+		t.Fatalf("accept retry sent %d notices", *count)
+	}
+	assertAcceptanceRows(t, 0)
 }
 
-func TestAcceptUsesExistingMergeConflictFlow(t *testing.T) {
+func acceptanceConflictFixture(t *testing.T) (*Supervisor, pendingDispatch) {
+	t.Helper()
 	sup, rec := acceptanceFixture(t, "worktree", false, TaskFailed)
 	task := sup.State.Tasks[0]
 	pending := sup.pending[task]
+	pending.brief.Touch = append(pending.brief.Touch, "/base.txt")
+	if err := brief.Write(pending.brief, task.BriefPath); err != nil {
+		t.Fatal(err)
+	}
 	sup.State.Tasks = sup.State.Tasks[:1]
 	runWrite(t, filepath.Join(task.Workdir, "base.txt"), "accepted version\n")
 	rec.Verification.Changed = append(rec.Verification.Changed, "base.txt")
@@ -248,15 +274,89 @@ func TestAcceptUsesExistingMergeConflictFlow(t *testing.T) {
 	}
 	resumeFile(t, sup.State.Folder, Resume{Task: task.ID, Accept: true})
 	sup.consumeControl()
-	if task.State != TaskWaiting || !task.ConflictAttempt || len(task.Conflicts) != 1 || task.Conflicts[0] != "base.txt" || task.Decision != "accepted" {
+	if task.State != TaskWaiting || !task.ConflictAttempt || len(task.Conflicts) != 1 || task.Conflicts[0] != "base.txt" || task.Decision != "" {
 		t.Fatalf("accepted merge did not use conflict flow: %+v", task)
 	}
-	sup.pending[task] = pending
-	if !sup.start(task) {
-		t.Fatalf("conflict attempt did not start: %+v", task)
+	assertAcceptanceRows(t, 0)
+	current, err := dispatch.LoadRecord(task.Folder)
+	if err != nil || current.Outcome.Decision == "accepted" {
+		t.Fatalf("premature acceptance in Dispatch record: %+v, %v", current, err)
 	}
-	takeResult(t, sup)
-	if task.State != TaskBlocked || task.Error != "merge conflict in base.txt" {
-		t.Fatalf("failed conflict attempt: %+v", task)
+	return sup, pending
+}
+
+func assertAcceptanceRows(t *testing.T, want int) {
+	t.Helper()
+	count := 0
+	if err := ledger.Each(func(raw json.RawMessage) error {
+		var row dispatch.Record
+		if err := json.Unmarshal(raw, &row); err != nil {
+			return err
+		}
+		if row.Kind == "acceptance" {
+			count++
+			if row.Attempt != 1 || row.Outcome.Decision != "accepted" || row.Outcome.Outcome != dispatch.OutcomeFailed {
+				t.Fatalf("acceptance names the wrong result: %s", raw)
+			}
+		} else if row.Outcome.Decision == "accepted" {
+			t.Fatalf("Dispatch Ledger row marked accepted: %s", raw)
+		}
+		return nil
+	}); err != nil || count != want {
+		t.Fatalf("acceptance rows: got %d, want %d, %v", count, want, err)
+	}
+}
+
+func TestAcceptWaitsForMergeConflictAttempt(t *testing.T) {
+	for _, resolve := range []bool{false, true} {
+		t.Run(fmt.Sprint(resolve), func(t *testing.T) {
+			sup, pending := acceptanceConflictFixture(t)
+			saved, err := Load(sup.State.Folder)
+			if err != nil || saved.Tasks[0].Decision != "" {
+				t.Fatalf("premature acceptance in Run state: %+v, %v", saved, err)
+			}
+			sup.State = saved
+			task := saved.Tasks[0]
+			sup.pending = map[*TaskState]pendingDispatch{task: pending}
+			if resolve {
+				bin := filepath.Join(t.TempDir(), "resolve")
+				runWrite(t, bin, "#!/bin/sh\nread pointer\nprintf 'both versions\\n' > base.txt\nprintf '## Summary\\nResolve the conflict.\\n\\nSTATUS: done\\n' > \"$MAESTRO_TASK_FOLDER/result.md\"\n")
+				if err := os.Chmod(bin, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				sup.Env.Reg = harness.New(map[string]string{"codex": bin})
+			}
+			if !sup.start(task) {
+				t.Fatalf("conflict attempt did not start: %+v", task)
+			}
+			rec := takeResult(t, sup)
+			if rec.Outcome.Decision == "accepted" {
+				t.Fatalf("conflict Dispatch was accepted: %+v", rec)
+			}
+			wantState, wantDecision, wantRows := TaskBlocked, "", 0
+			if resolve {
+				wantState, wantDecision, wantRows = TaskDone, "accepted", 1
+			}
+			saved, err = Load(saved.Folder)
+			if err != nil || saved.Tasks[0].State != wantState || saved.Tasks[0].Decision != wantDecision {
+				t.Fatalf("conflict result: %+v, %v", saved, err)
+			}
+			if !resolve && task.Error != "merge conflict in base.txt" {
+				t.Fatalf("failed conflict attempt: %+v", task)
+			}
+			original, err := dispatch.LoadRecord(filepath.Join(task.Folder, dispatch.FileAttempts, "1"))
+			if err != nil || (original.Outcome.Decision == "accepted") != resolve || original.Outcome.Outcome != dispatch.OutcomeFailed {
+				t.Fatalf("original result: %+v, %v", original, err)
+			}
+			current, err := dispatch.LoadRecord(task.Folder)
+			if err != nil || current.Attempt != 2 || current.Outcome.Decision == "accepted" {
+				t.Fatalf("conflict Dispatch record: %+v, %v", current, err)
+			}
+			row := ledgerRow(saved)["tasks"].([]map[string]any)[0]
+			if (row["decision"] == "accepted") != resolve {
+				t.Fatalf("Run Ledger decision: %+v", row)
+			}
+			assertAcceptanceRows(t, wantRows)
+		})
 	}
 }
