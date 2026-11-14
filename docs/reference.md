@@ -132,7 +132,29 @@ Antigravity has no kernel sandbox, so the hook is the only boundary of an Antigr
 
 ### Router
 
-The Router makes the Routes. The backend is Jev or the rules table, and Maestro uses the rules table when Jev is absent or sure of nothing. The rules table observes every Route and decides only when Jev is absent. For a Task's Tier and category, it tries the Families of the chain in order. Without a Jev key the rules table routes every Task, and edit Tasks end `unverified`; the Orchestrator reads the diff.
+The Router makes the Routes. The backend is Jev (a hosted routing and judging service from [typesafe.ai](https://typesafe.ai) that needs its own API key) or the rules table, and Maestro uses the rules table when Jev is absent or sure of nothing. The rules table observes every Route and decides only when Jev is absent. For a Task's Tier and category, it tries the Families of the chain in order. Without a Jev key the rules table routes every Task, and edit Tasks end `unverified`; the Orchestrator reads the diff. See [Without a Jev key](#without-a-jev-key).
+
+### Without a Jev key
+
+Maestro reads the key from `TYPESAFE_API_KEY`, else from `~/.maestro/env` (`maestro key set` writes it). `router = "rules"` in the user or project config has the same effect as no key. Without it, these behaviors change:
+
+- **Routes:** the rules table decides every Task from the Brief's `level` or `--level` (`some` when neither is set); there is no Jev score and no confidence band.
+- **Approval holds:** the vague-Brief question, the Router Council signal, and the `medium` or `fallback` confidence hold cannot fire, because only Jev raises them; the other [approval holds](#approval-holds) still apply, including the Router question when no Lane passes the hard rules.
+- **Gate:** it does not run; the Task's gate is `skipped` and the error text is `gate skipped: <reason>`.
+- **Edit Tasks:** they end `unverified`, never `verified`, even when every check passes; Maestro still commits an `unverified` edit Task that has a Report and changed files.
+- **Scores:** there is no `satisfies`, `verdict`, `risk`, or `done_items` score.
+- **Nudge:** there is none, because it needs a gate score.
+- **Cause:** a rule supplies it (see [Causes](#causes)), so a failed check is `capability` and re-Routes one Tier up, unless it is a failed Docker pre-flight (`environment`) or a touch violation or blocked Report (`brief`).
+- **End-of-Run Council:** it starts only for a Heavy or Frontier Task or `councils = "always"`; a gate risk of `high` or `critical` cannot start it.
+- **Council findings:** none is marked or filtered; each counts as probability `1` and stays in the findings list, and the Merge prints `filter skipped`. A Council with no `--level` or automatic Tier runs at the Daily Tier.
+
+Instead, the Orchestrator does this:
+
+- Reads the diff of every edit Task before accepting it; the Project file's `checks` still run after each edit.
+- Judges each Task against its Done items, because no gate scores them.
+- Weighs every Council finding itself, because none is marked weak.
+- Treats a Cause as a rule's guess from the Report and checks, not a judgment of the diff.
+- Sets `level` with care, because the estimate alone sets the Tier.
 
 ### Jev
 
