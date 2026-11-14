@@ -202,9 +202,9 @@ func (a *app) approveCmd() *cobra.Command {
 
 func (a *app) resumeCmd() *cobra.Command {
 	var task, lane, briefPath string
-	var skip, wait, merge, finish bool
+	var skip, wait, merge, finish, accept bool
 	c := &cobra.Command{
-		Use:   "resume <run> [--task <n> (--lane F[:E] | --brief <file> | --skip | --merge) | --finish]",
+		Use:   "resume <run> [--task <n> (--lane F[:E] | --brief <file> | --skip | --merge | --accept) | --finish]",
 		Short: "Continue a paused Run with one answer for the stuck Task",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -212,12 +212,15 @@ func (a *app) resumeCmd() *cobra.Command {
 				return fmt.Errorf("--task is required")
 			}
 			n := 0
-			for _, set := range []bool{lane != "", briefPath != "", skip, merge, finish} {
+			for _, set := range []bool{lane != "", briefPath != "", skip, merge, finish, accept} {
 				if set {
 					n++
 				}
 			}
 			if n != 1 || (finish && task != "") {
+				if accept {
+					return fmt.Errorf("give exactly one of --lane, --brief, --skip, --merge, --accept, --finish; --finish takes no --task")
+				}
 				return fmt.Errorf("give exactly one of --lane, --brief, --skip, --merge, --finish; --finish takes no --task")
 			}
 			env, err := a.env(false)
@@ -240,7 +243,7 @@ func (a *app) resumeCmd() *cobra.Command {
 					return err
 				}
 			}
-			ans := run.Resume{Lane: lane, Brief: briefPath, Skip: skip, Merge: merge, Finish: finish}
+			ans := run.Resume{Lane: lane, Brief: briefPath, Skip: skip, Merge: merge, Finish: finish, Accept: accept}
 			if t != nil {
 				ans.Task = t.ID
 			}
@@ -254,6 +257,8 @@ func (a *app) resumeCmd() *cobra.Command {
 					ui.Outf("Run %s will retry Finish", s.Run)
 				case merge:
 					ui.Outf("Task %s will retry the merge", t.ID)
+				case accept:
+					ui.Outf("Task %s will close with the Orchestrator's acceptance", t.ID)
 				case skip:
 					ui.Outf("task %s skipped", t.ID)
 				case lane != "":
@@ -276,6 +281,7 @@ func (a *app) resumeCmd() *cobra.Command {
 	c.Flags().StringVar(&briefPath, "brief", "", "restart with a corrected Brief file")
 	c.Flags().BoolVar(&skip, "skip", false, "skip the Task; the Run continues")
 	c.Flags().BoolVar(&merge, "merge", false, "retry the merge after a hand fix in the Worktree")
+	c.Flags().BoolVar(&accept, "accept", false, "accept the Lane result and continue the Run")
 	c.Flags().BoolVar(&finish, "finish", false, "retry landing the Run branch")
 	c.Flags().BoolVar(&wait, "wait", false, "keep the supervisor in this process")
 	return c

@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jalendport/maestro/internal/dispatch"
 	"github.com/jalendport/maestro/internal/worktree"
 )
 
@@ -27,6 +28,9 @@ func withControlLock(folder string, fn func() error) error {
 
 // QueueResume saves an answer and reports whether the supervisor will take it.
 func QueueResume(folder string, answer Resume) (bool, error) {
+	if answer.Accept && (answer.Lane != "" || answer.Brief != "" || answer.Skip || answer.Merge || answer.Finish) {
+		return false, fmt.Errorf("--accept cannot be combined with --lane, --brief, --skip, --merge, or --finish")
+	}
 	live := false
 	err := withControlLock(folder, func() error {
 		s, err := Load(folder)
@@ -40,6 +44,11 @@ func QueueResume(folder string, answer Resume) (bool, error) {
 			}
 		} else if !ok {
 			return fmt.Errorf("Run %s has no Task %q", s.Run, answer.Task)
+		}
+		if answer.Accept {
+			if _, err := acceptanceRecord(s, task); err != nil {
+				return err
+			}
 		}
 		if !answer.Finish && (task.State == TaskRunning || task.State == TaskDone || task.State == TaskSkipped) {
 			return fmt.Errorf("Task %s is %s", task.ID, task.State)
@@ -66,6 +75,24 @@ func QueueResume(folder string, answer Resume) (bool, error) {
 		return nil
 	})
 	return live, err
+}
+
+func acceptanceRecord(s *State, task *TaskState) (*dispatch.Record, error) {
+	if task.State != TaskBlocked && task.State != TaskFailed {
+		return nil, fmt.Errorf("Task %s is %s; --accept needs a blocked or failed Task", task.ID, task.State)
+	}
+	if task.DependencyBlocked {
+		return nil, fmt.Errorf("Task %s is %s by a dependency; --accept needs a Lane result", task.ID, task.State)
+	}
+	rec, err := dispatch.LoadRecord(task.Folder)
+	if err != nil {
+		return nil, fmt.Errorf("Task %s is %s with no Lane result: %w", task.ID, task.State, err)
+	}
+	_, report := rec.Report()
+	if !report || len(rec.Verification.Changed) == 0 || dispatch.DiffFor(s.Project, rec) == "" {
+		return nil, fmt.Errorf("Task %s is %s with no Lane result: --accept needs a Report and a diff", task.ID, task.State)
+	}
+	return rec, nil
 }
 
 // finishOwnership checks for an answer before it gives up the live index.

@@ -115,6 +115,9 @@ func Status(rec *Record) string {
 	if rec.Outcome.Outcome == OutcomeUnverified && rec.Outcome.ErrorText != "" {
 		state += " (" + rec.Outcome.ErrorText + ")"
 	}
+	if rec.Outcome.Decision == "accepted" {
+		state = "accepted"
+	}
 	duration := "—"
 	if !rec.StartedAt.IsZero() {
 		duration = ui.Duration(time.Duration(elapsed * float64(time.Second)))

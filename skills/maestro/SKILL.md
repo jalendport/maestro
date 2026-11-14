@@ -116,7 +116,7 @@ Read the Cause and the Lane's Blocked items. The Run report names the Worktree o
 
 - `brief`: the Brief excludes required work or contradicts itself. Correct the Brief, then resume with `--brief`.
 - `environment`: a tool or service was denied, down, or missing. Resolve that blocker, then resume.
-- `none`: nothing went wrong. On a Bad result, judge the result, then resume.
+- `none`: nothing went wrong. On a Bad result, read the diff and judge the result against its Done. If it meets its Done, resume with `--accept`. Otherwise, correct the Brief and resume with `--brief`.
 - `capability`: the Lane's work is wrong or incomplete. This is the only Cause that can re-Route a Bad result to a stronger Lane.
 
 A blocked Report needs your answer, whatever its Cause.
@@ -128,6 +128,9 @@ Answer a paused Run or a blocked Task with one command:
 - `maestro resume <run> --task <n> --lane <family[:effort]>`
 - `maestro resume <run> --task <n> --brief <corrected file>`
 - `maestro resume <run> --task <n> --skip`
+- `maestro resume <run> --task <n> --accept`
+
+Use `--accept` only after you read the diff of a blocked or failed Task with a Report and a diff. It closes the Task with your acceptance, applies the normal commit and merge rules, and releases dependent Tasks. A Task blocked only by a dependency cannot be accepted.
 
 ### Relay
 

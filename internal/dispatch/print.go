@@ -28,6 +28,9 @@ func Print(rec *Record, asJSON bool) int {
 	if rec.Outcome.Outcome == OutcomeUnverified && rec.Outcome.ErrorText != "" {
 		status += " (" + rec.Outcome.ErrorText + ")"
 	}
+	if rec.Outcome.Decision == "accepted" {
+		status = "accepted"
+	}
 	lane := rec.Route.FamilyID
 	if rec.Route.Effort != "" {
 		lane += " " + rec.Route.Effort
@@ -128,6 +131,9 @@ func Print(rec *Record, asJSON bool) int {
 }
 
 func exitCode(rec *Record) int {
+	if rec.Outcome.Decision == "accepted" {
+		return proc.CodeOK
+	}
 	switch rec.Outcome.Outcome {
 	case OutcomeVerified, OutcomeAnswered, OutcomeUnverified:
 		return proc.CodeOK

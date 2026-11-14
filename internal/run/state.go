@@ -67,6 +67,7 @@ type TaskState struct {
 	JudgedFiles       []string      `json:"judged_files,omitempty"`
 	Nudged            bool          `json:"nudged,omitempty"`
 	Outcome           string        `json:"outcome,omitempty"`
+	Decision          string        `json:"decision,omitempty"`
 	Status            string        `json:"status,omitempty"`
 	Error             string        `json:"error,omitempty"`
 	Cause             string        `json:"cause,omitempty"`

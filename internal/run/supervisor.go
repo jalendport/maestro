@@ -803,6 +803,9 @@ func (sup *Supervisor) handle(r result) {
 			sup.escalate(t, rec, rec.Outcome.ErrorText)
 		}
 	}
+	if t.State == TaskDone && t.Decision == "accepted" {
+		rec.Outcome.Decision = "accepted"
+	}
 	_ = sup.State.Save()
 }
 
@@ -1012,6 +1015,7 @@ type Resume struct {
 	Skip   bool   `json:"skip,omitempty"`
 	Merge  bool   `json:"merge,omitempty"`
 	Finish bool   `json:"finish,omitempty"`
+	Accept bool   `json:"accept,omitempty"`
 }
 
 func (sup *Supervisor) applyResume(path string) {
@@ -1035,9 +1039,50 @@ func (sup *Supervisor) applyResume(path string) {
 	}
 	delete(sup.pending, t)
 	switch {
+	case r.Accept:
+		rec, err := acceptanceRecord(sup.State, t)
+		if err != nil {
+			ui.Warnf("resume: %v", err)
+			return
+		}
+		t.State = TaskDone
+		if err := sup.commitTask(t, rec); err != nil {
+			sup.blockMerge(t, err)
+			rec.Outcome.Decision, rec.Outcome.ErrorText = "blocked", err.Error()
+			if err := rec.Save(); err != nil {
+				ui.Warnf("dispatch record: %v", err)
+			}
+			return
+		}
+		t.Decision = "accepted"
+		t.Error, t.Cause = "", ""
+		if t.State == TaskDone {
+			t.Waiting = ""
+		}
+		t.EndedAt = time.Now()
+		rec.Outcome.Decision = "accepted"
+		if err := rec.Save(); err != nil {
+			sup.blockMerge(t, err)
+			return
+		}
+		// Acceptance is a decision about an existing Dispatch, not a new Route.
+		accepted := *rec
+		accepted.Kind = "acceptance"
+		if err := ledger.Append(&accepted); err != nil {
+			ui.Warnf("ledger: %v", err)
+		}
 	case r.Merge:
 		if err := sup.mergeTask(t); err != nil {
 			sup.blockMerge(t, err)
+		} else if t.State == TaskDone && t.Decision == "accepted" {
+			rec, err := dispatch.LoadRecord(t.Folder)
+			if err == nil {
+				rec.Outcome.Decision = "accepted"
+				err = rec.Save()
+			}
+			if err != nil {
+				sup.blockMerge(t, err)
+			}
 		}
 	case r.Skip:
 		t.State = TaskSkipped
@@ -1067,6 +1112,7 @@ func (sup *Supervisor) applyResume(path string) {
 		t.Excluded = nil
 	}
 	if !r.Skip && (r.Brief != "" || r.Lane != "") {
+		t.Decision = ""
 		t.AnswerAttempt = t.Attempt
 		t.Escalations = 0
 	}
@@ -1258,7 +1304,11 @@ func ledgerRow(s *State) map[string]any {
 		if t.Route != nil {
 			fam = t.Route.FamilyID
 		}
-		tasks = append(tasks, map[string]any{"number": t.Number, "id": t.ID, "title": t.Title, "state": t.State, "outcome": t.Outcome, "attempts": t.Attempt, "family": fam})
+		row := map[string]any{"number": t.Number, "id": t.ID, "title": t.Title, "state": t.State, "outcome": t.Outcome, "attempts": t.Attempt, "family": fam}
+		if t.Decision != "" {
+			row["decision"] = t.Decision
+		}
+		tasks = append(tasks, row)
 	}
 	return map[string]any{
 		"kind": "run", "project": s.Project, "run": s.Run, "plan_path": s.Plan, "tasks": tasks, "state": s.State,

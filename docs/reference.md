@@ -480,6 +480,16 @@ The Merge holds a status table, the findings per Seat, and the report paths. Jev
 
 Answer a Relay with `maestro answer <task> allow|deny --relay <id>`. Use the id from the `relay` event printed by `maestro wait` or `maestro status`. For which Lanes relay and the time limit, see [Relay](#relay).
 
+### Resume
+
+Use `maestro resume <run> --task <n>` with one answer: `--lane <family[:effort]>` to re-Route, `--brief <file>` to restart with a corrected Brief, `--skip` to skip the Task, `--merge` to retry a merge after a hand fix, or `--accept` to accept the Lane result after you read its diff. Use `maestro resume <run> --finish` to retry landing the Run branch.
+
+`--accept` needs a Task in state `blocked` or `failed` with a Report and a diff. A Task blocked only by a dependency cannot be accepted. An error names the state when the Task cannot be accepted. Combine no other answer with `--accept`.
+
+Acceptance closes the Task as `done`, releases its dependent Tasks, and continues the Run. In tree mode, the Brief's `commit: true` commits the changed paths with the commit message template; `commit: false` leaves them uncommitted. In Worktree mode, Maestro commits and merges through the same path as a verified Task, with the existing merge conflict rules.
+
+The Task state and Dispatch record store `decision: accepted`. Status and the Run report show `accepted`. The Ledger appends an `acceptance` row and includes the Task's decision in the Run row. The original Dispatch row and gate result stay in the Ledger, so acceptance does not count as a gate pass or a second Route in Route statistics.
+
 ### Init
 
 `maestro init` writes the Project file. It detects each stack from files at the project root. A project can match more than one stack. It writes active `dirs` and `allow` arrays for all matches. It writes `checks` as commented suggestions, such as `# checks = ["go test ./..."]`. Review the suggestions before you activate them: an incorrect check fails every edit Task. With no match, all keys stay commented.
@@ -510,7 +520,7 @@ Maestro writes these paths itself. Do not edit them by hand.
 | Path | Written by |
 |---|---|
 | `~/.maestro/env` | `maestro key set` writes the Jev key. |
-| `~/.maestro/ledger.jsonl` | Every finished Dispatch, Council, and Run appends one row. The Ledger is append only; rows are never updated. |
+| `~/.maestro/ledger.jsonl` | Every finished Dispatch, Council, Run, and Task acceptance appends one row. The Ledger is append only; rows are never updated. |
 | `~/.maestro/budget.json` | Dispatches (Harvest) and `maestro budget` (Probe) store Readings. |
 | `~/.maestro/cache/discovery.json` | `maestro roster refresh` rewrites it, and any verb rewrites it when it is stale. |
 | `~/.maestro/control/<project-key>/` | Dispatches store Lane policy and Relay files. |

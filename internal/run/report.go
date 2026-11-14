@@ -125,6 +125,9 @@ func Report(s *State) string {
 }
 
 func stateWord(t *TaskState) string {
+	if t.State == TaskDone && t.Decision == "accepted" {
+		return "accepted"
+	}
 	if t.State == TaskDone && t.Outcome == dispatch.OutcomeUnverified {
 		return "unverif."
 	}
