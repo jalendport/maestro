@@ -99,11 +99,13 @@ func TestGateReceivesCleanedBlockedList(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := &Env{Roster: &roster.Roster{Router: config.Router{Backend: "jev", BaseURL: server.URL}}}
-	for _, tc := range []struct{ text, want string }{
-		{"No command was denied.\n- none", ""},
-		{"- No command was denied.\n- none\n- command one denied\n- command two denied", "command one denied\ncommand two denied"},
+	for _, tc := range []struct{ prefix, text, want string }{
+		{"", "No command was denied.\n- none", ""},
+		{"", "- No command was denied.\n- none\n- command one denied\n- command two denied", "command one denied\ncommand two denied"},
+		{"## Summary\n```md\nExample.\n", "- command one denied", "command one denied"},
+		{"## Summary\n```md\n```\nExample.\n```\n", "- command one denied", "command one denied"},
 	} {
-		report := brief.ParseReport("## Blocked\n" + tc.text + "\nSTATUS: partial\n")
+		report := brief.ParseReport(tc.prefix + "## Blocked\n" + tc.text + "\nSTATUS: partial\n")
 		rec := &Record{Verification: Verification{Changed: []string{"tracked.txt"}}, Permission: Permission{Blocked: []string{"stale item"}}}
 		gate := runGate(env, &Task{Project: root, Title: "Test"}, rec, &brief.Brief{Goal: "goal", Done: "done"}, report, snap)
 		if gate.Skipped != "" {

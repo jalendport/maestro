@@ -402,9 +402,6 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 				if referencePath(path, lane) {
 					touchesReference = true
 				}
-				if c.Harness == "claude" && readOnly && (len(lane.ReadDirs) > 0 || len(lane.ReadFiles) > 0) && !readablePath(path, lane) {
-					return Verdict{Kind: "deny", Reason: "outside the Lane's readable paths: " + path}
-				}
 			}
 			if touchesReference && !readOnly {
 				return Verdict{Kind: "deny", Reason: "read-only reference: only read-only commands are allowed"}
@@ -435,16 +432,6 @@ func DecideLane(c *Call, lane *Lane) Verdict {
 			return Decide(c, "all").verdict()
 		}
 		if readTool(c.Tool) {
-			if c.Harness == "claude" && (len(lane.ReadDirs) > 0 || len(lane.ReadFiles) > 0) {
-				if target := claudeReadTarget(c, lane); target != "" && !readablePath(target, lane) {
-					return Verdict{Kind: "deny", Reason: "outside the Lane's readable paths: " + target}
-				}
-				if c.Tool == "Glob" {
-					if pattern, _ := c.Input["pattern"].(string); filepath.IsAbs(pattern) && !readablePath(pattern, lane) {
-						return Verdict{Kind: "deny", Reason: "outside the Lane's readable paths: " + pattern}
-					}
-				}
-			}
 			return Verdict{Kind: "allow"}
 		}
 		return Verdict{Kind: "deny", Reason: "unknown Lane tool: " + c.Tool}
@@ -465,34 +452,6 @@ func referencePath(path string, lane *Lane) bool {
 		}
 	}
 	return false
-}
-
-func readablePath(path string, lane *Lane) bool {
-	for _, dir := range append([]string{lane.Root, lane.RunFolder}, lane.Dirs...) {
-		if inside(path, dir) {
-			return true
-		}
-	}
-	return referencePath(path, lane)
-}
-
-func claudeReadTarget(c *Call, lane *Lane) string {
-	var target string
-	switch c.Tool {
-	case "Read":
-		target, _ = c.Input["file_path"].(string)
-	case "Glob", "Grep", "LS":
-		target, _ = c.Input["path"].(string)
-		if target == "" {
-			target = cmp.Or(c.CWD, lane.Root)
-		}
-	default:
-		return ""
-	}
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(cmp.Or(c.CWD, lane.Root), target)
-	}
-	return target
 }
 
 // commandPaths finds explicit paths, including git's working-directory flags.

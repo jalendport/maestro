@@ -28,9 +28,11 @@ var positionRe = regexp.MustCompile(`(?mi)^\**POSITION\**:\s*\**(confirmed|chang
 
 // ParseReport reads a Report. A missing status line yields StatusUnshaped.
 func ParseReport(text string) *Report {
-	r := &Report{Raw: text, Order: SectionOrder(text), Status: StatusUnshaped}
+	// Reports match every heading, even after an unclosed or nested fence.
+	r := &Report{Raw: text, Order: sectionOrder(text, headingRe.FindAllStringSubmatchIndex(text, -1)), Status: StatusUnshaped}
 	// The status and position lines sit after the last heading; keep them out of that section's body.
-	r.Sections = SplitSections(positionRe.ReplaceAllString(statusRe.ReplaceAllString(text, ""), ""))
+	body := positionRe.ReplaceAllString(statusRe.ReplaceAllString(text, ""), "")
+	r.Sections = splitSections(body, headingRe.FindAllStringSubmatchIndex(body, -1))
 	if m := statusRe.FindAllStringSubmatch(text, -1); len(m) > 0 {
 		r.Status = strings.ToLower(m[len(m)-1][1])
 	}

@@ -166,6 +166,58 @@ func countPauseNotices(t *testing.T) *int {
 	return count
 }
 
+func TestPauseNoticeAfterResumeFailsBeforeClaim(t *testing.T) {
+	for _, failure := range []string{"router", "brief"} {
+		t.Run(failure, func(t *testing.T) {
+			sup := worktreeSupervisor(t)
+			sup.State.Mode = "tree"
+			sup.State.Tasks = sup.State.Tasks[:1]
+			task := sup.State.Tasks[0]
+			task.State = TaskBlocked
+			count := countPauseNotices(t)
+			if err := sup.end(StatePaused); err != nil {
+				t.Fatal(err)
+			}
+			// A corrected Brief can pass resume validation and fail at routing.
+			corrected := task.BriefPath + ".corrected"
+			runWrite(t, corrected, "---\nlane: codx-sol\n---\n# Correct the Task\n## Goal\nCorrect the work.\n## Done\nThe work is complete.\n")
+			resumeFile(t, sup.State.Folder, Resume{Task: task.ID, Brief: corrected})
+			sup.consumeControl()
+			if failure == "brief" {
+				runWrite(t, corrected, "invalid Brief")
+			}
+			loaded, err := Load(sup.State.Folder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sup.State, task = loaded, loaded.Tasks[0]
+			if sup.start(task) || task.State != TaskFailed || task.Attempt != 0 {
+				t.Fatalf("expected failure before claim: %+v", task)
+			}
+			if failure == "router" && !strings.Contains(task.Error, `unknown family "codx-sol"`) {
+				t.Fatalf("expected Router error: %s", task.Error)
+			}
+			if fileExists(resumeWorkPath(sup.State, task)) {
+				t.Fatal("resume work marker remains after failure")
+			}
+			if err := sup.State.Save(); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err = Load(sup.State.Folder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sup.State = loaded
+			if err := sup.end(StatePaused); err != nil {
+				t.Fatal(err)
+			}
+			if *count != 2 {
+				t.Fatalf("pause notices = %d, want 2", *count)
+			}
+		})
+	}
+}
+
 func TestPauseNoticeAfterResumedDispatchBlocksAgain(t *testing.T) {
 	for _, answer := range []string{"lane", "brief"} {
 		t.Run(answer, func(t *testing.T) {

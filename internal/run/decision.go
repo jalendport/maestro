@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jalendport/maestro/internal/ui"
 )
 
 // pauseNoticeChanged keeps the last set across supervisor restarts without
-// changing run.json. Answers that start work reset the saved notice.
+// changing run.json. Answers that start work or fail before claim reset it.
 func pauseNoticeChanged(s *State) (bool, error) {
 	tasks := []string{}
 	for _, task := range sortedTasks(s) {
@@ -43,6 +45,18 @@ func resetPauseNotice(s *State) error {
 
 func resumeWorkPath(s *State, task *TaskState) string {
 	return filepath.Join(s.Folder, "control", "work-resume-"+task.ID)
+}
+
+// consumeResumeWork resets the notice when an answer takes a slot or fails
+// before claim. Keep the marker if the notice could not be reset.
+func consumeResumeWork(s *State, task *TaskState) {
+	if path := resumeWorkPath(s, task); fileExists(path) {
+		if err := resetPauseNotice(s); err != nil {
+			ui.Warnf("pause notice: %v", err)
+		} else if err := os.Remove(path); err != nil {
+			ui.Warnf("pause notice: %v", err)
+		}
+	}
 }
 
 // PendingResume includes answers queued before the supervisor updates run.json.

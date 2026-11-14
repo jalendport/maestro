@@ -571,6 +571,9 @@ func (sup *Supervisor) start(t *TaskState) (started bool) {
 				sup.blockMerge(t, err)
 				_ = sup.State.Save()
 			}
+			if t.State == TaskFailed || t.State == TaskBlocked {
+				consumeResumeWork(sup.State, t)
+			}
 		}
 	}()
 	pending, routed := sup.pending[t]

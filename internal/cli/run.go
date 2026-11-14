@@ -244,6 +244,12 @@ func (a *app) resumeCmd() *cobra.Command {
 				}
 			}
 			ans := run.Resume{Lane: lane, Brief: briefPath, Skip: skip, Merge: merge, Finish: finish, Accept: accept}
+			if lane != "" {
+				family, _, _ := strings.Cut(lane, ":")
+				if _, ok := env.Roster.Family(family); !ok {
+					return fmt.Errorf("unknown family %q (see maestro roster)", family)
+				}
+			}
 			if t != nil {
 				ans.Task = t.ID
 			}

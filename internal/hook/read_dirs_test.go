@@ -32,16 +32,17 @@ func TestClaudeReferenceVerdicts(t *testing.T) {
 			{"grep folder", "Grep", root, map[string]any{"path": reference, "pattern": "example"}, "allow"},
 			{"named file", "Read", root, map[string]any{"file_path": named}, "allow"},
 			{"grep named file", "Grep", root, map[string]any{"path": named, "pattern": "example"}, "allow"},
-			{"sibling file", "Read", root, map[string]any{"file_path": sibling}, "deny"},
-			{"sibling search", "Grep", root, map[string]any{"path": other}, "deny"},
-			{"sibling glob", "Glob", root, map[string]any{"path": root, "pattern": filepath.Join(other, "*.go")}, "deny"},
+			{"sibling file", "Read", root, map[string]any{"file_path": sibling}, "allow"},
+			{"sibling search", "Grep", root, map[string]any{"path": other}, "allow"},
+			{"sibling glob", "Glob", root, map[string]any{"path": root, "pattern": filepath.Join(other, "*.go")}, "allow"},
+			{"sibling list", "LS", root, map[string]any{"path": other}, "allow"},
 			{"ls argument", "Bash", root, map[string]any{"command": "ls '" + reference + "'"}, "approve_read"},
 			{"git directory", "Bash", root, map[string]any{"command": "git -C '" + reference + "' status"}, "approve_read"},
 			{"git attached directory", "Bash", root, map[string]any{"command": "git -C'" + reference + "' status"}, "approve_read"},
 			{"cat named file", "Bash", root, map[string]any{"command": "cat '" + named + "'"}, "approve_read"},
-			{"cat sibling file", "Bash", root, map[string]any{"command": "cat '" + sibling + "'"}, "deny"},
+			{"cat sibling file", "Bash", root, map[string]any{"command": "cat '" + sibling + "'"}, "auto_approve"},
 			{"cat relative named file", "Bash", root, map[string]any{"command": "cat '../" + filepath.Base(other) + "/named.go'"}, "approve_read"},
-			{"cat relative sibling file", "Bash", root, map[string]any{"command": "cat '../" + filepath.Base(other) + "/sibling.go'"}, "deny"},
+			{"cat relative sibling file", "Bash", root, map[string]any{"command": "cat '../" + filepath.Base(other) + "/sibling.go'"}, "auto_approve"},
 			{"reference cwd", "Bash", reference, map[string]any{"command": "ls"}, "approve_read"},
 			{"reference cwd grep", "Bash", reference, map[string]any{"command": "rg example ."}, "approve_read"},
 			{"write command", "Bash", root, map[string]any{"command": "touch '" + reference + "/new'"}, "deny"},
@@ -61,6 +62,14 @@ func TestClaudeReferenceVerdicts(t *testing.T) {
 				got := DecideLane(&Call{Harness: "claude", Tool: tc.tool, CWD: tc.cwd, Input: tc.input}, lane)
 				if got.Kind != tc.want {
 					t.Fatalf("verdict = %+v, want %s", got, tc.want)
+				}
+				if strings.Contains(tc.name, "sibling") {
+					plain := *lane
+					plain.ReadDirs, plain.ReadFiles = nil, nil
+					without := DecideLane(&Call{Harness: "claude", Tool: tc.tool, CWD: tc.cwd, Input: tc.input}, &plain)
+					if got != without || len(Render("claude", got)) != 0 {
+						t.Fatalf("outside read changed permission flow: with=%+v without=%+v", got, without)
+					}
 				}
 				if got.Kind == "approve_read" && !strings.Contains(string(Render("claude", got)), `"permissionDecision":"allow"`) {
 					t.Fatal("reference command did not get prompt-free approval")

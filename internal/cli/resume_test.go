@@ -9,6 +9,24 @@ import (
 	"github.com/jalendport/maestro/internal/run"
 )
 
+func TestResumeRefusesUnknownFamilyBeforeQueuing(t *testing.T) {
+	for _, lane := range []string{"codx-sol", "codx-sol:high"} {
+		t.Run(lane, func(t *testing.T) {
+			_, s := waitFixture(t)
+			s.Tasks[0].State = run.TaskBlocked
+			if err := s.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := waitCommand(t, "resume", s.Run, "--task", "1", "--lane", lane); err == nil || err.Error() != `unknown family "codx-sol" (see maestro roster)` {
+				t.Fatalf("unknown Family: %v", err)
+			}
+			if run.PendingResume(s.Folder, "") {
+				t.Fatal("unknown Family was queued")
+			}
+		})
+	}
+}
+
 func TestResumeRefusesRunningDoneAndSkippedTasks(t *testing.T) {
 	for _, state := range []string{run.TaskRunning, run.TaskDone, run.TaskSkipped} {
 		for _, answer := range [][]string{{"--lane", "codex-sol"}, {"--brief", "corrected.md"}, {"--skip"}, {"--merge"}, {"--accept"}} {

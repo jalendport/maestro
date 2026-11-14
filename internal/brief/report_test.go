@@ -6,6 +6,21 @@ import (
 	"testing"
 )
 
+func TestReportsMatchHeadingsInsideFences(t *testing.T) {
+	for _, fence := range []string{"```md\nExample.", "```md\n```\nExample.\n```"} {
+		t.Run(fence, func(t *testing.T) {
+			r := ParseReport("## Summary\n" + fence + "\n## Blocked\n- Harness denied docker info.\n## Open\nnone\nSTATUS: partial\n")
+			if r.Status != StatusPartial || !reflect.DeepEqual(r.Blocked, []string{"Harness denied docker info."}) || strings.Join(r.Order, ",") != "Summary,Blocked,Open" {
+				t.Fatalf("Report lost headings: %+v", r)
+			}
+			c := ParseReport("## Answer\n" + fence + "\n## Findings\n- Finding.\n## Concerns\nnone\nPOSITION: confirmed\n")
+			if c.Position != "confirmed" || strings.Join(c.Order, ",") != "Answer,Findings,Concerns" || c.Sections["Findings"] != "- Finding." {
+				t.Fatalf("Council result lost headings: %+v", c)
+			}
+		})
+	}
+}
+
 func TestParseReportDropsNoCommandPlaceholders(t *testing.T) {
 	for _, subject := range []string{"command was", "commands were"} {
 		for _, action := range []string{"denied", "blocked"} {

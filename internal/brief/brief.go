@@ -241,8 +241,11 @@ func headingLocations(body string, heading *regexp.Regexp) [][]int {
 
 // SplitSections maps each "## " heading to the trimmed text under it.
 func SplitSections(body string) map[string]string {
+	return splitSections(body, headingLocations(body, headingRe))
+}
+
+func splitSections(body string, locs [][]int) map[string]string {
 	out := map[string]string{}
-	locs := headingLocations(body, headingRe)
 	for i, loc := range locs {
 		name := body[loc[2]:loc[3]]
 		start := loc[1]
@@ -257,8 +260,12 @@ func SplitSections(body string) map[string]string {
 
 // SectionOrder returns the headings in file order.
 func SectionOrder(body string) []string {
+	return sectionOrder(body, headingLocations(body, headingRe))
+}
+
+func sectionOrder(body string, locs [][]int) []string {
 	var out []string
-	for _, loc := range headingLocations(body, headingRe) {
+	for _, loc := range locs {
 		out = append(out, body[loc[2]:loc[3]])
 	}
 	return out

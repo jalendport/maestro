@@ -117,10 +117,6 @@ func TestParsersKeepFencedHeadings(t *testing.T) {
 			if len(p.Tasks) != 2 || p.Tasks[0].Goal != goal || b.Goal != goal || b.Done != "Done." || p.Tasks[0].Done != "Done." {
 				t.Fatalf("sections changed: Brief %+v, Plan %+v", b, p)
 			}
-			r := ParseReport("## Summary\n" + goal + "\n## Blocked\nnone\nSTATUS: done\n")
-			if r.Status != StatusDone || r.Sections["Summary"] != goal || strings.Join(r.Order, ",") != "Summary,Blocked" || len(r.Blocked) != 0 {
-				t.Fatalf("Report changed: %+v", r)
-			}
 		})
 	}
 }
