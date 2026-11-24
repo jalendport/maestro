@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 2.1.0 - 2026-11-24
 
 ### Added
 - Added `maestro resume <run> --task <n> --accept` to close a blocked or failed Task after you read its diff; Maestro commits and merges it as a verified Task and starts its dependents
